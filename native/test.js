@@ -39,6 +39,34 @@ try {
   native.pikelet_dispose(handle);
 }
 
+// serialize() must refuse while ghosts are resident: the wire format has no
+// deleted flag, so an export taken with a ghost present would resurrect it
+// as live, searchable data on the next import with no signal anything was
+// wrong. This binding had no such guard before (unlike the WASM path, which
+// checks ghostCount in JS before ever reaching serialize()) — this is the
+// one path where a ghost could actually reach a snapshot, so it is the one
+// that most needs direct coverage.
+for (const quantized of [0, 1]) {
+  const gh = native.pikelet_init(4, 8, quantized, 0, 4, 16, 16);
+  try {
+    native.pikelet_add(gh, new Float32Array([1, 0, 0, 0]));
+    native.pikelet_add(gh, new Float32Array([0, 1, 0, 0]));
+    native.pikelet_delete(gh, 0);
+    assert.equal(native.pikelet_ghost_count(gh), 1);
+    assert.throws(
+      () => native.pikelet_export(gh),
+      /ghost entries/
+    );
+    // compact() strips the ghost; export must then succeed normally.
+    native.pikelet_compact(gh);
+    assert.equal(native.pikelet_ghost_count(gh), 0);
+    const buf = native.pikelet_export(gh);
+    assert.ok(buf.length > 0);
+  } finally {
+    native.pikelet_dispose(gh);
+  }
+}
+
 // The symmetric u8 kernel (uint8_dot) runs only during graph maintenance —
 // insert-time edge recompute, the diversity heuristic, pruning — so a real
 // quantized build is the only thing that exercises its ISA branch. 400

@@ -441,7 +441,20 @@ Napi::Value Export(const Napi::CallbackInfo& info) {
     uint32_t h = info[0].As<Napi::Number>().Uint32Value();
     if (h >= MAX_HANDLES || !g_handles[h])
         return env.Null();
-    auto data = g_handles[h]->serialize();
+    // serialize() throws when ghosts are resident (see its own comment): the
+    // wire format has no deleted flag, so exporting with ghosts present would
+    // silently resurrect them as live data on the next import. This binding
+    // had no such guard before — unlike the WASM path (pikelet-core.js's
+    // export() checks ghostCount first), so this was the one place a ghost
+    // could actually reach a snapshot.
+    std::vector<uint8_t> data;
+    try {
+        data = g_handles[h]->serialize();
+    } catch (const std::exception& e) {
+        Napi::Error::New(env, std::string("pikelet_export: ") + e.what())
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
     auto buf = Napi::Buffer<uint8_t>::Copy(env, data.data(), data.size());
     return buf;
 }

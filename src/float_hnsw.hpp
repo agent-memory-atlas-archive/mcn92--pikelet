@@ -19,6 +19,7 @@
 #include <cstring>
 #include <cstdint>
 #include <unordered_set>
+#include <stdexcept>
 
 #if defined(__wasm_simd128__)
     #include <wasm_simd128.h>
@@ -584,7 +585,18 @@ public:
 
     }
 
+    // Refuses while ghosts are resident rather than silently serializing
+    // them: the wire format has no deleted flag (deserialize() unconditionally
+    // resets deleted_/num_deleted_ to zero on load, see the note there), so a
+    // snapshot taken with ghosts present would resurrect every one of them as
+    // live, searchable data on the next import — a caller depending on a
+    // delete having stuck would get it back with no signal anything was
+    // wrong. compact() must run first; it is the only thing that actually
+    // strips ghosts from the graph and vector storage.
     std::vector<uint8_t> serialize() const {
+        if (num_deleted_ > 0) {
+            throw std::logic_error("serialize() refused: index has ghost entries; call compact() first");
+        }
         size_t total_size = 10 * 4 + count_ * dims_ * sizeof(float);
         for (size_t i = 0; i < count_; ++i) {
             total_size += 4;

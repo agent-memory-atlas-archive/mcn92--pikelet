@@ -314,7 +314,16 @@ uint8_t* pikelet_export(uint32_t h, size_t* out_size) {
         if (out_size) *out_size = 0;
         return nullptr;
     }
-    g_export_bufs[h] = g_handles[h].index->serialize();
+    // serialize() throws when ghosts are resident (see its own comment) —
+    // caught here the same way pikelet_import already catches an untrusted
+    // buffer's failure, so a ghost-blocked export fails the same way a bad
+    // handle does (null/0) instead of aborting the WASM instance.
+    try {
+        g_export_bufs[h] = g_handles[h].index->serialize();
+    } catch (...) {
+        if (out_size) *out_size = 0;
+        return nullptr;
+    }
     *out_size = g_export_bufs[h].size();
     return g_export_bufs[h].data();
 }
