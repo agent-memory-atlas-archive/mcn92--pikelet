@@ -501,15 +501,56 @@ both as equivalent.
 
 ## 8. Open questions for Draft 2
 
-1. Corpus compression (per-record or segment-level) — record-granular
-   range reads argue for per-record; measure before deciding.
-2. Whether `sampleQueries` belongs in the manifest or the evaluation
-   segment (identity implications of moving it).
+1. ~~Corpus compression (per-record or segment-level) — record-granular
+   range reads argue for per-record; measure before deciding.~~
+   **Resolved: not adopted.** Measured 2026-09-12 on the wiki corpus
+   (456,153 records, 332 MB raw) against the real 200-query eval
+   ground-truth access pattern
+   (`docs/measurements/corpus-compression/`). Per-record compression
+   works cleanly — gzip and brotli both compress every record
+   independently with zero page amplification by construction (one
+   range read still hydrates exactly one record) and a real ~40-50%
+   byte reduction (brotli: wire 3,143 B vs. raw 5,933 B per query, mean
+   over the eval set). Segment/page-level compression was rejected by
+   measurement the same way corpus-v2's digest geometry was in question
+   6: even the smallest page size tested (16 records) already costs
+   5.2–5.6x amplification per query (fetching+decompressing a whole
+   page to hydrate a handful of scattered ids), rising to 130–156x at
+   512 records/page — the corpus-size win doesn't survive contact with
+   real hydration, which touches records too scattered for a page to
+   amortize. So per-record was the size/latency winner either way. Not
+   adopted anyway: brotli decode has no standard programmatic browser
+   API (only transparent HTTP-layer decoding), so shipping it as a
+   corpus codec means bundling a WASM brotli decoder for the browser
+   target; gzip decode is free everywhere via `DecompressionStream`/
+   `node:zlib`, but the byte win it alone provides (~40%) wasn't judged
+   worth taking on a new codec dependency against this project's
+   no-native-dependencies, runs-everywhere position. Corpus records
+   stay raw UTF-8 JSON (section 3.5, unchanged).
+2. ~~Whether `sampleQueries` belongs in the manifest or the evaluation
+   segment (identity implications of moving it).~~ **Resolved: manifest**
+   (already the shipped behavior — section 3.2, read at
+   `complete/index.mjs:980`; this entry just records the reasoning).
+   Evaluation (kind 4) is required for conformance but a reader MAY
+   serve queries without ever reading it (section 3.3) — sampleQueries
+   is example-query text a host may want to show before a user has
+   searched at all (empty-state UI, docs), so it has to be reachable
+   from the manifest, which is always resident, independent of whether
+   the evaluation segment is fetched. Moving it to the evaluation
+   segment would tie its availability to a segment reads can skip.
+5. ~~Browser reader packaging (the encoder runs in plain JS today;
+   confirm no Node-only dependencies before freezing the host story).~~
+   **Resolved: confirmed.** `complete/*.mjs` (the reader/encoder path)
+   has zero `require('fs')`/Node-only calls — every `fs` use in the
+   package is confined to the Node-side artifact builders and local
+   file source (`pikelet-artifact-*.js`), which correctly aren't part
+   of the browser bundle. `@xenova/transformers` is an
+   `optionalDependency` (`pikelet/package.json`), and a real browser
+   build already ships and runs the full encoder path, WASM engine
+   included (`examples/04-static-wiki-pack/web/dist/`).
 3. Signatures over the identity (contract section 10, question 7).
 4. A `filters` or metadata-index segment — out of contract today
    (section 8), revisit only with a concrete host need.
-5. Browser reader packaging (the encoder runs in plain JS today; confirm
-   no Node-only dependencies before freezing the host story).
 6. ~~Per-row vector commitments (closing section 6's transitional gap per
    read).~~ **Resolved and shipped as SKETCH_PROFILE.md's format 2**,
    default since 0.5.0 (2026-08-26) — kept here as the design record.
