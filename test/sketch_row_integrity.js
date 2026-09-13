@@ -80,6 +80,16 @@ async function main() {
     check(`v2 overhead is digest pages + page table (+${overhead} bytes)`,
         overhead > 0 && overhead <= v2m.rowIntegrity.blocks * (16 * 16 + 32) + 32);
 
+    // rowDigestBytes below 16 gives a second-preimage resistance of only
+    // 2^(8*rowDigestBytes) hash evaluations — 2^64 at the old floor of 8,
+    // not tamper evidence against anyone who cares — so the builder must
+    // refuse it even though readers still accept it (spec/SKETCH_PROFILE.md).
+    await rejects('builder refuses rowDigestBytes below the 16-byte floor', async () => {
+        exportSketchArtifact(index, path.join(tmp, 'weak.pikelet-sketch'), { ...opts, rowDigestBytes: 8 });
+    }, /rowDigestBytes must be an integer in \[16, 32\]/);
+    check('builder accepts rowDigestBytes at the floor',
+        exportSketchArtifact(index, path.join(tmp, 'floor.pikelet-sketch'), { ...opts, rowDigestBytes: 16 }).rowIntegrity.rowDigestBytes === 16);
+
     console.log('2. parity and per-read verification (full open)');
     const v1 = await PikeletSketchArtifact.openFile(v1Path);
     const v2 = await PikeletSketchArtifact.openFile(v2Path);

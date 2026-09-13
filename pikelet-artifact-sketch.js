@@ -99,8 +99,18 @@ function exportSketchArtifact(index, outPath, options = {}) {
         if (!Number.isInteger(rowsPerBlock) || rowsPerBlock < 1 || rowsPerBlock > 4096) {
             throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'rowsPerBlock must be an integer in [1, 4096]', { rowsPerBlock });
         }
-        if (!Number.isInteger(rowDigestBytes) || rowDigestBytes < 8 || rowDigestBytes > 32) {
-            throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'rowDigestBytes must be an integer in [8, 32]', { rowDigestBytes });
+        // Floor is 16, not the format's 8: the per-row digest is truncated
+        // SHA-256, and the claim it backs is that nobody can substitute a
+        // different row with the same digest — a second-preimage problem at
+        // 8*rowDigestBytes bits. At 8 bytes that's 2^64, a fraction of a
+        // second of the Bitcoin network's hash rate; not tamper evidence
+        // against anyone who cares. At 16 it's 2^128. The saving from 8 vs
+        // 16 bytes on a typical row is a couple percent, so there is no
+        // reason to offer the weak end of the range. Readers still accept
+        // down to 8 (spec's read-path floor, format.md) for artifacts built
+        // before this floor was raised.
+        if (!Number.isInteger(rowDigestBytes) || rowDigestBytes < 16 || rowDigestBytes > 32) {
+            throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'rowDigestBytes must be an integer in [16, 32]', { rowDigestBytes });
         }
     }
     const pool = dim / sketchDims;

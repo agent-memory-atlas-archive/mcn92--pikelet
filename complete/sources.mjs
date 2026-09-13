@@ -1,3 +1,5 @@
+import { pikeletError, PIKELET_ERROR_CODES } from '../pikelet-errors.js';
+
 export function httpRangeSource(url, options = {}) {
     const stats = { requests: 0, bytes: 0, acceptRanges: null, etag: null, fullFallback: false, retries: 0, redirects: 0 };
     const maxFullFallbackBytes = options.maxFullFallbackBytes ?? 64 * 1024 * 1024;
@@ -139,6 +141,25 @@ export function httpRangeSource(url, options = {}) {
                 return body;
             }
             if (response.status === 200) {
+                // If-Range has a defined meaning: a 200 instead of the
+                // requested 206 means either the host ignores Range, or the
+                // pinned ETag no longer matches (the artifact was replaced).
+                // Those need different handling — slices of a replaced file
+                // don't match what the manifest describes, and format-2's
+                // lexical segment above 8 MiB carries only a whole-segment
+                // digest, so postings read from it would go unverified.
+                // Only fall back when the ETag still matches (or neither
+                // side has one to compare).
+                if (stats.etag) {
+                    const responseEtag = response.headers.get('etag');
+                    if (responseEtag !== stats.etag) {
+                        throw pikeletError(
+                            PIKELET_ERROR_CODES.ARTIFACT_CHANGED,
+                            `artifact changed on the host: expected ETag ${stats.etag}, got ${responseEtag || '(missing)'}`,
+                            { expectedEtag: stats.etag, actualEtag: responseEtag },
+                        );
+                    }
+                }
                 // An unknown size must refuse, not pass the gate: with no
                 // Content-Length (chunked body) and init() never called,
                 // size would be 0 and the cap check silently vacuous.

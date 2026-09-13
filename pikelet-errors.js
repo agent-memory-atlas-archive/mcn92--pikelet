@@ -17,6 +17,7 @@ const PIKELET_ERROR_CODES = Object.freeze({
     INTERNAL_INVARIANT: 'INTERNAL_INVARIANT',
     // Reserved for the deferred shared-runtime API.
     INDEX_LIMIT: 'INDEX_LIMIT',
+    ARTIFACT_CHANGED: 'ARTIFACT_CHANGED',
 });
 
 class PikeletError extends Error {

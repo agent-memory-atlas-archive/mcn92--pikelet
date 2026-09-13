@@ -67,6 +67,35 @@ for (const quantized of [0, 1]) {
   }
 }
 
+// L2 insert/search must reject non-finite vectors the same way the Cosine
+// path already does via normalize_cosine_vector: the L2 path stores raw
+// floats with no check of its own, so a NaN component used to make every
+// distance comparison false (arbitrary neighbours, NaN keys breaking the
+// priority queue's ordering invariant) and, in the quantized engine, drove
+// vmin/vmax/scale to NaN and reached static_cast<uint8_t>(NaN) past its
+// clamp guards — undefined behavior. Only the JS-side isFinite check in
+// add() shielded this; native bindings had no guard of their own.
+for (const quantized of [0, 1]) {
+  const nh = native.pikelet_init(4, 8, quantized, 0 /* L2 */, 4, 16, 16);
+  try {
+    assert.equal(native.pikelet_add(nh, new Float32Array([1, 0, 0, 0])), 0);
+    assert.equal(
+      native.pikelet_add(nh, new Float32Array([NaN, 0, 0, 0])),
+      0xFFFFFFFF,
+      `quantized=${quantized}: insert must refuse a NaN component`
+    );
+    assert.equal(
+      native.pikelet_add(nh, new Float32Array([Infinity, 0, 0, 0])),
+      0xFFFFFFFF,
+      `quantized=${quantized}: insert must refuse an infinite component`
+    );
+    const result = native.pikelet_query(nh, new Float32Array([NaN, 0, 0, 0]), 1);
+    assert.equal(result.count, 0, `quantized=${quantized}: search must refuse a NaN query`);
+  } finally {
+    native.pikelet_dispose(nh);
+  }
+}
+
 // The symmetric u8 kernel (uint8_dot) runs only during graph maintenance —
 // insert-time edge recompute, the diversity heuristic, pruning — so a real
 // quantized build is the only thing that exercises its ISA branch. 400

@@ -199,6 +199,13 @@ public:
         if (metric_ == DistanceMetric::Cosine) {
             if (!normalize_cosine_vector(vec, scratch_norm_.data(), dims_)) return UINT32_MAX;
             src = scratch_norm_.data();
+        } else if (!is_finite_vector(vec, dims_)) {
+            // Quantization below runs unconditionally on src and has no
+            // finite check of its own: vmin/vmax comparisons are false
+            // against NaN, scale/inv_scale become NaN, and the q<0/q>255
+            // clamps are also both false for NaN, so it reaches
+            // static_cast<uint8_t>(NaN) unclamped — UB, not just a bad value.
+            return UINT32_MAX;
         }
 
         uint32_t id = static_cast<uint32_t>(count_++);
@@ -328,6 +335,7 @@ public:
             if (!normalize_cosine_vector(query, norm_query_.data(), dims_)) return {};
             cached_query_ = norm_query_.data();
         } else {
+            if (!is_finite_vector(query, dims_)) return {};
             cached_query_ = query;
         }
 
@@ -371,6 +379,7 @@ public:
             if (!normalize_cosine_vector(query, norm_query_.data(), dims_)) return {};
             cached_query_ = norm_query_.data();
         } else {
+            if (!is_finite_vector(query, dims_)) return {};
             cached_query_ = query;
         }
 
@@ -854,28 +863,42 @@ public:
             if (!safe_read_u32(ef_construction_val)) return false;
         }
 
+        // Validate every header field against locals before touching a single
+        // member. base_edges_ was sized at construction for the *current*
+        // M0_; overwriting M_/M0_/metric_/ef_construction_ before validation
+        // finishes (and failing partway through) used to leave those members
+        // set to attacker-controlled values while base_edges_ stayed the old
+        // size — the next insert's base_slot(id) = base_edges_.data() +
+        // id * M0_ then indexes past the buffer with the bad M0_. A snapshot
+        // must match the constructed index's M/M0/metric/ef_construction
+        // exactly: those are config, not data, and this index was already
+        // built with a fixed set of them.
+        if (count_val > max_elements_) return false;
+        if (metric_val > static_cast<uint32_t>(DistanceMetric::Cosine)) return false;
+        if (m_val <= 1 || m_val > 128 || m0_val != m_val * 2) return false;
+        if (ef_construction_val == 0 || ef_construction_val > 4096) return false;
+        if (m_val != M_ || m0_val != M0_ ||
+            static_cast<DistanceMetric>(metric_val) != metric_ ||
+            ef_construction_val != ef_construction_) {
+            return false;
+        }
+        // Cap the level count read from an untrusted snapshot. Without this an
+        // attacker-controlled level_val drives a multi-gigabyte upper_[i].resize()
+        // below, throwing std::length_error/bad_alloc and aborting the instance.
+        if (level_val > MAX_DESERIALIZE_LEVEL) return false;
+        if (count_val == 0) {
+            if (entry_val != UINT32_MAX) return false;
+        } else if (entry_val >= count_val) {
+            return false;
+        }
+
         count_ = count_val;
         entry_point_ = entry_val;
-        max_level_ = static_cast<int>(level_val);
+        max_level_ = (count_val == 0) ? 0 : static_cast<int>(level_val);
         M_ = m_val;
         M0_ = m0_val;
         metric_ = static_cast<DistanceMetric>(metric_val);
         ef_construction_ = ef_construction_val;
-
-        if (count_ > max_elements_) return fail();
-        if (metric_val > static_cast<uint32_t>(DistanceMetric::Cosine)) return fail();
-        if (M_ <= 1 || M_ > 128 || M0_ != M_ * 2) return fail();
-        if (ef_construction_ == 0 || ef_construction_ > 4096) return fail();
-        // Cap the level count read from an untrusted snapshot. Without this an
-        // attacker-controlled level_val drives a multi-gigabyte upper_[i].resize()
-        // below, throwing std::length_error/bad_alloc and aborting the instance.
-        if (level_val > MAX_DESERIALIZE_LEVEL) return fail();
-        if (count_ == 0) {
-            if (entry_point_ != UINT32_MAX) return fail();
-            max_level_ = 0;
-        } else if (entry_point_ >= count_) {
-            return fail();
-        }
         level_mult_ = 1.0 / std::log(static_cast<double>(M_));
 
         // count_ <= max_elements_, so count_*sizeof(float)*2 cannot overflow a

@@ -477,6 +477,29 @@ const A = buildSynthetic();
             globalThis.fetch = realFetch2;
         }
     }
+    // httpRangeSource: a 200 with a changed ETag means the artifact was
+    // replaced, not that the host ignores Range — it must not be treated
+    // as a fallback-worthy full download.
+    {
+        const realFetch3 = globalThis.fetch;
+        globalThis.fetch = async (url, init = {}) => {
+            if (init.method === 'HEAD') {
+                return new Response(null, { status: 200, headers: { 'content-length': String(A.bytes.length), 'accept-ranges': 'bytes', etag: '"v1"' } });
+            }
+            // The host answers with 200 and a different ETag: the file
+            // behind the URL changed since the HEAD pinned "v1".
+            return new Response(A.bytes, { status: 200, headers: { 'content-length': String(A.bytes.length), etag: '"v2"' } });
+        };
+        try {
+            const { httpRangeSource: rangeSource } = await import('../complete/sources.mjs');
+            const src = rangeSource('http://host.invalid/c.pikelet');
+            await src.init();
+            await rejects('a 200 with a mismatched ETag is reported as a changed artifact, not a Range-ignoring host',
+                () => src.read(0, 64), /artifact changed.*expected ETag "v1".*got "v2"/);
+        } finally {
+            globalThis.fetch = realFetch3;
+        }
+    }
     // 4. httpRangeSource: after the one-time full-download fallback, reads
     // are served from memory and issue no further requests.
     const { httpRangeSource } = await import('../complete/sources.mjs');

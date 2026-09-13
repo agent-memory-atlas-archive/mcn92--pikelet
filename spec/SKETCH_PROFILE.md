@@ -70,7 +70,7 @@ eagerly.
 | 120 | u32 | recommendedRerank | producer's suggested top-C (see 4.3); `0` = unset |
 | 124..168 | — | staged residency extension | micro-tier fields and stage-1 hash (section 8); all zero when the extension is absent |
 | 168 | u32 | rowsPerBlock | v2 only (section 2.4); rows per digest block, `[1, 4096]` |
-| 172 | u32 | rowDigestBytes | v2 only; truncated per-row digest size, `[8, 32]` |
+| 172 | u32 | rowDigestBytes | v2 only; truncated per-row digest size, `[8, 32]` (readers accept the full range for backward compatibility; conforming builders MUST NOT emit below 16 — see 2.4) |
 | 176 | u32 | pageTableOffset | v2 only; start of the page-hash table, exactly at the end of the sketch tiers |
 | 180..256 | — | reserved | MUST be zero; readers MUST ignore |
 
@@ -86,7 +86,11 @@ fetches it. The vectors region becomes a sequence of blocks —
 — where slot `j` of a block's digest page is the first `rowDigestBytes`
 bytes of the SHA-256 of row `blockIndex*rowsPerBlock + j` (unused slots in
 the final block are zero; the final block carries only the remaining
-rows). A **page-hash table** of one full 32-byte SHA-256 per block sits at
+rows). Below 16 bytes the digest is a second-preimage target of only
+2^(8*rowDigestBytes) hash evaluations — 2^64 at the format floor of 8,
+well within reach of dedicated hardware — so it stops backing the
+tamper-evidence claim it exists for; conforming builders MUST use at
+least 16 bytes. A **page-hash table** of one full 32-byte SHA-256 per block sits at
 `pageTableOffset`, at the end of the resident prefix, so `residentSha256`
 — and any container identity that commits to this header — anchors it.
 `fileBytes` equals `vectorsOffset` plus the interleaved region;
