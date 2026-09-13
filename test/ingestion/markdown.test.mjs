@@ -95,3 +95,31 @@ section('markdown: oversized sections split at paragraph boundaries');
   check('paragraphs are not split mid-sentence across pieces',
     pieces.every((c) => /here\.$/.test(c.text.trim()) || /section$/.test(c.text.trim())));
 }
+
+section('markdown: no-intro.md (h1 immediately followed by h2, no intro paragraph)');
+{
+  // Regression: a leading section under 25 tokens (typically a title-only
+  // H1 with no intro paragraph) has no previous chunk to merge backward
+  // into like every other undersized section does, so it used to fall
+  // through and become its own title-only chunk — which then also
+  // swallowed the next undersized section (its real content, wrong
+  // anchor), since *that* section's backward-merge target was the stub
+  // instead of whatever comes after it.
+  const { doc, chunks } = pipeline('no-intro.md');
+  check('document title is still the h1 text', doc.title === 'Snapshot restore', doc.title);
+  check('no chunk is a title-only stub',
+    !chunks.some((c) => c.headingPath.length === 0 && c.text.trim() === 'Snapshot restore'),
+    JSON.stringify(chunks.map((c) => ({ headingPath: c.headingPath, text: c.text.slice(0, 40) }))));
+  check('the h1 stub does not rank as its own retrievable record',
+    !chunks.some((c) => c.anchor === 'snapshot-restore'), JSON.stringify(chunks.map((c) => c.anchor)));
+
+  const refunds = chunks.find((c) => /Refunds are issued/.test(c.text));
+  check('the short leading section (Refunds) merged forward, not lost',
+    !!refunds, JSON.stringify(chunks.map((c) => c.text.slice(0, 30))));
+  check('it carries the anchor of the section it merged into, not the page-level anchor',
+    refunds?.anchor === 'overview' && refunds.headingPath.join('>') === 'Overview',
+    JSON.stringify({ anchor: refunds?.anchor, headingPath: refunds?.headingPath }));
+
+  const compat = byAnchor(chunks, 'compatibility');
+  check('a later, normal-sized section is unaffected', !!compat && /is refused rather than allowed/.test(compat.text));
+}

@@ -533,7 +533,31 @@ function chunkDocs(docs, options) {
       anchor: section.anchor || '',
       text: normalizeText(text),
     });
-    for (const section of doc.sections) {
+    // An undersized section merges into the previous chunk (its content is
+    // preserved; its own anchor stops being a retrieval target). A section
+    // at the very start of the document — most commonly a title-only H1
+    // with no intro paragraph — has no previous chunk to merge into, so it
+    // must merge forward instead: prepend it to the next section here,
+    // before the main loop, rather than let it fall through to becoming
+    // its own title-only chunk (which then also swallows whatever comes
+    // after it, since every later undersized section merges backward into
+    // that stub instead of the real section it belongs under).
+    const sections = [];
+    let carry = '';
+    for (const raw of doc.sections) {
+      const section = carry ? { ...raw, text: carry + (raw.text ? `\n${raw.text}` : '') } : raw;
+      carry = '';
+      if (tokenize(section.text).length < 25 && sections.length === 0) {
+        carry = section.text;
+        continue;
+      }
+      sections.push(section);
+    }
+    if (carry) {
+      if (sections.length) sections[sections.length - 1].text += `\n${carry}`;
+      else sections.push({ headingPath: [], anchor: '', text: carry });
+    }
+    for (const section of sections) {
       const tokens = tokenize(section.text);
       if (!tokens.length) continue;
       if (tokens.length < 25) {
