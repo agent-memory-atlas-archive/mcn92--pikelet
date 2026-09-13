@@ -527,52 +527,100 @@ function chunkDocs(docs, options) {
     }
     const docStart = chunks.length;
     const keepMax = Math.floor(target * 1.6);
-    const push = (section, text) => chunks.push({
+    // A section contributes provenance only if it is both headed (not a
+    // depth-0 preamble — sectionize() gives those no `heading` at all) and
+    // has a body beyond that heading (not a title-only H1 with nothing
+    // under it before the next heading). Either kind still contributes its
+    // *text* to a merge; neither gets a say in *where* the merge is
+    // attributed, since neither names a location a reader could actually
+    // be pointed at.
+    const hasProvenance = (section) => section.heading
+      && normalizeText(section.text) !== normalizeText(section.heading);
+    // Attribute a merge of several sections to the most specific location
+    // that is still true of everything merged in: the longest common
+    // prefix of their heading paths, owned by whichever contributing
+    // section's own path equals that prefix (its anchor); '' (page-level)
+    // if no section owns it, or if no contributor has provenance at all.
+    // Wrong-but-precise (a sibling section that doesn't contain the text)
+    // is worse than coarse-but-correct (the page) for a project whose
+    // result is "here is the exact evidence" — so provenance for a merged
+    // chunk must never point at a location that not every part of the
+    // merged text belongs under.
+    const attributeMerge = (contributors) => {
+      const real = contributors.filter(hasProvenance);
+      if (!real.length) return { headingPath: [], anchor: '' };
+      let lcp = real[0].headingPath;
+      for (const s of real.slice(1)) {
+        const path = s.headingPath;
+        let i = 0;
+        while (i < lcp.length && i < path.length && lcp[i] === path[i]) i++;
+        lcp = lcp.slice(0, i);
+      }
+      const owner = real.find((s) => s.headingPath.length === lcp.length
+        && s.headingPath.every((h, i) => h === lcp[i]));
+      return { headingPath: lcp, anchor: owner ? (owner.anchor || '') : '' };
+    };
+    const push = (section, text, contributors = [section]) => chunks.push({
       ...base(),
-      headingPath: section.headingPath,
-      anchor: section.anchor || '',
+      ...attributeMerge(contributors),
       text: normalizeText(text),
+      contributors,
     });
     // An undersized section merges into the previous chunk (its content is
-    // preserved; its own anchor stops being a retrieval target). A section
-    // at the very start of the document — most commonly a title-only H1
-    // with no intro paragraph — has no previous chunk to merge into, so it
-    // must merge forward instead: prepend it to the next section here,
-    // before the main loop, rather than let it fall through to becoming
-    // its own title-only chunk (which then also swallows whatever comes
-    // after it, since every later undersized section merges backward into
-    // that stub instead of the real section it belongs under).
+    // preserved; provenance is re-attributed across everything merged so
+    // far via attributeMerge, not simply inherited from either side). A
+    // section at the very start of the document — most commonly a
+    // title-only H1 with no intro paragraph — has no previous chunk to
+    // merge into, so it must merge forward instead: carry it here, before
+    // the main loop, rather than let it fall through to becoming its own
+    // title-only chunk (which then also swallows whatever comes after it,
+    // since every later undersized section merges backward into that stub
+    // instead of the real section it belongs under).
     const sections = [];
-    let carry = '';
+    let carry = [];
     for (const raw of doc.sections) {
-      const section = carry ? { ...raw, text: carry + (raw.text ? `\n${raw.text}` : '') } : raw;
-      carry = '';
-      if (tokenize(section.text).length < 25 && sections.length === 0) {
-        carry = section.text;
+      if (sections.length === 0 && carry.length === 0 && tokenize(raw.text).length < 25) {
+        // A leading undersized section has no previous chunk to merge
+        // backward into; carry it forward onto whatever section comes
+        // next — sized or not — and stop. It does not keep absorbing
+        // further sections itself: if the next section is also
+        // undersized, the main loop's backward merge (LCP-aware) picks up
+        // from there once this first merged section exists to merge into.
+        carry = [raw];
         continue;
       }
-      sections.push(section);
+      const contributors = [...carry, raw];
+      carry = [];
+      sections.push({ ...raw, text: contributors.map((s) => s.text).filter(Boolean).join('\n'), contributors });
     }
-    if (carry) {
-      if (sections.length) sections[sections.length - 1].text += `\n${carry}`;
-      else sections.push({ headingPath: [], anchor: '', text: carry });
+    if (carry.length) {
+      // Every section in the document was the single leading undersized
+      // one (a one-section document too small to split further); the doc
+      // already cleared the 25-token floor as a whole, so it stands alone.
+      sections.push({ text: carry.map((s) => s.text).filter(Boolean).join('\n'), contributors: carry });
     }
     for (const section of sections) {
       const tokens = tokenize(section.text);
       if (!tokens.length) continue;
       if (tokens.length < 25) {
-        if (chunks.length > docStart) chunks[chunks.length - 1].text += `\n${normalizeText(section.text)}`;
-        else push(section, section.text);
+        if (chunks.length > docStart) {
+          const prev = chunks[chunks.length - 1];
+          prev.contributors.push(...section.contributors);
+          prev.text += `\n${normalizeText(section.text)}`;
+          Object.assign(prev, attributeMerge(prev.contributors));
+        } else {
+          push(section, section.text, section.contributors);
+        }
         continue;
       }
       if (tokens.length <= keepMax) {
-        push(section, section.text);
+        push(section, section.text, section.contributors);
         continue;
       }
       let piece = [];
       let pieceTokens = 0;
       const flushPiece = () => {
-        if (pieceTokens > 0) push(section, piece.join('\n\n'));
+        if (pieceTokens > 0) push(section, piece.join('\n\n'), section.contributors);
         piece = [];
         pieceTokens = 0;
       };
@@ -583,7 +631,7 @@ function chunkDocs(docs, options) {
           flushPiece();
           const words = tokenize(para);
           for (let start = 0; start < words.length; start += Math.max(1, target - overlap)) {
-            push(section, words.slice(start, start + target).join(' '));
+            push(section, words.slice(start, start + target).join(' '), section.contributors);
             if (start + target >= words.length) break;
           }
           continue;
@@ -598,6 +646,9 @@ function chunkDocs(docs, options) {
     // floor honored: merge a lone undersized chunk forward is impossible,
     // so it simply stays (the document itself passed the floor above).
   }
+  // contributors is bookkeeping for attributeMerge's LCP computation only;
+  // strip it before chunks leave chunkDocs.
+  for (const c of chunks) delete c.contributors;
   return chunks;
 }
 

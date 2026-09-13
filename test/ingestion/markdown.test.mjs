@@ -116,10 +116,92 @@ section('markdown: no-intro.md (h1 immediately followed by h2, no intro paragrap
   const refunds = chunks.find((c) => /Refunds are issued/.test(c.text));
   check('the short leading section (Refunds) merged forward, not lost',
     !!refunds, JSON.stringify(chunks.map((c) => c.text.slice(0, 30))));
-  check('it carries the anchor of the section it merged into, not the page-level anchor',
-    refunds?.anchor === 'overview' && refunds.headingPath.join('>') === 'Overview',
+  // The H1 stub is heading-only (no body of its own — sectionize()'s text
+  // is just the heading line), so it contributes no provenance: Refunds is
+  // the only real content in this chunk, and gets its own anchor exactly
+  // as if the stub were not there at all. This is the precise case where
+  // precision is correct, unlike the ambiguous multi-sibling case below.
+  check('it carries its own anchor — the h1 stub contributes no provenance',
+    refunds?.anchor === 'refunds' && refunds.headingPath.join('>') === 'Refunds',
     JSON.stringify({ anchor: refunds?.anchor, headingPath: refunds?.headingPath }));
 
+  const overview = byAnchor(chunks, 'overview');
+  check('the next, normal-sized section is unaffected and stands alone',
+    !!overview && /A snapshot captures the full index state/.test(overview.text));
   const compat = byAnchor(chunks, 'compatibility');
   check('a later, normal-sized section is unaffected', !!compat && /is refused rather than allowed/.test(compat.text));
+}
+
+section('markdown: ambiguous multi-sibling merges attribute to the page, not a wrong sibling');
+{
+  // A second regression this same fix must not reintroduce: when several
+  // undersized sections under *different* headings merge into one chunk,
+  // no single one of them describes the whole chunk. Attributing the merge
+  // to whichever section happened to be first (forward-carry) or last
+  // (backward-merge) to join is wrong-but-precise — it points a query
+  // whose match came from one sibling at a URL fragment for a different
+  // one. Coarse-but-correct (the page, no fragment) is the right call for
+  // a project whose thesis is that a result identifies the exact evidence
+  // location: a wrong precise answer is worse than an honest coarse one.
+  const text = [
+    '# Config reference', '',
+    '## Timeout', '', 'Default timeout is 30 seconds unless overridden per request.', '',
+    '## Retries', '', 'Failed requests retry up to three times with backoff.', '',
+    '## Backoff', '', 'Backoff starts at 200ms and doubles each retry.', '',
+    '## Pooling', '', 'Connections are pooled per host, up to 16 concurrent.', '',
+    '## Logging', '', 'Request logs include method, path, and status code.', '',
+  ].join('\n');
+  const file = 'config-reference.md';
+  const extracted = extractByExtension(text, file);
+  const doc = { id: 0, sourcePath: file, title: extracted.title, slug: null, text: extracted.text, sections: extracted.sections };
+  const chunks = chunkDocs([doc], { targetTokens: 256, overlapPercent: 15 });
+  check('every undersized sibling section merges into one chunk', chunks.length === 1, JSON.stringify(chunks.map((c) => c.text.length)));
+  check('the merged chunk has no fragment anchor (page-level, not a wrong sibling)',
+    chunks[0].anchor === '' && chunks[0].headingPath.length === 0,
+    JSON.stringify({ anchor: chunks[0].anchor, headingPath: chunks[0].headingPath }));
+  check('none of the sibling content is lost',
+    /Default timeout/.test(chunks[0].text) && /Backoff starts/.test(chunks[0].text) && /status code/.test(chunks[0].text));
+}
+
+section('markdown: backward merge into a normal-sized section does not inherit its anchor for an unrelated sibling');
+{
+  // A pre-existing bug with the same root cause as the two regressions
+  // above, just via the other merge direction: a normal-sized section
+  // (Serialize) already stood as its own chunk, then a later undersized
+  // sibling under a *different* heading (Compaction before export) merged
+  // backward into it. The old behavior kept Serialize's own anchor for the
+  // combined chunk even though the merged-in content isn't about
+  // serializing — same wrong-but-precise failure, now fixed by attributing
+  // every merge (forward or backward) via the longest common heading-path
+  // prefix of everything actually merged in.
+  const para = 'A snapshot serializes the graph, vectors, and deletion markers into one contiguous buffer that a compatible reader can restore from directly. ';
+  const text = `# Snapshots\n\n## Serialize\n\n${para.repeat(4)}\n\n## Compaction before export\n\nGhosts must be compacted before export or the snapshot silently resurrects them.\n`;
+  const file = 'snapshots-merge.md';
+  const extracted = extractByExtension(text, file);
+  const doc = { id: 0, sourcePath: file, title: extracted.title, slug: null, text: extracted.text, sections: extracted.sections };
+  const chunks = chunkDocs([doc], { targetTokens: 256, overlapPercent: 15 });
+  check('Serialize and the short Compaction sibling merge into one chunk', chunks.length === 1, JSON.stringify(chunks.map((c) => c.text.length)));
+  check('the merged chunk does not keep Serialize\'s own anchor for content that is not about serializing',
+    chunks[0].anchor === '' && chunks[0].headingPath.length === 0,
+    JSON.stringify({ anchor: chunks[0].anchor, headingPath: chunks[0].headingPath }));
+  check('both sections\' content survive the merge',
+    /serializes the graph/.test(chunks[0].text) && /compacted before export/.test(chunks[0].text));
+}
+
+section('markdown: merges under a real, shared parent section stay precisely attributed');
+{
+  // The LCP rule should not over-correct into always landing on the page:
+  // when merged sections really do share a common ancestor that itself has
+  // a body, the merge is precisely and correctly attributed to that
+  // ancestor, not forced to page-level just because a merge happened.
+  const para = 'Authentication covers how clients prove identity before any request is accepted by the service layer. ';
+  const text = `# API\n\n## Authentication\n\n${para.repeat(3)}\n\n### Rotating keys\n\nRotate keys via the dashboard.\n\n### Revoking keys\n\nRevoke immediately invalidates the key everywhere.\n`;
+  const file = 'api-nested-merge.md';
+  const extracted = extractByExtension(text, file);
+  const doc = { id: 0, sourcePath: file, title: extracted.title, slug: null, text: extracted.text, sections: extracted.sections };
+  const chunks = chunkDocs([doc], { targetTokens: 256, overlapPercent: 15 });
+  check('all three sections merge into one chunk', chunks.length === 1, JSON.stringify(chunks.map((c) => c.text.length)));
+  check('the merge is attributed to the shared parent, which really does cover all of it',
+    chunks[0].anchor === 'authentication' && chunks[0].headingPath.join('>') === 'Authentication',
+    JSON.stringify({ anchor: chunks[0].anchor, headingPath: chunks[0].headingPath }));
 }
