@@ -181,7 +181,14 @@ chamber43 pack: matchQuality: strong    confidence: 0.916   → Chamber 43
 
 The model answered **Chamber 43** and cited the same logical source record. With Veyra not mounted at all, the same prompt produced no chamber number and the model declined to guess. Change the evidence and the grounded answer changes with it; remove the evidence source and the answer disappears.
 
-The test is synthetic and intentionally narrow. All three packs and the `matchQuality`/`confidence` numbers above are reproducible: `node examples/05-one-file-search/web/public/reproduce-ablation.mjs`. The retrieval side is scripted; the paired LLM-session claims (declining to confirm the removed fact, answering Chamber 43, declining without the pack mounted) were run separately and aren't reproduced by that script.
+The test is synthetic and intentionally narrow. The exact packs used for the results above are published as the `veyra-packs-v1` GitHub release assets rather than committed to the repository. Fetch and SHA-256-verify them once, then reproduce the retrieval-side intervention:
+
+```bash
+npm run demo:veyra
+node examples/05-one-file-search/web/public/reproduce-ablation.mjs
+```
+
+The script reproduces `matchQuality`, confidence, and retrieved evidence for the full, ablated, and Chamber 43 packs. The paired LLM-session results — declining to confirm the removed fact, answering Chamber 43 after the mutation, and declining without Veyra mounted — were run separately and are not scripted here.
 
 ---
 
@@ -261,7 +268,13 @@ A pack mounted with a content hash has a stable identity — `https://example.co
 
 **A mounted pack's content reaches the model as tool output.** `verify_pack` proves the bytes are intact and match their pinned identity; it does not prove the corpus itself is trustworthy. Mounting a pack from a source you don't control is the same trust decision as giving an agent any other untrusted-content tool — treat pack text the way you'd treat search results or fetched web pages, not as instructions.
 
-**Try it with your own questions.** The three Veyra packs from the ablation test above (`examples/05-one-file-search/web/public/veyra*.pikelet`) are committed to this repo, so there's a working MCP mount you can query with anything, not just the fixed prompts above:
+**Try it with your own questions.** The three Veyra packs from the intervention above are published as pinned GitHub release assets. Fetch and verify them first:
+
+```bash
+npm run demo:veyra
+```
+
+Then mount all three through Pikelet's MCP server:
 
 ```bash
 claude -p "your question here" \
@@ -270,7 +283,14 @@ claude -p "your question here" \
   --allowedTools "mcp__veyra-demo__search,mcp__veyra-demo__list_packs,mcp__veyra-demo__get_record"
 ```
 
-or drop the flags and just run `claude` from the repo root — Claude Code picks up project-level `.mcp.json` configs automatically, so pointing one at this file (or copying its `veyra-demo` server into your own) gets the same three packs into an interactive session. All three packs share the same 94-ish-record synthetic corpus, so the interesting thing to ask about is Tovash's chamber — the full and Chamber 43 packs will disagree with each other, and the ablated pack won't answer at all.
+For an interactive session, use the same config without `-p`:
+
+```bash
+claude \
+  --mcp-config examples/05-one-file-search/web/public/veyra.mcp.json
+```
+
+All three packs derive from the same small synthetic Station Veyra corpus, with controlled differences in the Tovash evidence. Ask where the Tovash project is housed: the full pack supports Chamber 17, the modified pack supports Chamber 43, and the ablated pack should abstain.
 
 ---
 

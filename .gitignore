@@ -153,3 +153,8 @@ bench/beir/results/
 # convention as examples/05-one-file-search/encoder-spike/real/: a locally
 # regenerable export, not source.
 bench/beir/arctic-xs/
+
+# Downloaded Veyra demo release assets (npm run demo:veyra). Already covered
+# by the *.pikelet rule in examples/05-one-file-search/.gitignore; restated
+# here explicitly so it's visible at the root without having to know that.
+/examples/05-one-file-search/web/public/veyra*.pikelet
