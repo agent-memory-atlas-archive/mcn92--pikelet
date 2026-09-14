@@ -6,12 +6,12 @@
 *.tampered
 web/dist/
 
-# The README's ablation reproduction packs are checked in deliberately
-# (see web/public/reproduce-ablation.mjs) — an exception to the *.pikelet
-# rule above, not generated scratch output.
-!web/public/veyra.pikelet
-!web/public/veyra-ablated.pikelet
-!web/public/veyra-chamber43.pikelet
+# web/public/veyra*.pikelet used to be a committed exception to the
+# *.pikelet rule above (~75MB across 3 files). They're now release assets,
+# fetched and SHA-256-verified by web/veyra-corpus/fetch-veyra.mjs — see
+# that script and web/veyra-corpus/README.md for the source and rebuild
+# recipe. No exception needed here anymore; they're gitignored like any
+# other compiled .pikelet output.
 
 student-pilot/
 encoder-spike/spike.mjs

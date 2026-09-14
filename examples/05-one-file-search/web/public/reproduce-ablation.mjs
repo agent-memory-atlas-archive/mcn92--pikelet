@@ -12,12 +12,20 @@
 //
 // Usage: node examples/05-one-file-search/web/public/reproduce-ablation.mjs
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openPikeletFile } from '../../../../complete/index.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const QUESTION = 'What chamber is the Tovash project housed in?';
+
+if (!fs.existsSync(path.join(HERE, 'veyra.pikelet'))) {
+    console.error(
+        'Veyra demo packs not found. Fetch them first:\n\n  npm run demo:veyra\n'
+    );
+    process.exit(1);
+}
 
 async function run(label, file) {
     const search = await openPikeletFile(path.join(HERE, file));

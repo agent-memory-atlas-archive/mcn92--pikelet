@@ -104,6 +104,7 @@
     "build:all": "node scripts/build-all.mjs",
     "bench": "node benchmarks/run.js",
     "demo:data": "node scripts/make-demo-vectors.mjs",
+    "demo:veyra": "node examples/05-one-file-search/web/veyra-corpus/fetch-veyra.mjs",
     "demo:artifact": "node examples/legacy/range-artifact-demo/demo.js --compact",
     "demo:sketch": "node examples/legacy/range-artifact-demo/sketch_demo.js --compact",
     "demo:artifact:browser:build": "vite build examples/legacy/range-artifact-demo/static",

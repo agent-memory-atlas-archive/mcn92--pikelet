@@ -89,7 +89,10 @@ smoke, provenance, identity, abstention, and embedded-evaluation checks.
   `encoder-spike/build-encoder.sh`).
 - `web/` — the browser host: an input box over the reader, showing per-query
   range requests and bytes. `serve.mjs` is the entire hosting requirement:
-  static files + `Range` support.
+  static files + `Range` support. `web/ablation.html` is a two-panel
+  ablation demo (same question against a full pack and one missing/
+  contradicting a record) — `npm run demo:veyra` fetches its packs first
+  (see `web/veyra-corpus/README.md` for the source and rebuild recipe).
 - `search-reader.mjs`, `demo.mjs`, `test.mjs` — the original composition
   spike over 03's six separate asset files, kept as the reference the
   one-file reader is tested against.
