@@ -1,6 +1,6 @@
 // Spike: the composed Search Artifact reader — one call from query text to
-// hydrated, calibrated results, over the five components that
-// examples/legacy/03-edge-docs-search ships as separate Worker assets:
+// hydrated, calibrated results, over the five components the
+// encoder-conformance fixture assets ship separately:
 //
 //   corpus      docs-corpus.json       (records: title/text/preview/anchor/path)
 //   index       docs-index.bin         (.pnck snapshot -> sketch tier at open)
@@ -11,8 +11,8 @@
 // This file exists to answer the composition questions ahead of the complete
 // artifact profile (SEARCH_ARTIFACT_CONTRACT.md section 9.4) — its API is a
 // draft of the future one-file reader, not a published surface. The
-// abstention helpers are extracted verbatim from 03's worker.js so the
-// committed golden fixtures transfer as acceptance tests.
+// abstention helpers are extracted verbatim from the edge-worker example's
+// worker.js so the committed golden fixtures transfer as acceptance tests.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
     loadStudentModel,
     embedTextWithStudent,
-} from '../legacy/03-edge-docs-search/student-embedder.mjs';
+} from '../../test/fixtures/encoder-conformance/student-embedder.mjs';
 
 const require = createRequire(import.meta.url);
 const Pikelet = require('../../pikelet.js');

@@ -46,7 +46,7 @@ ABSTENTION_MIN_SHUFFLED_CATCH = 0.60
 ABSTENTION_MIN_GENERAL_CATCH = 0.80
 ABSTENTION_MIN_NONSENSE_NONE = 1.00
 ABSTENTION_MAX_NOISE_MEDIAN = ABSTENTION_HARD
-GOLDEN_ABSTENTION_FIXTURES_PATH = Path(__file__).with_name("fixtures") / "abstention-golden.json"
+GOLDEN_ABSTENTION_FIXTURES_PATH = Path(__file__).parents[3] / "test" / "fixtures" / "encoder-conformance" / "abstention-golden.json"
 
 CURATED_HELDOUT = [
     "How does an edge isolate recover a saved vector index?",

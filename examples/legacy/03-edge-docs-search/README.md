@@ -114,9 +114,11 @@ The build produces five runtime assets that Wrangler bundles into the Worker:
 `docs-student-evaluation.json` is also produced for inspection but is not
 imported by the Worker.
 
-The current artifacts are committed under `assets/`, so deployment does not
-require Python, PyTorch, or retraining. The build instructions below regenerate
-them when the documentation or encoder changes.
+The current artifacts are committed under
+`test/fixtures/encoder-conformance/assets/` (they are also the fixtures
+`test/complete_profile.mjs` and `npm run test:worker-example` check against),
+so deployment does not require Python, PyTorch, or retraining. The build
+instructions below regenerate them when the documentation or encoder changes.
 
 ## Build the demo
 
@@ -157,15 +159,17 @@ HF_HOME=/tmp/pikelet-hf \
 Verify that plain JavaScript reproduces the exported Python model:
 
 ```bash
-node examples/legacy/03-edge-docs-search/verify_student.mjs \
+node test/fixtures/encoder-conformance/verify_student.mjs \
   --student-dir /tmp/pikelet-student
 ```
 
-Build the Pikelet snapshot and bundled asset directory:
+Build the Pikelet snapshot and bundled asset directory. `worker.js` imports
+assets from `test/fixtures/encoder-conformance/assets/` directly, so that is
+also where a rebuild must write them:
 
 ```bash
 node examples/legacy/03-edge-docs-search/build_demo.mjs \
-  --out examples/legacy/03-edge-docs-search/assets \
+  --out test/fixtures/encoder-conformance/assets \
   --student-dir /tmp/pikelet-student
 ```
 

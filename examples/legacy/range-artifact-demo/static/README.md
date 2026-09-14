@@ -38,7 +38,7 @@ The docs artifact is built from the worker-semantic-search snapshot:
 
 ```bash
 node -e "require('./pikelet.js').buildRangeArtifactFile(
-  'examples/legacy/03-edge-docs-search/assets/docs-index.bin',
+  'test/fixtures/encoder-conformance/assets/docs-index.bin',
   'examples/legacy/range-artifact-demo/static/public/artifacts/pikelet-docs.pikelet-range',
   { layout: 'rcm' })"
 ```
@@ -47,7 +47,7 @@ Corpus chunk ids map one-to-one onto artifact node ids (the snapshot was built
 in insertion order with no deletions), so results hydrate by direct lookup. If
 you rebuild the index, rebuild the artifact and re-copy
 `docs-corpus.json` and `docs-student.bin` from
-`examples/legacy/03-edge-docs-search/assets/` together — the encoder, index, and
+`test/fixtures/encoder-conformance/assets/` together — the encoder, index, and
 corpus are one matched set.
 
 ## Measured warm-cache behavior

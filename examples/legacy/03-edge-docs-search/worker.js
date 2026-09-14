@@ -1,10 +1,10 @@
 import Pikelet from '../../../pikelet.workerd.mjs';
-import { embedTextWithStudent, loadStudentModel, scoreQuery } from './student-embedder.mjs';
-import SNAPSHOT_ASSET from './assets/docs-index.bin';
-import STUDENT_ASSET from './assets/docs-student.bin';
-import ABSTENTION_ASSET from './assets/docs-abstention.json';
-import CORPUS_ASSET from './assets/docs-corpus.json';
-import MANIFEST_ASSET from './assets/docs-manifest.json';
+import { embedTextWithStudent, loadStudentModel, scoreQuery } from '../../../test/fixtures/encoder-conformance/student-embedder.mjs';
+import SNAPSHOT_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-index.bin';
+import STUDENT_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-student.bin';
+import ABSTENTION_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-abstention.json';
+import CORPUS_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-corpus.json';
+import MANIFEST_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-manifest.json';
 
 const MAX_RESULTS = 8;
 const DEFAULT_MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;

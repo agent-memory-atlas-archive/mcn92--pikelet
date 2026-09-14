@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Pikelet from '../../../pikelet.node.mjs';
-import { embedTextWithStudent, loadStudentModel } from './student-embedder.mjs';
+import { embedTextWithStudent, loadStudentModel } from '../../../test/fixtures/encoder-conformance/student-embedder.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

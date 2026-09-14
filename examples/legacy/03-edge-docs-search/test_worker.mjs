@@ -40,7 +40,7 @@ if (!existsSync(path.join(bundleDir, 'worker.js'))) {
   process.exit(1);
 }
 const goldenFixtures = JSON.parse(
-  readFileSync(new URL('./fixtures/abstention-golden.json', import.meta.url), 'utf8')
+  readFileSync(new URL('../../../test/fixtures/encoder-conformance/abstention-golden.json', import.meta.url), 'utf8')
 );
 const miniflare = new Miniflare({
   compatibilityDate: '2025-04-09',

@@ -329,19 +329,20 @@ lists the gate that actually executes it:
   reference-reader results (`test/fixtures/sketch_golden.js`, checked by
   `test/sketch_profile.js`; run by `npm test`)
 - abstention golden fixtures with exact expected labels
-  (`examples/legacy/03-edge-docs-search/fixtures/abstention-golden.json`, driven
-  under Miniflare by `npm run test:worker-example`; run in CI)
+  (`test/fixtures/encoder-conformance/abstention-golden.json`, checked
+  directly by `test/complete_profile.mjs` and, under Miniflare against the
+  deployed edge-worker example, by `npm run test:worker-example`; both run
+  in CI)
 - encoder parity verification between independent implementations
-  (`examples/legacy/03-edge-docs-search/verify_student.mjs`). This is a
+  (`test/fixtures/encoder-conformance/verify_student.mjs`). This is a
   producer-side gate: it requires the trained student artifacts, which are
   not committed, so it runs when a student encoder is (re)trained — not in
   the automated suite. An artifact shipping a distilled encoder without this
   check passing is a non-conforming producer, not a missing fixture.
 
-Until these are packaged as a standalone kit, "pass the conformance suite"
-means passing the checks these assets drive. A contract requirement with no
-fixture behind it is a defect in this specification, not a lesser kind of
-requirement.
+"Pass the conformance suite" means passing the checks these assets drive. A
+contract requirement with no fixture behind it is a defect in this
+specification, not a lesser kind of requirement.
 
 ## 6. Versioning and Compatibility
 

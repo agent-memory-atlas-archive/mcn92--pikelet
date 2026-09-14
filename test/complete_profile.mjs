@@ -802,14 +802,15 @@ console.log('\nB. format-1 file (pikelet-complete-v1) compatibility');
 }
 
 // ---------------------------------------------------------------------------
-// C. kind-1 artifact from the committed examples/03 assets (format 2)
+// C. kind-1 artifact from the committed encoder-conformance assets (format 2)
 // ---------------------------------------------------------------------------
-console.log('\nC. kind-1 student-inline artifact compiled from examples/03 assets');
+console.log('\nC. kind-1 student-inline artifact compiled from encoder-conformance assets');
 {
-    const assets = path.join(ROOT, 'examples', 'legacy', '03-edge-docs-search', 'assets');
+    const fixtureDir = path.join(ROOT, 'test', 'fixtures', 'encoder-conformance');
+    const assets = path.join(fixtureDir, 'assets');
     const corpusRaw = JSON.parse(fs.readFileSync(path.join(assets, 'docs-corpus.json'), 'utf8'));
     const sourceManifest = JSON.parse(fs.readFileSync(path.join(assets, 'docs-manifest.json'), 'utf8'));
-    const goldens = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', 'legacy', '03-edge-docs-search', 'fixtures', 'abstention-golden.json'), 'utf8'));
+    const goldens = JSON.parse(fs.readFileSync(path.join(fixtureDir, 'abstention-golden.json'), 'utf8'));
     const count = Object.keys(corpusRaw).length;
     const records = [];
     for (let id = 0; id < count; id++) {

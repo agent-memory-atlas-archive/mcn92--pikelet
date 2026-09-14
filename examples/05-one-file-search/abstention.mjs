@@ -1,10 +1,10 @@
-// Abstention scoring, extracted from 03's worker.js and parameterized on
-// the calibration model. Pure JS, no runtime dependencies — shared by the
-// Node spike facade and the browser one-file reader. The scoreQuery import
-// is the only coupling to the encoder module (they form one
-// query-interpretation unit; see spec/COMPLETE_PROFILE.md section 3.6).
+// Abstention scoring, extracted from the edge-worker example's worker.js and
+// parameterized on the calibration model. Pure JS, no runtime dependencies —
+// shared by the Node spike facade and the browser one-file reader. The
+// scoreQuery import is the only coupling to the encoder module (they form
+// one query-interpretation unit; see spec/COMPLETE_PROFILE.md section 3.6).
 
-import { scoreQuery } from '../legacy/03-edge-docs-search/student-embedder.mjs';
+import { scoreQuery } from '../../test/fixtures/encoder-conformance/student-embedder.mjs';
 
 export function buildKnownBucketTables(model) {
     const word = new Set();
