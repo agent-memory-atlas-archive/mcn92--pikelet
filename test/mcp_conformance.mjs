@@ -45,6 +45,16 @@ function stubPack() {
                     results: opts.showAbstained ? withheld : [],
                 };
             }
+            // Mirrors the real reader's unscored contract (complete/index.mjs):
+            // no fitted calibrator means no confidence field at all, and
+            // results always ship — there is nothing to withhold against.
+            if (queryText === 'unscored query') {
+                return {
+                    matchQuality: 'unscored',
+                    confidence: undefined,
+                    results: [{ id: 2, title: 'Unscored', headingPath: [], anchor: null, sourcePath: 'unscored.md', text: 'unscored text', distance: 0.4 }],
+                };
+            }
             return {
                 matchQuality: 'strong',
                 confidence: 0.9,
@@ -208,6 +218,20 @@ await withServer(async ({ send, waitFor }) => {
     const bad = (await waitFor(4)).result;
     check('non-boolean showAbstained is rejected as a tool error',
         bad.isError === true && bad.content[0].text.includes('showAbstained'));
+
+    const unscored = await call(5, { query: 'unscored query' });
+    check('an unscored section always ships its results',
+        unscored.sections[0].matchQuality === 'unscored' && unscored.sections[0].results.length === 1);
+    check('an unscored section carries an unscoredWarning naming the pack',
+        typeof unscored.unscoredWarning === 'string' && unscored.unscoredWarning.includes('stub-pack')
+        && unscored.unscoredWarning.includes('no calibrated abstention'));
+    check('unscored does not also trigger the none-verdict note',
+        unscored.note === undefined);
+
+    const unscoredStrict = await call(6, { query: 'unscored query', showAbstained: false });
+    check('showAbstained: false has no effect on an unscored section',
+        unscoredStrict.sections[0].matchQuality === 'unscored' && unscoredStrict.sections[0].results.length === 1
+        && typeof unscoredStrict.unscoredWarning === 'string');
 });
 
 console.log(`\nMCP protocol conformance: ${passed} passed, ${failed} failed`);

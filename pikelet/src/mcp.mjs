@@ -61,12 +61,15 @@ function toolDefinitions(packs) {
         + 'chunks with full provenance (pack, immutable pack identity, title, heading path, '
         + 'source) plus a calibrated matchQuality per pack: "strong" means the pack answers '
         + 'this with confidence, "weak" means treat results with caution, "none" means the '
-        + 'calibrator scored no confident answer. The calibrator can be wrong, especially on '
-        + 'paraphrases that share few word forms with the source text, so results ship even '
-        + 'under a "none" verdict by default — weigh matchQuality and confidence yourself '
-        + 'rather than treating "none" as certain proof the pack has no answer, but also do '
-        + 'not cite a "none" result with the same confidence as "strong". Pass '
-        + 'showAbstained: false for the stricter behavior (zero results on "none").',
+        + 'calibrator scored no confident answer, "unscored" means the pack has no fitted '
+        + 'calibrator at all — no confidence signal whatsoever, not even a low one; treat its '
+        + 'results as unverified regardless of how relevant they look (see unscoredWarning in '
+        + 'the response). The calibrator can be wrong, especially on paraphrases that share few '
+        + 'word forms with the source text, so results ship even under a "none" verdict by '
+        + 'default — weigh matchQuality and confidence yourself rather than treating "none" as '
+        + 'certain proof the pack has no answer, but also do not cite a "none" result with the '
+        + 'same confidence as "strong". Pass showAbstained: false for the stricter behavior '
+        + '(zero results on "none"; has no effect on "unscored", which never withholds).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -188,8 +191,18 @@ async function callSearch(packs, args) {
   }
   // A 'none' section can carry results (showAbstained default), so
   // "answered" has to read matchQuality — not just whether results shipped.
-  const answered = sections.filter((s) => s.matchQuality !== 'none');
+  const answered = sections.filter((s) => s.matchQuality !== 'none' && s.matchQuality !== 'unscored');
   const noneSections = sections.filter((s) => s.matchQuality === 'none');
+  // Unscored packs have no fitted calibrator at all (asset: null — the
+  // corpus failed calibration's gates, or shipped with calibration
+  // skipped): there is no matchQuality/confidence signal whatsoever, not
+  // just a low one. Results still ship (there is nothing to withhold
+  // against — showAbstained has no effect here), but silently, a caller
+  // could mistake them for the same confidence as a "strong" verdict.
+  // Every unscored section gets a warning, independent of whether other
+  // packs answered, since it is a per-pack property a caller citing that
+  // specific pack's results needs to know.
+  const unscoredSections = sections.filter((s) => s.matchQuality === 'unscored');
   return {
     query: args.query,
     packsSearched: names,
@@ -203,6 +216,12 @@ async function callSearch(packs, args) {
           + 'rather than guessing, or rerun without showAbstained: false to see what the '
           + 'calibrator withheld — it can misjudge paraphrases that share few word forms with '
           + 'the source.',
+    } : {}),
+    ...(unscoredSections.length > 0 ? {
+      unscoredWarning: `${unscoredSections.map((s) => s.pack).join(', ')}: no calibrated abstention — this `
+        + `pack shipped without a fitted calibrator, so its results carry no matchQuality/confidence signal at `
+        + 'all (not even a low one). Weigh every result from it as unverified; do not treat its absence of a '
+        + '"none" verdict as evidence the query is actually answered.',
     } : {}),
     sections,
   };
@@ -551,6 +570,8 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
             + 'default since the calibrator can misjudge paraphrases — weigh matchQuality and '
             + 'confidence yourself rather than treating "none" as proof the pack has no '
             + 'answer, and do not cite a "none" result as confidently as a "strong" one. '
+            + '"unscored" means a pack has no fitted calibrator at all — no confidence signal, '
+            + 'not just a low one; the response carries an unscoredWarning for these. '
             + 'verify_pack runs the tests a pack carries inside itself, including the '
             + 'calibration quality (cvAucHard) behind matchQuality verdicts; list_packs '
             + 'reports identities for citation pinning.',
