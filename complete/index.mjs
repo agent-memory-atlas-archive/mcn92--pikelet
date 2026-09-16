@@ -125,13 +125,23 @@ function toHex(bytes) {
 const isSha256Hex = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 
 // SHA-256 via WebCrypto (browser, workerd, Node 18+); node:crypto fallback
-// for older Node. Fails closed: verification is not optional in this reader.
+// for older Node, gated on an actual Node runtime check rather than just
+// "WebCrypto is missing" — a browser can lack crypto.subtle too (privacy
+// settings, a hardened build), and a bare dynamic import('node:crypto')
+// there isn't a Node module resolution failure, it's a cross-origin module
+// fetch a browser refuses outright, surfacing as an opaque module-loading
+// error instead of the clear message below. Fails closed either way:
+// verification is not optional in this reader.
 async function sha256hex(bytes) {
     if (globalThis.crypto?.subtle) {
         return toHex(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes)));
     }
-    const { createHash } = await import(/* webpackIgnore: true */ /* @vite-ignore */ 'node:crypto');
-    return createHash('sha256').update(bytes).digest('hex');
+    if (typeof process !== 'undefined' && process.versions?.node) {
+        const { createHash } = await import(/* webpackIgnore: true */ /* @vite-ignore */ 'node:crypto');
+        return createHash('sha256').update(bytes).digest('hex');
+    }
+    throw new Error('No crypto backend available (crypto.subtle is missing) — '
+        + 'cannot verify artifact integrity in this environment');
 }
 
 function asUint8Array(bytes) {
