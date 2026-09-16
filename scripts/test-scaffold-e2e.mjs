@@ -112,12 +112,17 @@ console.log('\n--- compile ---');
 {
   const fixtureDir = path.join(work, 'compile-fixture');
   fs.mkdirSync(fixtureDir, { recursive: true });
+  // Real titles, not filenames: a heading of "routers.md" tokenizes into a
+  // near-empty content-word set ("routers", "md" — "md" itself is dropped
+  // as under COVERAGE_MIN_WORD_LEN), which starves the calibrator's
+  // coverage feature of anything meaningful to grade a title-templated
+  // positive against.
   const fixtures = {
-    'volcanoes.md': 'Volcanoes form where magma rises through cracks in the crust and erupts onto the surface. Repeated eruptions of lava and ash build the cone over thousands of years, usually along tectonic plate boundaries where one plate subducts beneath another and melts into fresh magma below.',
-    'routers.md': 'A network router forwards packets between different networks by reading the destination address in each packet header and consulting its routing table. Routes are configured statically or learned through routing protocols, and home routers also perform network address translation with a built-in firewall.',
-    'sourdough.md': 'Sourdough bread rises without commercial yeast by relying on a starter, a live culture of wild yeast and lactic acid bacteria kept alive with regular feedings of flour and water. The long fermentation develops flavor and structure, and the acidity gives the crumb its characteristic tang.',
+    'volcanoes.md': ['How Volcanoes Form', 'Volcanoes form where magma rises through cracks in the crust and erupts onto the surface. Repeated eruptions of lava and ash build the cone over thousands of years, usually along tectonic plate boundaries where one plate subducts beneath another and melts into fresh magma below.'],
+    'routers.md': ['How Network Routers Work', 'A network router forwards packets between different networks by reading the destination address in each packet header and consulting its routing table. Routes are configured statically or learned through routing protocols, and home routers also perform network address translation with a built-in firewall.'],
+    'sourdough.md': ['Sourdough Bread Fermentation', 'Sourdough bread rises without commercial yeast by relying on a starter, a live culture of wild yeast and lactic acid bacteria kept alive with regular feedings of flour and water. The long fermentation develops flavor and structure, and the acidity gives the crumb its characteristic tang.'],
   };
-  for (const [name, text] of Object.entries(fixtures)) fs.writeFileSync(path.join(fixtureDir, name), `# ${name}\n\n${(text + ' ').repeat(3)}`);
+  for (const [name, [title, text]] of Object.entries(fixtures)) fs.writeFileSync(path.join(fixtureDir, name), `# ${title}\n\n${(text + ' ').repeat(3)}`);
   const outFile = path.join(work, 'compiled', 'search.pikelet');
   run(process.execPath, [CPS_BIN, 'compile', '--source', fixtureDir, '--out', outFile], { cwd: CPS_DIR });
   ok(fs.existsSync(outFile), 'compile wrote the .pikelet artifact');
@@ -206,9 +211,15 @@ console.log('\n--- compile ---');
         && Number.isFinite(top.distance) && (top.source || top.title),
         'mcp search returns provenanced results with calibrated quality', JSON.stringify({ q: section.matchQuality, top: { ...top, text: (top.text || '').slice(0, 40) } }));
 
+      // showAbstained defaults true at the MCP layer: a 'none' verdict
+      // still ships results (with a caveat note), it does not withhold
+      // them — see pikelet/src/mcp.mjs.
       const off = (await callTool(5, 'search', { query: 'medicare part d formulary exception' })).body;
-      ok(off.sections.every((s) => s.matchQuality === 'none' && s.results.length === 0) && typeof off.note === 'string',
+      ok(off.sections.every((s) => s.matchQuality === 'none') && typeof off.note === 'string',
         'off-domain query abstains in every pack and says so', JSON.stringify(off).slice(0, 160));
+      const offStrict = (await callTool(11, 'search', { query: 'medicare part d formulary exception', showAbstained: false })).body;
+      ok(offStrict.sections.every((s) => s.matchQuality === 'none' && s.results.length === 0) && typeof offStrict.note === 'string',
+        'showAbstained: false withholds results on an off-domain query', JSON.stringify(offStrict).slice(0, 160));
 
       const record = (await callTool(6, 'get_record', { pack: packName, id: top.id })).body;
       ok(record.pack === packName && record.id === top.id && typeof record.text === 'string' && record.text.length >= top.text.length,

@@ -522,9 +522,10 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
   // ranks far down. Restricted to the retained set so a held-out
   // document's own title can't leak in through BM25 and inflate coverage
   // for a query calibration expects unanswerable.
-  const fusedTop = (text, vectorHits) => {
+  const fusedTop = (text, vectorHits, excludeSet = null) => {
     if (!lexicalIndex) return vectorHits;
-    const lexHits = lexicalIndex.search(text, 5).filter((h) => retainedSet.has(h.id));
+    const lexHits = lexicalIndex.search(text, 5)
+      .filter((h) => retainedSet.has(h.id) && !(excludeSet && excludeSet.has(h.id)));
     const cut = lexHits.length ? lexHits[0].score / LEXICAL_CUTOFF : Infinity;
     const lexRank = new Map(lexHits.filter((h) => h.score >= cut).map((h, i) => [h.id, i]));
     if (lexRank.size === 0) return vectorHits;
@@ -552,7 +553,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
   // Signals must be computed the way the reader computes them from its own
   // search hits (complete/retrieval-abstention.mjs): d0, the rank-4 margin,
   // and the mean over the returned list.
-  const signalsFor = (text, hits) => {
+  const signalsFor = (text, hits, excludeSet = null) => {
     const top = hits.slice(0, K);
     const d0 = top.length ? top[0].distance : 1;
     const margin = top.length > 1 ? top[Math.min(4, top.length - 1)].distance - d0 : 0;
@@ -561,8 +562,15 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // top hit ranked, say, 40th by vector distance still needs its real
     // distance available to fuse correctly, which only the wider search()
     // pool (not top) carries. d0/margin/mean10 above stay on top/K, matching
-    // the reader's own base-signal window exactly.
-    const fused = fusedTop(text, hits);
+    // the reader's own base-signal window exactly. excludeSet (ablation
+    // only) must reach the lexical half of the fusion too: BM25 runs its
+    // own independent search over the full retainedSet, so without this a
+    // document the vector search correctly excluded could still be
+    // re-admitted into the coverage-scoring passage pool through the
+    // lexical side — measured on a real corpus: d0 moved (proving the
+    // vector exclusion worked) while coverage1 stayed unchanged, because
+    // the ablated document was still winning on BM25 and re-entering fusion.
+    const fused = fusedTop(text, hits, excludeSet);
     return {
       d0,
       margin,
@@ -736,9 +744,19 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     for (const positiveRow of positives) {
       const { text } = positiveRow;
       const targets = ablationTargets(positiveRow);
-      if (targets.size === 0 || retainedSet.size - targets.size < K) continue;
+      // signalsFor already degrades gracefully below the nominal K window
+      // (it uses whatever top.length actually is for margin/mean10) — the
+      // only real requirement is that ablation leaves something to search
+      // at all. Requiring the post-ablation pool stay >= K (the ORIGINAL,
+      // pre-ablation window size) is impossible on any corpus small enough
+      // that K was itself capped down to retainedPos.length: excluding
+      // even one chunk then always leaves fewer than K, so every single
+      // positive got skipped before ever reaching a search — measured on
+      // an 8-chunk fixture, where this alone produced 0 ablation negatives
+      // out of 56 verified positives.
+      if (targets.size === 0 || retainedSet.size - targets.size < 1) continue;
       const hits = await searchExcluding(text, targets);
-      const sig = signalsFor(text, hits);
+      const sig = signalsFor(text, hits, targets);
       const stillClose = sig.d0 <= positiveRow.d0 + 0.05;
       const stillGrounded = sig[COVERAGE_FEAT] >= 0.75
         || (positiveRow[COVERAGE_FEAT] >= ABLATION_RELATIVE_COVERAGE_FLOOR
