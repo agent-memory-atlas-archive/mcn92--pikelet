@@ -15,13 +15,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 import { pipeline } from './markdown.test.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CPS = path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs');
-const { extractMarkdown } = await import(CPS);
+const { extractMarkdown } = await import(pathToFileURL(CPS).href);
 
 const KNOWN_DIVERGENCES = new Map([
   ['Why is  this   spaced', 'why-is-this-spaced'],

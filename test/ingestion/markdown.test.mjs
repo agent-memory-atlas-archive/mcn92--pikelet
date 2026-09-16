@@ -3,12 +3,12 @@
 // setext headings, Unicode headings and slugs, oversized-section splitting.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CPS = path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs');
-const { extractByExtension, chunkDocs, applySourceRoutes, tokenize } = await import(CPS);
+const { extractByExtension, chunkDocs, applySourceRoutes, tokenize } = await import(pathToFileURL(CPS).href);
 
 export function pipeline(file, { routePrefix = 'docs', targetTokens = 256 } = {}) {
   const text = fs.readFileSync(path.join(here, 'fixtures', file), 'utf8');

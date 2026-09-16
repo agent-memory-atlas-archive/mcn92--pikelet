@@ -3,12 +3,12 @@
 // excluded from paths.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CPS = path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs');
-const { extractHtml, chunkDocs } = await import(CPS);
+const { extractHtml, chunkDocs } = await import(pathToFileURL(CPS).href);
 
 section('html: page.html (id attributes, fallback slugs, chrome stripping)');
 {
@@ -38,7 +38,7 @@ section('html: page.html (id attributes, fallback slugs, chrome stripping)');
 
 section('html: minified pages with unquoted attributes (nodejs.org style)');
 {
-  const { extractLinks } = await import(CPS);
+  const { extractLinks } = await import(pathToFileURL(CPS).href);
   const minified = '<title>FS | Node.js Documentation</title><body>'
     + '<a href=documentation.html>docs</a><a href=/other>other</a>'
     + '<h2 id=fsreadfilesyncpath-options>fs.readFileSync(path[, options])</h2>'
