@@ -615,16 +615,43 @@ function chunkDocs(docs, options) {
     // title-only chunk (which then also swallows whatever comes after it,
     // since every later undersized section merges backward into that stub
     // instead of the real section it belongs under).
+    // A child heading is a true continuation of its undersized parent
+    // section — "6. The C ABI" with a 12-token intro, followed by
+    // "6.1 Handle Lifecycle", is one topic split across two headings, not
+    // two unrelated sections. Forward-merging into that child keeps the
+    // parent's own words attributed under the child's (more specific, still
+    // correct) path instead of destroying both the parent's exact anchor
+    // and the child's when the main loop's LCP-based backward merge below
+    // collides them with whatever unrelated section came before the
+    // parent. isChildOf only recognizes a genuine parent/child pair (the
+    // next heading's path extends this one's, one level deeper) — an
+    // unrelated sibling next (same or shallower depth) gets no special
+    // treatment and falls through to the backward merge, which is already
+    // correct for that case.
+    const isChildOf = (parentPath, childPath) => childPath.length === parentPath.length + 1
+      && parentPath.every((h, i) => h === childPath[i]);
     const sections = [];
     let carry = [];
-    for (const raw of doc.sections) {
-      if (sections.length === 0 && carry.length === 0 && tokenize(raw.text).length < 25) {
-        // A leading undersized section has no previous chunk to merge
-        // backward into; carry it forward onto whatever section comes
-        // next — sized or not — and stop. It does not keep absorbing
-        // further sections itself: if the next section is also
-        // undersized, the main loop's backward merge (LCP-aware) picks up
-        // from there once this first merged section exists to merge into.
+    for (let i = 0; i < doc.sections.length; i++) {
+      const raw = doc.sections[i];
+      const next = doc.sections[i + 1];
+      const undersized = tokenize(raw.text).length < 25;
+      if (undersized && next && isChildOf(raw.headingPath, next.headingPath)) {
+        // Carry onto the child next iteration rather than falling into the
+        // backward-merge branch below. Works whether or not a previous
+        // chunk exists yet — the leading-H1-title case (no previous chunk)
+        // is one instance of this, not a separate rule.
+        carry.push(raw);
+        continue;
+      }
+      if (sections.length === 0 && carry.length === 0 && undersized) {
+        // A leading undersized section with no child next and no previous
+        // chunk to merge backward into: carry it forward onto whatever
+        // comes next — sized or not — same as before. It does not keep
+        // absorbing further sections itself: if the next section is also
+        // undersized (and not its child), the main loop's backward merge
+        // (LCP-aware) picks up from there once this first merged section
+        // exists to merge into.
         carry = [raw];
         continue;
       }
