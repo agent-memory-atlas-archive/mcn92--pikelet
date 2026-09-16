@@ -8,6 +8,7 @@ await import('./markdown.test.mjs');
 await import('./mdx.test.mjs');
 await import('./html.test.mjs');
 await import('./anchors.test.mjs');
+await import('./strip.test.mjs');
 
 const { passed, failed } = counts();
 console.log(`\nIngestion conformance: ${passed} passed, ${failed} failed`);

@@ -454,12 +454,51 @@ function extractLinks(html, baseHref, origin) {
   return links;
 }
 
+// Markdown syntax is removed by position, never by deleting characters
+// globally: hyphens, minus signs, underscores in identifiers, and
+// comparison operators are content the record must carry verbatim.
+// Fenced blocks and inline code spans pass through untouched (minus their
+// delimiters); prose loses only heading hashes, blockquote/list prefixes,
+// rules, boundary emphasis, table scaffolding, and link/image wrappers.
 function stripMarkdown(text) {
-  return normalizeText(text
-    .replace(/```[\s\S]*?```/g, (block) => `\n${block}\n`)
-    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+  const src = String(text || '');
+  const stash = [];
+  const keep = (s) => ` ${stash.push(s) - 1} `;
+
+  let out = src
+    // 1. Protect code first. Fenced blocks keep their body byte-for-byte;
+    //    inline spans keep their contents.
+    .replace(/^([ \t]*)(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n[ \t]*\2[ \t]*$/gm, (_, indent, fence, body) => keep(`\n${body}\n`))
+    .replace(/(`+)([^`\n]+?)\1/g, (_, ticks, body) => keep(body))
+    // 2. Images and links: keep alt/link text, drop the URL.
+    .replace(/!\[([^\]]*)]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
-    .replace(/[#>*_`~-]/g, ' '));
+    .replace(/\[([^\]]+)]\[[^\]]*]/g, '$1')
+    // 3. Block-level markers, anchored to line start.
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')                // ATX heading hash
+    .replace(/[ \t]+#+[ \t]*$/gm, '')                         // trailing closing hashes
+    .replace(/^[ \t]{0,3}(?:[-*_][ \t]*){3,}$/gm, '')         // horizontal rules
+    .replace(/^[ \t]{0,3}(?:>[ \t]?)+/gm, '')                 // blockquote (nested ok)
+    .replace(/^([ \t]*)[-*+][ \t]+(?=\S)/gm, '$1')            // unordered list bullet
+    .replace(/^([ \t]*)[-*+][ \t]+\[[ xX]][ \t]+/gm, '$1')    // task list checkbox
+    // 4. Tables: drop separator rows and pipe scaffolding.
+    .replace(/^[ \t]*\|?(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*:?-*:?[ \t]*\|?[ \t]*\n/gm, '')
+    .replace(/^[ \t]*\|/gm, '').replace(/\|[ \t]*$/gm, '').replace(/[ \t]*\|[ \t]*/g, ' ')
+    // 5. Inline emphasis, only at word boundaries so snake_case and
+    //    intra-word asterisks survive.
+    .replace(/(\*\*\*|___)(?=\S)([\s\S]*?\S)\1/g, '$2')
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '$2')
+    .replace(/(?<![\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, '$1')
+    .replace(/(?<![\w_])_(?=\S)([^_\n]*?\S)_(?![\w_])/g, '$1')
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, '$1')
+    // 6. Backslash escapes of markdown punctuation.
+    .replace(/\\([\\`*_{}[\]()#+\-.!>~|])/g, '$1');
+
+  // Tidy prose lines, then restore protected code verbatim (after the
+  // trim, so code indentation survives).
+  out = out.replace(/^[ \t]+|[ \t]+$/gm, '').replace(/[ \t]+/g, ' ');
+  out = out.replace(/ (\d+) /g, (_, i) => stash[Number(i)]);
+  return String(out).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function decodeEntities(text) {
