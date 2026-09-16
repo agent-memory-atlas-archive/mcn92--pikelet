@@ -90,7 +90,30 @@ const SEED = 424242;
 // feature name (see complete/retrieval-abstention.mjs).
 const BASE_FEATS = ['d0', 'margin', 'mean10', 'known_frac'];
 const COVERAGE_FEAT = 'coverage1';
-const FEATS = [...BASE_FEATS, COVERAGE_FEAT];
+const MAXSIM_FEAT = 'maxSim1';
+// grounding1: max(coverage1, maxSim1) — one word can ground a query either
+// by exact/stemmed lexical match (coverage1) or by encoder-level semantic
+// similarity (maxSim1); either is sufficient, so the two are combined by
+// max, not summed or fit as separate linear terms. This is deliberate, not
+// a simplification: measured on two real corpora, coverage1 alone
+// separates positives from ablation hard negatives better than maxSim1
+// alone (it's a sharp "the answer is truly absent" signal), which means a
+// joint logistic fit over both as independent features gives coverage1
+// nearly all the weight (measured ~5-19x maxSim1's) — the fit optimizes
+// hard-negative separation, which is exactly the objective coverage1 is
+// artificially good at for the same reason it over-penalizes paraphrases:
+// ablation negatives keep the query's own words while only removing the
+// answer, so raw word-overlap-with-retrieved-passage is a sharp
+// discriminator there specifically. That leaves maxSim1's real advantage —
+// it penalizes a genuine paraphrase (retrieval-verified answerable,
+// deliberately reduced lexical overlap with its own source — see the
+// "substituted" positive class below) roughly 2x less than coverage1 does
+// — almost unused by the fit. Taking the max at the feature level instead
+// of the coefficient level lets a paraphrase's semantic similarity rescue
+// it from coverage1's false penalty directly, without depending on
+// gradient descent to discover that trade against the wrong objective.
+const GROUNDING_FEAT = 'grounding1';
+const FEATS = [...BASE_FEATS, GROUNDING_FEAT];
 const COVERAGE_MIN_WORD_LEN = 3;
 const COVERAGE_TOP_PASSAGES = 5;
 const BLOOM_SEEDS = [0, 0x9e3779b9];
@@ -100,6 +123,16 @@ const MIN_VERIFIED_POSITIVES = 4;
 const MIN_NEGATIVES = 8;
 const MIN_HARD_NEGATIVES = 6;
 const MIN_AUC = 0.85;
+// Encoder-guided substitution positives (see the comment above the loop
+// that builds them): sampled over up to this many base positives, from a
+// vocabulary capped to the SUBSTITUTION_VOCAB_TOP most frequent corpus
+// words, keeping a swap only above SUBSTITUTION_MIN_COS word-level cosine
+// similarity. 0.55 measured as the point past which swaps stayed
+// recognizably related rather than incoherent on a real corpus (0.35 let
+// through nonsense like "fourth location sits during layout").
+const SUBSTITUTION_BUDGET = 32;
+const SUBSTITUTION_VOCAB_TOP = 800;
+const SUBSTITUTION_MIN_COS = 0.55;
 // The hard-negative bar is lower than the pooled bar: these queries sit near
 // the decision boundary by design, and demanding easy-class separation from
 // them would fail honest fits. Below this, the model cannot tell answerable
@@ -316,21 +349,84 @@ function stem(w) {
   if (w.length - 1 >= STEM_MIN_LEN && w.endsWith('e')) return w.slice(0, -1);
   return w;
 }
-function coverageFrac(text, passageTexts, isCommon) {
+// A word present only in a passage's heading, not its body, still grounds
+// the query — a heading names its section's exact topic — but at reduced
+// credit: a heading is a handful of words repeated verbatim by every
+// title-templated query about that passage, so full credit there is the
+// same free-coverage bug body-only scoring was built to fix. Reduced,
+// not zero, credit avoids overcorrecting into the opposite failure (a
+// real rank-1 hit whose match is in the heading scoring no coverage at
+// all — see splitHeadingBody above).
+const HEADING_COVERAGE_WEIGHT = 0.5;
+function coverageFrac(text, passages, isCommon) {
   const content = tokenize(text).filter((w) => w.length >= COVERAGE_MIN_WORD_LEN && !COVERAGE_STOPWORDS.has(w));
   if (!content.length) return 0;
   const weights = content.map((w) => (isCommon && isCommon(w) ? COVERAGE_COMMON_WORD_WEIGHT : 1));
   const weightSum = weights.reduce((a, c) => a + c, 0);
   let best = 0;
-  for (const passageText of passageTexts) {
-    const passageWords = tokenize(passageText || '');
-    const passage = new Set(passageWords);
-    const passageStems = new Set(passageWords.map(stem));
-    const present = (w) => passage.has(w) || passage.has(`${w}s`) || passage.has(`${w}es`)
-      || (w.endsWith('s') && passage.has(w.slice(0, -1)))
-      || passageStems.has(stem(w));
-    const grounded = content.reduce((sum, w, i) => sum + (present(w) ? weights[i] : 0), 0);
+  for (const { heading, body } of passages) {
+    const bodyWords = tokenize(body || '');
+    const bodySet = new Set(bodyWords);
+    const bodyStems = new Set(bodyWords.map(stem));
+    const headingSet = new Set(tokenize(heading || ''));
+    const presentIn = (set, stems, w) => set.has(w) || set.has(`${w}s`) || set.has(`${w}es`)
+      || (w.endsWith('s') && set.has(w.slice(0, -1)))
+      || (stems && stems.has(stem(w)));
+    const creditFor = (w) => {
+      if (presentIn(bodySet, bodyStems, w)) return 1;
+      if (presentIn(headingSet, null, w)) return HEADING_COVERAGE_WEIGHT;
+      return 0;
+    };
+    const grounded = content.reduce((sum, w, i) => sum + creditFor(w) * weights[i], 0);
     best = Math.max(best, grounded / weightSum);
+  }
+  return best;
+}
+
+// MaxSim grounding (comparison feature, not yet used in the fit — see the
+// design note near MAXSIM_FEAT below): coverageFrac requires exact or
+// stemmed word identity, so a query and its answer passage that use
+// different words for the same idea ("login" vs "authentication", "big"
+// vs "huge") ground each other at zero — a real, structural blind spot on
+// a system built around a semantic, paraphrase-tolerant retriever.
+// maxSimFrac replaces exact match with per-word embedding cosine
+// similarity (ColBERT-style late interaction, computed cheaply here: the
+// inline encoder's per-token hidden states are already produced by the
+// same forward pass embed() uses for the sentence vector — see
+// embedWords() in complete/inline-transformer.mjs — so this costs one
+// extra encoder call per scored passage, not one per word). For each
+// query content word, the score is the best cosine similarity against
+// any content word in the passage (heading words at reduced credit, same
+// asymmetry as coverageFrac and for the same reason), averaged across
+// query words with the same common-word downweighting coverageFrac uses.
+async function maxSimFrac(text, passages, isCommon, embedWordVec) {
+  const content = tokenize(text).filter((w) => w.length >= COVERAGE_MIN_WORD_LEN && !COVERAGE_STOPWORDS.has(w));
+  if (!content.length) return 0;
+  const weights = content.map((w) => (isCommon && isCommon(w) ? COVERAGE_COMMON_WORD_WEIGHT : 1));
+  const weightSum = weights.reduce((a, c) => a + c, 0);
+  const queryVecs = await Promise.all(content.map((w) => embedWordVec(w)));
+  const cosine = (a, b) => {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot; // both sides are already L2-normalized by embedWords()
+  };
+  let best = 0;
+  for (const { heading, body } of passages) {
+    const bodyWords = [...new Set(tokenize(body || '').filter((w) => w.length >= COVERAGE_MIN_WORD_LEN))];
+    const headingWords = [...new Set(tokenize(heading || '').filter((w) => w.length >= COVERAGE_MIN_WORD_LEN))];
+    if (!bodyWords.length && !headingWords.length) continue;
+    const bodyVecs = await Promise.all(bodyWords.map((w) => embedWordVec(w)));
+    const headingVecs = await Promise.all(headingWords.map((w) => embedWordVec(w)));
+    let simSum = 0;
+    for (let i = 0; i < content.length; i++) {
+      let simBest = 0;
+      for (const bv of bodyVecs) simBest = Math.max(simBest, cosine(queryVecs[i], bv));
+      let simHeading = 0;
+      for (const hv of headingVecs) simHeading = Math.max(simHeading, cosine(queryVecs[i], hv));
+      simBest = Math.max(simBest, simHeading * HEADING_COVERAGE_WEIGHT);
+      simSum += Math.max(0, simBest) * weights[i];
+    }
+    best = Math.max(best, simSum / weightSum);
   }
   return best;
 }
@@ -385,6 +481,60 @@ function buildVocabBloom(chunks) {
     }
   }
   return { bloom, bits, minCount, keptWords: kept.length, uniqueWords: counts.size };
+}
+
+// Proper-noun detection without a tagger: a word that is capitalized
+// somewhere in a chunk's raw text but never appears in lowercase anywhere
+// in the corpus is very likely a name (character, place) rather than a
+// sentence-initial common word — "Elizabeth" never occurs as "elizabeth"
+// in running prose, but "Dogs" (sentence-initial "Dogs bark") usually also
+// occurs as plain "dogs" elsewhere. This needs no NLP dependency and is
+// cheap over a whole corpus; it undercounts (single-mention names, or ones
+// that coincide with a common word, are missed), and roman numerals /
+// day-and-month names slip through as false positives (harmless — a
+// "swap" landing on one just produces an odd-but-still-unanswerable
+// negative, verified by retrieval like every other class here).
+const ENTITY_MIN_LEN = 3;
+const ROMAN_NUMERAL = /^[ivxlcdm]+$/;
+function buildEntityIndex(chunks) {
+  const capitalized = new Map(); // lowercase -> original-case display form
+  const lowercaseSeen = new Set();
+  const perChunkCapWords = chunks.map((chunk) => {
+    const words = String(chunk.text || '').match(/[A-Za-z']+/g) || [];
+    const caps = [];
+    for (const w of words) {
+      if (w.length < ENTITY_MIN_LEN) continue;
+      const lower = w.toLowerCase();
+      if (/^[A-Z]/.test(w)) {
+        caps.push(lower);
+        if (!capitalized.has(lower)) capitalized.set(lower, w);
+      } else lowercaseSeen.add(lower);
+    }
+    return caps;
+  });
+  const df = new Map();
+  perChunkCapWords.forEach((caps) => {
+    for (const w of new Set(caps)) {
+      if (lowercaseSeen.has(w) || STOPWORDS.has(w) || ROMAN_NUMERAL.test(w)) continue;
+      df.set(w, (df.get(w) || 0) + 1);
+    }
+  });
+  // A name appearing in nearly every chunk (a protagonist) is a weak
+  // negative candidate — swapping it in barely changes anything a reader
+  // (or the retriever) would find implausible. Keep entities confined to a
+  // minority of the corpus, so a swap is a genuine mismatch.
+  const maxDf = Math.max(2, Math.ceil(chunks.length * 0.4));
+  const entitySet = new Set([...df.entries()].filter(([, c]) => c >= 1 && c <= maxDf).map(([w]) => w));
+  return {
+    entities: [...entitySet],
+    display: (w) => capitalized.get(w) || w,
+    // Which of this corpus's entities occur in a piece of text — O(words
+    // in text) via tokenize + set membership, not a regex scan per entity
+    // per call (that was O(positives x entities) regex compilations,
+    // measured pathologically slow on a corpus with hundreds of detected
+    // names: Pride and Prejudice alone has 200+).
+    presentIn: (text) => tokenize(text).filter((w) => entitySet.has(w)),
+  };
 }
 
 function knownFrac(text, bloom, bits) {
@@ -481,7 +631,7 @@ async function loadCalibrationQueries(config, projectDir, log) {
   return out;
 }
 
-export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, lexicalIndex = null, log = () => {}, projectDir = null }) {
+export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, embedWordVecs = null, lexicalIndex = null, log = () => {}, projectDir = null }) {
   const skip = (reason) => {
     log(`Abstention calibration skipped: ${reason}; the artifact will report match_quality "unscored"`);
     return null;
@@ -499,6 +649,18 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     const bit = fnv1a(w, seed, commonWords.bits);
     return (commonWords.bloom[bit >> 3] >> (bit & 7)) & 1;
   });
+  // Single-word vector cache for maxSimFrac (comparison feature): the same
+  // content word recurs across many probe rows (a corpus's own vocabulary
+  // is finite), so caching avoids re-embedding it every time it appears
+  // in a query or a passage.
+  const wordVecCache = new Map();
+  const embedWordVec = embedWordVecs ? async (w) => {
+    if (!wordVecCache.has(w)) {
+      const vecs = await embedWordVecs(w);
+      wordVecCache.set(w, vecs.get(w) || new Float32Array(config.embedding.dims));
+    }
+    return wordVecCache.get(w);
+  } : null;
 
   // Nothing is held out at the corpus level: the earlier held-out-document
   // hard-negative class asked a titleQuestions template about an excluded
@@ -540,20 +702,26 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       .map((entry) => entry.hit);
   };
   // A chunk's text starts with its own heading, echoed as the first line
-  // (ingest.mjs's section-to-chunk join). A title-templated query's own
-  // words ARE the heading, so scoring coverage against the full text lets
-  // the heading echo ground the query for free — guaranteed coverage from
-  // a word the query only "found" because the builder put it there twice.
-  // Coverage should measure whether the passage BODY supports the query,
-  // not whether the query already knows the passage's own title.
-  const bodyOnly = (text) => {
+  // (ingest.mjs's section-to-chunk join). Excluding it entirely (the first
+  // attempt at this) was too strong a correction: a query that names the
+  // exact concept a heading names — "export buffer ownership" against a
+  // section titled exactly that — retrieves the right passage at rank 1,
+  // but with the heading discounted to zero, coverage1 sees no grounding
+  // at all and the fit, which weighs coverage several times heavier than
+  // d0 (see the design note below), can score a perfect hit as "none".
+  // Splitting heading from body lets coverageFrac count a heading match as
+  // real but partial evidence — see HEADING_COVERAGE_WEIGHT — rather than
+  // full credit (the original bug: a title-templated positive's own words
+  // ARE the heading, so full credit there is free, unearned coverage) or
+  // zero credit (this bug).
+  const splitHeadingBody = (text) => {
     const nl = text.indexOf('\n');
-    return nl === -1 ? text : text.slice(nl + 1);
+    return nl === -1 ? { heading: text, body: '' } : { heading: text.slice(0, nl), body: text.slice(nl + 1) };
   };
   // Signals must be computed the way the reader computes them from its own
   // search hits (complete/retrieval-abstention.mjs): d0, the rank-4 margin,
   // and the mean over the returned list.
-  const signalsFor = (text, hits, excludeSet = null) => {
+  const signalsFor = async (text, hits, excludeSet = null) => {
     const top = hits.slice(0, K);
     const d0 = top.length ? top[0].distance : 1;
     const margin = top.length > 1 ? top[Math.min(4, top.length - 1)].distance - d0 : 0;
@@ -571,16 +739,25 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // vector exclusion worked) while coverage1 stayed unchanged, because
     // the ablated document was still winning on BM25 and re-entering fusion.
     const fused = fusedTop(text, hits, excludeSet);
+    const passages = fused.slice(0, COVERAGE_TOP_PASSAGES).map((h) => splitHeadingBody(chunks[h.id]?.text || ''));
+    const coverage1 = coverageFrac(text, passages, isCommon);
+    // null when the caller didn't provide embedWordVecs (e.g. a kind-2
+    // external-encoder build, where word-level embedding would mean a live
+    // call to a host encoder per word — a cost this feature isn't asking
+    // anyone to pay yet).
+    const maxSim1 = embedWordVec ? await maxSimFrac(text, passages, isCommon, embedWordVec) : null;
     return {
       d0,
       margin,
       mean10,
       known_frac: knownFrac(text, bloom, bits),
-      [COVERAGE_FEAT]: coverageFrac(
-        text,
-        fused.slice(0, COVERAGE_TOP_PASSAGES).map((h) => bodyOnly(chunks[h.id]?.text || '')),
-        isCommon,
-      ),
+      [COVERAGE_FEAT]: coverage1,
+      [MAXSIM_FEAT]: maxSim1,
+      // The actual fit feature — see GROUNDING_FEAT's design note.
+      // Degrades to plain coverage1 when maxSim1 isn't available so a
+      // kind-2 build (no per-word encoder access) still gets a grounding
+      // term instead of losing one outright.
+      [GROUNDING_FEAT]: maxSim1 === null ? coverage1 : Math.max(coverage1, maxSim1),
     };
   };
 
@@ -633,32 +810,104 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
         ? topK.some((h) => h.id === sourceId)
         : topK.some((h) => (chunks[h.id]?.title || '').trim() === sourceTitle);
     };
-    // Positives: title/content-word templates, verified by retrieval. This
-    // is the ONE positive-generation family — no second "low-coverage"
-    // class built by swapping some of these words, because that class
-    // still inherited the contamination (half its words stayed passage-
-    // verbatim by construction) while adding a second generator signature
-    // for the model to key on instead of answerability. The single-family
-    // design is deliberate: whatever this generator's blind spots are,
-    // every negative below is built by the SAME process (ablate the same
-    // text), so the fit cannot tell positive from negative by which
-    // generator produced the query — only by what retrieval returns.
-    const positiveTemplates = [
+    // Positives: title/content-word templates, verified by retrieval.
+    // Every one of these copies its words from the target passage, so
+    // coverage1 is ~1.0 for the whole class by construction — not a
+    // generator-identity problem (every negative below is retrieval-
+    // verified the same way and paired 1:1 with a positive via ablation,
+    // so the fit cannot tell positive from negative by query shape), but
+    // a genuine blind spot: the fit never sees an answerable query with
+    // partial lexical overlap, so it has no evidence that low coverage
+    // can still mean "answered" — and leans on coverage harder than
+    // anything else as a result (measured: coverage weighted ~4x d0 in a
+    // fit trained on this class alone).
+    const baseTemplates = [
       ...titleQuestions(titles, Math.ceil(MAX_POSITIVES / 2), SEED ^ 0x51f15e),
       ...contentWordQuestions(chunks, Math.floor(MAX_POSITIVES / 2), SEED ^ 0xc0ffee, retainedPos),
     ];
-    for (const { text, sourceTitle, sourceId } of positiveTemplates) {
+    const basePositives = [];
+    for (const { text, sourceTitle, sourceId } of baseTemplates) {
       const hits = await search(text);
       if (verify(hits, sourceTitle, sourceId)) {
-        rows.push({ text, label: 1, sourceTitle, sourceId, ...signalsFor(text, hits) });
+        const row = { text, label: 1, sourceTitle, sourceId, ...(await signalsFor(text, hits)) };
+        rows.push(row);
+        basePositives.push(row);
       } else droppedPositives++;
+    }
+    if (basePositives.length < MIN_VERIFIED_POSITIVES) {
+      return skip(`only ${basePositives.length} of ${baseTemplates.length} templated queries verified by retrieval (need ${MIN_VERIFIED_POSITIVES})`);
+    }
+    const basePositiveD0 = basePositives.map((r) => r.d0).sort((a, b) => a - b);
+    const positiveMedianD0 = basePositiveD0[Math.floor(basePositiveD0.length / 2)];
+    // Encoder-guided substitution: swap some of a verified positive's
+    // content words for a same-corpus vocabulary word the encoder places
+    // close by cosine similarity, excluding words the source passage
+    // already contains, then re-verify by retrieval — a substituted query
+    // that no longer retrieves its source is dropped, not mislabeled.
+    // Retrieval verification is what makes this safe to mix with the base
+    // class: the label is earned the same way every other positive earns
+    // it, so its presence doesn't let the fit cheat on query shape — it
+    // only teaches the fit that partial lexical overlap can still be
+    // answerable, which the base class alone cannot. Vocabulary capped to
+    // the most frequent SUBSTITUTION_VOCAB_TOP corpus words (excludes
+    // hapax/rare words — typos, ids, proper nouns, corpus noise) and
+    // SUBSTITUTION_MIN_COS gates coherence: below it, a "nearest" neighbor
+    // in a sentence-trained encoder's word-level cosine is not actually
+    // related, just the least-far of a bad candidate pool — measured
+    // producing incoherent queries ("fourth location sits during layout")
+    // that still happened to retrieve their source on a small corpus.
+    const substWords = (t) => (String(t).toLowerCase().match(/[a-z0-9']+/g) || []);
+    const isSubstContent = (w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w);
+    const substDf = new Map();
+    for (const c of chunks) for (const w of new Set(substWords(c.text).filter(isSubstContent))) substDf.set(w, (substDf.get(w) || 0) + 1);
+    const substVocab = [...substDf.entries()].sort((a, b) => b[1] - a[1]).slice(0, SUBSTITUTION_VOCAB_TOP).map(([w]) => w);
+    const substWordVec = new Map();
+    const substVecOf = async (w) => {
+      if (!substWordVec.has(w)) {
+        const v = Float32Array.from(await embedQuery(w));
+        let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1;
+        substWordVec.set(w, v.map((x) => x / n));
+      }
+      return substWordVec.get(w);
+    };
+    for (const w of substVocab) await substVecOf(w);
+    const substCos = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += a[i] * b[i]; return d; };
+    const substPassageWords = ({ sourceId, sourceTitle }) => {
+      const ids = sourceId !== undefined ? [sourceId]
+        : retainedPos.filter((p) => (chunks[p].title || '').trim() === sourceTitle);
+      return new Set(ids.flatMap((id) => substWords(chunks[id]?.text || '')));
+    };
+    const substRng = rng(SEED ^ 0x5ab571);
+    let substitutedDropped = 0, substitutedKept = 0;
+    for (const pos of sample(basePositives, Math.min(SUBSTITUTION_BUDGET, basePositives.length), SEED ^ 0x5ab57)) {
+      const inPassage = substPassageWords(pos);
+      const toks = substWords(pos.text);
+      const out = [...toks];
+      let swapped = 0;
+      for (let i = 0; i < toks.length; i++) {
+        const w = toks[i];
+        if (!isSubstContent(w) || substRng() < 0.5) continue;
+        const wv = await substVecOf(w);
+        let best = null, bestCos = SUBSTITUTION_MIN_COS;
+        for (const v of substVocab) {
+          if (v === w || inPassage.has(v) || inPassage.has(v.replace(/s$/, '')) || v === `${w}s` || w === `${v}s`) continue;
+          const c = substCos(wv, substWordVec.get(v));
+          if (c > bestCos) { bestCos = c; best = v; }
+        }
+        if (best) { out[i] = best; swapped++; }
+      }
+      if (!swapped) { substitutedDropped++; continue; }
+      const text = out.join(' ');
+      const hits = await search(text);
+      if (verify(hits, pos.sourceTitle, pos.sourceId)) {
+        rows.push({ text, label: 1, sourceTitle: pos.sourceTitle, sourceId: pos.sourceId, genKind: 'substituted', ...(await signalsFor(text, hits)) });
+        substitutedKept++;
+      } else substitutedDropped++;
     }
     const positives = rows.filter((r) => r.label === 1);
     if (positives.length < MIN_VERIFIED_POSITIVES) {
-      return skip(`only ${positives.length} of ${positiveTemplates.length} templated queries verified by retrieval (need ${MIN_VERIFIED_POSITIVES})`);
+      return skip(`only ${positives.length} verified positives (need ${MIN_VERIFIED_POSITIVES})`);
     }
-    const positiveD0 = positives.map((r) => r.d0).sort((a, b) => a - b);
-    const positiveMedianD0 = positiveD0[Math.floor(positiveD0.length / 2)];
 
     // Human-written queries (runtime.calibrationQueries), when the corpus
     // ships them, are held out of the fit entirely — never trained on,
@@ -673,13 +922,13 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     for (const { text, sourceTitle, sourceId } of humanTemplates) {
       const hits = await search(text);
       if (verify(hits, sourceTitle, sourceId)) {
-        humanRows.push({ text, label: 1, sourceTitle, sourceId, ...signalsFor(text, hits) });
+        humanRows.push({ text, label: 1, sourceTitle, sourceId, ...(await signalsFor(text, hits)) });
       } else humanDropped++;
     }
 
     let droppedForeign = 0;
     for (const { text } of titleQuestions(FOREIGN_TITLE_BANK, FOREIGN_TITLE_BANK.length, SEED ^ 0xf03e16)) {
-      const sig = signalsFor(text, await search(text));
+      const sig = await signalsFor(text, await search(text));
       // An off-domain query that retrieves as strongly as a median positive
       // overlaps the corpus domain; its label is untrustworthy, so it stays
       // out of the fit — but it is scored and reported (eval-only) rather
@@ -690,7 +939,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       } else rows.push({ text, label: 0, negClass: 'easy', negativeKind: 'foreign-bank', ...sig });
     }
     for (const text of syntheticGibberish(GIBBERISH_QUERIES, SEED ^ 0x9166e11, bloom, bits)) {
-      rows.push({ text, label: 0, negClass: 'easy', negativeKind: 'synthetic-gibberish', ...signalsFor(text, await search(text)) });
+      rows.push({ text, label: 0, negClass: 'easy', negativeKind: 'synthetic-gibberish', ...(await signalsFor(text, await search(text))) });
     }
 
     // Ablation negatives (point 1) replace recombination as the load-bearing
@@ -756,20 +1005,70 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       // out of 56 verified positives.
       if (targets.size === 0 || retainedSet.size - targets.size < 1) continue;
       const hits = await searchExcluding(text, targets);
-      const sig = signalsFor(text, hits, targets);
+      const sig = await signalsFor(text, hits, targets);
       const stillClose = sig.d0 <= positiveRow.d0 + 0.05;
-      const stillGrounded = sig[COVERAGE_FEAT] >= 0.75
-        || (positiveRow[COVERAGE_FEAT] >= ABLATION_RELATIVE_COVERAGE_FLOOR
-          && sig[COVERAGE_FEAT] >= positiveRow[COVERAGE_FEAT] * 0.75);
+      const stillGrounded = sig[GROUNDING_FEAT] >= 0.75
+        || (positiveRow[GROUNDING_FEAT] >= ABLATION_RELATIVE_COVERAGE_FLOOR
+          && sig[GROUNDING_FEAT] >= positiveRow[GROUNDING_FEAT] * 0.75);
       if (stillClose || stillGrounded) ablationDropped++;
       else rows.push({ text, label: 0, negClass: 'hard', negativeKind: 'ablation', sourceId: positiveRow.sourceId, ...sig });
+    }
+
+    // Entity-swap negatives: ablation assumes excluding a passage's source
+    // document leaves the query genuinely unanswerable elsewhere in the
+    // corpus — true for topically distinct sections (docs, reference
+    // material), false for thematically uniform or narrative content
+    // (a novel's chapters share characters, settings, and themes, so
+    // excluding one chapter often leaves the query answerable by another).
+    // Measured on Pride and Prejudice: only 3 of 101 verified positives
+    // survived ablation as genuine hard negatives, well under
+    // MIN_HARD_NEGATIVES, and the corpus shipped unscored. A swapped-entity
+    // negative sidesteps the topical-uniqueness assumption entirely: take a
+    // verified positive that names a proper noun (character, place —
+    // detected corpus-wide, see buildEntityIndex) and substitute a
+    // different entity that never co-occurs with it, so the query becomes
+    // an entity combination that (as far as the corpus is concerned) never
+    // happened — genuinely unanswerable regardless of how uniform the
+    // corpus's themes are. Verified by retrieval like every other class
+    // here: kept only when it does NOT retrieve the original source.
+    const entityIndex = buildEntityIndex(chunks);
+    let entitySwapDropped = 0;
+    if (entityIndex.entities.length >= 2) {
+      const entityRng = rng(SEED ^ 0xe57171);
+      // Entities that occur anywhere in the source chunk(s) — excluded as
+      // replacement candidates (see below) — indexed once per positive via
+      // its own (small) chunk set rather than scanning every corpus
+      // entity's (potentially large) chunksOf per positive.
+      for (const positiveRow of positives) {
+        const { text, sourceId, sourceTitle } = positiveRow;
+        const sourceChunks = ablationTargets(positiveRow);
+        const present = entityIndex.presentIn(text);
+        if (!present.length) continue;
+        const from = present[Math.floor(entityRng() * present.length)];
+        const inSourceChunks = new Set();
+        for (const id of sourceChunks) for (const w of entityIndex.presentIn(chunks[id]?.text || '')) inSourceChunks.add(w);
+        // Prefer a replacement that never appears in the same chunk(s) as
+        // the source — a swap between two entities that already coexist
+        // there could still describe something the passage actually says.
+        const candidates = entityIndex.entities.filter((w) => w !== from && !inSourceChunks.has(w));
+        const pool = candidates.length ? candidates : entityIndex.entities.filter((w) => w !== from);
+        if (!pool.length) continue;
+        const to = pool[Math.floor(entityRng() * pool.length)];
+        const swapped = text.replace(new RegExp(`\\b${from}\\b`, 'i'), entityIndex.display(to));
+        if (swapped === text) continue;
+        const hits = await search(swapped);
+        if (verify(hits, sourceTitle, sourceId)) { entitySwapDropped++; continue; }
+        rows.push({
+          text: swapped, label: 0, negClass: 'hard', negativeKind: 'entity-swap', sourceId, ...(await signalsFor(swapped, hits)),
+        });
+      }
     }
 
     const negatives = rows.filter((r) => r.label === 0 && !r.evalOnly);
     if (negatives.length < MIN_NEGATIVES) return skip(`only ${negatives.length} negatives survived the overlap drop (need ${MIN_NEGATIVES})`);
     const hardNegatives = negatives.filter((r) => r.negClass === 'hard');
     if (hardNegatives.length < MIN_HARD_NEGATIVES) {
-      return skip(`only ${hardNegatives.length} ablation hard negatives survived verification (need ${MIN_HARD_NEGATIVES}); without them the fit cannot separate answerable from in-domain-unanswerable`);
+      return skip(`only ${hardNegatives.length} hard negatives survived verification (ablation + entity-swap, need ${MIN_HARD_NEGATIVES}); without them the fit cannot separate answerable from in-domain-unanswerable`);
     }
 
     // Weak band: retained-title questions whose source lands at rank 5..K on
@@ -785,7 +1084,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
         if (rows.filter((r) => r.label === -1).length >= 24) break;
         const hits = await search(text);
         const rank = hits.findIndex((h) => (chunks[h.id]?.title || '').trim() === sourceTitle) + 1;
-        if (rank >= 5 && rank <= K) rows.push({ text, label: -1, ...signalsFor(text, hits) });
+        if (rank >= 5 && rank <= K) rows.push({ text, label: -1, ...(await signalsFor(text, hits)) });
       }
     }
 
@@ -856,6 +1155,12 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       ? stage2Positives.length / stage2Negatives.length : 1;
     const fit = [...stage2Positives, ...stage2Negatives];
     const stage2WeightOf = (r) => (r.label === 0 ? balanceFactor : 1);
+    // Whether maxSim1 actually reached grounding1 on this build (reported
+    // in the summary below) — informational only now; grounding1 itself is
+    // never null (see its definition in signalsFor), so FEATS never
+    // changes shape here the way it used to when maxSim1 was a separate
+    // linear term.
+    const maxSimAvailable = fit.length > 0 && fit.every((r) => r[MAXSIM_FEAT] !== null);
     const scorerFor = (fitRows) => genericScorerFor(FEATS, fitRows, stage2WeightOf);
     const model = scorerFor(fit);
     const { mean, std, w, b } = model;
@@ -879,7 +1184,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       const train = shuffled.filter((_, i) => i % FOLDS !== fold);
       if (!train.some((r) => r.label === 1) || !train.some((r) => r.label === 0)) continue;
       const foldModel = scorerFor(train);
-      for (const r of test) heldout.push({ label: r.label, negClass: r.negClass, negativeKind: r.negativeKind, p: foldModel.prob(r) });
+      for (const r of test) heldout.push({ label: r.label, negClass: r.negClass, negativeKind: r.negativeKind, genKind: r.genKind, p: foldModel.prob(r) });
     }
     const heldoutPos = heldout.filter((r) => r.label === 1);
     // cvAuc and cvAucHard are the same number now that stage 2 fits only on
@@ -888,6 +1193,14 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // verify_pack callers reading cvAucHard specifically.
     const cvAuc = aucFor(heldoutPos, heldout.filter((r) => r.label === 0));
     const cvAucHard = cvAuc;
+    // Per-generator-class held-out AUC: the base template class alone
+    // tends to separate cleanly (its positives are all coverage ~1.0,
+    // which the fit leans on hard), which can mask the substituted class
+    // — the one actually testing "does partial lexical overlap still
+    // score as answerable" — scoring poorly. A regression here is exactly
+    // the failure mode a pooled number hides.
+    const cvAucBase = aucFor(heldoutPos.filter((r) => r.genKind === undefined), heldout.filter((r) => r.label === 0));
+    const cvAucSubstituted = aucFor(heldoutPos.filter((r) => r.genKind === 'substituted'), heldout.filter((r) => r.label === 0));
     const gateAuc = cvAuc ?? fitAuc;
     if (gateAuc === null || gateAuc < MIN_AUC) {
       return skip(`${cvAuc === null ? 'fit' : 'cross-validated'} AUC ${gateAuc === null ? 'n/a' : gateAuc.toFixed(3)} separating answerable from in-domain-unanswerable < ${MIN_AUC}`);
@@ -1017,11 +1330,59 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       text: r.text,
       ...(r.sourceId !== undefined ? { expectId: r.sourceId } : { expectTitle: r.sourceTitle }),
     }));
+    // maxSim1 comparison (see MAXSIM_FEAT): how would this feature alone
+    // separate positives from hard negatives, versus coverage1 doing the
+    // same job — computed the same way aucFor scores the real fit, so the
+    // two numbers are directly comparable. null when embedWordVecs wasn't
+    // provided (maxSim1 is null on every row in that case).
+    const maxSimRows = hardNegatives.length && positives.length && positives[0][MAXSIM_FEAT] !== null
+      ? { pos: positives.map((r) => ({ p: r[MAXSIM_FEAT] })), neg: hardNegatives.map((r) => ({ p: r[MAXSIM_FEAT] })) }
+      : null;
+    const coverageRows = { pos: positives.map((r) => ({ p: r[COVERAGE_FEAT] })), neg: hardNegatives.map((r) => ({ p: r[COVERAGE_FEAT] })) };
+    // The hard-negative comparison above tests "did we hide the answer" —
+    // ablation negatives share the positive's own query text, so they stay
+    // lexically close to it and can't show whether a feature survives a
+    // genuine reworded question. The substituted class (retrieval-verified,
+    // built by swapping words for corpus vocabulary NOT in the source
+    // passage — see the loop above) is a real paraphrase: same answer,
+    // deliberately reduced lexical overlap with its own source. A grounding
+    // feature that fights the semantic retriever's paraphrase tolerance
+    // should score substituted positives lower than base positives even
+    // though both are equally answerable; maxSim1's whole premise is that
+    // it shouldn't dip nearly as much as coverage1 does here.
+    const basePos = positives.filter((r) => r.genKind === undefined);
+    const substPos = positives.filter((r) => r.genKind === 'substituted');
+    const paraphraseRows = (feat) => (basePos.length && substPos.length && basePos[0][feat] !== null
+      ? {
+        meanBase: +(basePos.reduce((s, r) => s + r[feat], 0) / basePos.length).toFixed(4),
+        meanSubstituted: +(substPos.reduce((s, r) => s + r[feat], 0) / substPos.length).toFixed(4),
+        separationAuc: aucFor(basePos.map((r) => ({ p: r[feat] })), substPos.map((r) => ({ p: r[feat] }))),
+      }
+      : null);
+    const maxSimParaphrase = paraphraseRows(MAXSIM_FEAT);
+    const coverageParaphrase = paraphraseRows(COVERAGE_FEAT);
+    const maxSimVsCoverage = {
+      maxSimSeparationAuc: maxSimRows ? aucFor(maxSimRows.pos, maxSimRows.neg) : null,
+      coverageSeparationAuc: aucFor(coverageRows.pos, coverageRows.neg),
+      meanMaxSimPositive: maxSimRows ? +(maxSimRows.pos.reduce((s, r) => s + r.p, 0) / maxSimRows.pos.length).toFixed(4) : null,
+      meanMaxSimHardNegative: maxSimRows ? +(maxSimRows.neg.reduce((s, r) => s + r.p, 0) / maxSimRows.neg.length).toFixed(4) : null,
+      meanCoveragePositive: +(coverageRows.pos.reduce((s, r) => s + r.p, 0) / coverageRows.pos.length).toFixed(4),
+      meanCoverageHardNegative: +(coverageRows.neg.reduce((s, r) => s + r.p, 0) / coverageRows.neg.length).toFixed(4),
+      // separationAuc here means "distinguishes base from substituted" —
+      // for a paraphrase-robust feature, LOWER is better (0.5 = doesn't
+      // notice a paraphrase happened at all; both are positives).
+      paraphrase: { maxSim1: maxSimParaphrase, coverage1: coverageParaphrase },
+    };
     const summary = {
       method: 'self-templates-v5',
       seed: SEED,
       searchConfig: { k: K },
       verifiedPositiveQueries: positives.length,
+      positivesByGenKind: {
+        base: positives.filter((r) => r.genKind === undefined).length,
+        substituted: positives.filter((r) => r.genKind === 'substituted').length,
+      },
+      substitutedDropped,
       positivesDroppedAsUnretrievable: droppedPositives,
       // Point 5: human-written queries (runtime.calibrationQueries) are
       // held out of the fit entirely and validated here instead — the only
@@ -1042,13 +1403,18 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       // here as its own separating-power number since it no longer appears
       // inside fitAuc/cvAuc at all (point 3).
       stage1FloorAuc: stage1FloorAuc === null ? null : +stage1FloorAuc.toFixed(6),
-      // Ablation negatives are the only hard-negative source: same query
-      // text as a verified positive, scored with the answer excluded, so
-      // the model cannot separate positive from negative on anything but
-      // what the top passages actually contain — see the comment above the
-      // ablation loop.
+      // Ablation is the primary hard-negative source: same query text as a
+      // verified positive, scored with the answer excluded, so the model
+      // cannot separate positive from negative on anything but what the
+      // top passages actually contain — see the comment above the ablation
+      // loop. Entity-swap tops it up on corpora where ablation alone
+      // starves (thematically uniform / narrative content — see the
+      // comment above that loop).
       ablationNegativeQueries: negatives.filter((r) => r.negativeKind === 'ablation').length,
       ablationDroppedAsSuspectedAnswerable: ablationDropped,
+      entitySwapNegativeQueries: negatives.filter((r) => r.negativeKind === 'entity-swap').length,
+      entitySwapDroppedAsStillAnswerable: entitySwapDropped,
+      corpusEntitiesDetected: entityIndex.entities.length,
       weakQueries: weakP.length,
       weakDroppedAsIndistinguishableFromNegatives: allWeakP.length - weakP.length,
       // fitAuc/cvAuc are positives-vs-ablation-negatives only (stage 2 fits
@@ -1063,16 +1429,37 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       fitAuc: fitAuc === null ? null : +fitAuc.toFixed(6),
       cvAuc: cvAuc === null ? null : +cvAuc.toFixed(6),
       cvAucHard: cvAucHard === null ? null : +cvAucHard.toFixed(6),
+      // Per-generator-class held-out AUC: a regression specific to the
+      // substituted (low-coverage) class is exactly the failure a pooled
+      // number can hide, since the base class alone tends to separate
+      // cleanly. null means too few held-out rows of that class landed in
+      // any fold to compute it.
+      cvAucByGenKind: {
+        base: cvAucBase === null ? null : +cvAucBase.toFixed(6),
+        substituted: cvAucSubstituted === null ? null : +cvAucSubstituted.toFixed(6),
+      },
       hardThresholdOverlap: hardOverlap,
       hardThresholdClampedFrom: hardRaw > HARD_CEILING ? Number(hardRaw.toFixed(6)) : null,
       vocab: { uniqueWords, keptWords, minCount },
       coverage: { topPassages: COVERAGE_TOP_PASSAGES, commonWords: commonWords.commonWords, commonDfCap: commonWords.dfCap },
+      // Standalone separation power of coverage1 and maxSim1 (see
+      // GROUNDING_FEAT's design note) — what each grounding signal does
+      // alone, not what grounding1 = max(coverage1, maxSim1) does once
+      // it's the one term the fit actually sees.
+      maxSimVsCoverage,
+      maxSimInFit: maxSimAvailable,
     };
-    // features[]/weights[] carry only the base topic features; the coverage
-    // term rides in asset.coverage so a reader that predates it scores the
-    // topic-only model against the same thresholds (conservative — it lacks
-    // a term that is positive for answerable queries) instead of feeding an
-    // unknown feature name NaN into the logistic.
+    // features[]/weights[] carry only the base topic features; grounding1
+    // rides in asset.coverage (name kept for backward compatibility — see
+    // below) so a reader that predates it scores the topic-only model
+    // against the same thresholds (conservative — it lacks a term that is
+    // positive for answerable queries) instead of feeding an unknown
+    // feature name NaN into the logistic. A reader with per-word encoder
+    // access (asset.coverage.useMaxSim + embedWords provided) computes
+    // max(coverageFrac, maxSimFrac); one without either just computes
+    // coverageFrac — both score the same weight/mean/std, since
+    // grounding1 degrades to coverage1 exactly the same way at build time
+    // when maxSim1 wasn't available (see signalsFor).
     const asset = {
       version: 1,
       corpus: config.name,
@@ -1084,12 +1471,13 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       bias: b,
       coverage: {
         weight: w[BASE_FEATS.length],
-        mean: mean[COVERAGE_FEAT],
-        std: std[COVERAGE_FEAT],
+        mean: mean[GROUNDING_FEAT],
+        std: std[GROUNDING_FEAT],
         minWordLen: COVERAGE_MIN_WORD_LEN,
         stopwords: [...COVERAGE_STOPWORDS],
         topK: COVERAGE_TOP_PASSAGES,
         commonWordWeight: COVERAGE_COMMON_WORD_WEIGHT,
+        useMaxSim: maxSimAvailable,
         commonBloom: {
           bits: commonWords.bits,
           hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'],

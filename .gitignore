@@ -143,6 +143,8 @@ examples/legacy/range-artifact-demo/static/dist/
 # Local working notes and one-off bundles
 /AWS_BENCHMARK_BUNDLE.md
 /commit*.txt
+/benchmark_nytimes.js
+/docs-search-student/
 
 # BEIR benchmark — downloaded datasets, converted records/packs, raw+scored
 # results. Commit the adapter scripts and config.json, not the data.

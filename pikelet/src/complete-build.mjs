@@ -57,8 +57,13 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
       calibrationBytes = await fs.readFile(path.resolve(projectDir, encoder.calibrationPath));
     } else if (runtime.calibration === 'auto') {
       const embedQuery = async (text) => (await (await getEmbedder()).embed(`${declaration.prefixPolicy?.query || ''}${text}`)).vector;
+      // Word-level vectors for maxSimFrac (comparison feature — see
+      // calibrate.mjs's design note): no query/passage prefix, since a
+      // single word is not itself a query needing an instruction prefix —
+      // that would distort the word's own meaning vector for no benefit.
+      const embedWordVecs = async (text) => (await getEmbedder()).embedWords(text);
       const lexicalIndex = openLexicalIndex(lexical.bytes);
-      const calibrated = await calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, lexicalIndex, log, projectDir });
+      const calibrated = await calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, embedWordVecs, lexicalIndex, log, projectDir });
       if (calibrated) {
         calibrationBytes = Buffer.from(JSON.stringify(calibrated.calibrationJson), 'utf8');
         // Retrieval-verified positives double as golden queries: embedded
@@ -71,15 +76,33 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         calibrationSummary = calibrated.summary;
         const {
           verifiedPositiveQueries, foreignNegativeQueries, syntheticGibberishQueries,
-          ablationNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard, humanCalibrationQueries, realQueryAuc,
-          realQueryAbstentionRate,
+          ablationNegativeQueries, entitySwapNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard,
+          humanCalibrationQueries, realQueryAuc, realQueryAbstentionRate, maxSimVsCoverage, maxSimInFit,
         } = calibrated.summary;
         const validation = humanCalibrationQueries
           ? `${humanCalibrationQueries} human queries: AUC ${realQueryAuc ?? 'n/a'}, abstention rate ${((realQueryAbstentionRate ?? 0) * 100).toFixed(0)}%`
           : 'no human queries (runtime.calibrationQueries) — validated by cvAucHard only';
-        log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${ablationNegativeQueries} ablation hard negatives / `
-          + `${foreignNegativeQueries} off-domain / ${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
+        log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${ablationNegativeQueries} ablation + `
+          + `${entitySwapNegativeQueries} entity-swap hard negatives / ${foreignNegativeQueries} off-domain / `
+          + `${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
           + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
+        log(`  grounding1 = max(coverage1, maxSim1): ${maxSimInFit ? 'maxSim1 available, blended in' : 'maxSim1 unavailable, coverage1 only'}`);
+        // Standalone separation power of each half of grounding1 (see
+        // calibrate.mjs's GROUNDING_FEAT design note); logged so it's
+        // visible without pulling apart the artifact.
+        if (maxSimVsCoverage?.maxSimSeparationAuc !== null && maxSimVsCoverage !== undefined) {
+          log(`  maxSim1 vs coverage1 vs ablation hard negatives (standalone, not the blended grounding1): separation AUC `
+            + `${maxSimVsCoverage.maxSimSeparationAuc ?? 'n/a'} vs ${maxSimVsCoverage.coverageSeparationAuc ?? 'n/a'}; `
+            + `mean positive/hard-negative ${maxSimVsCoverage.meanMaxSimPositive}/${maxSimVsCoverage.meanMaxSimHardNegative} `
+            + `vs ${maxSimVsCoverage.meanCoveragePositive}/${maxSimVsCoverage.meanCoverageHardNegative}`);
+          const para = maxSimVsCoverage.paraphrase;
+          if (para?.coverage1) {
+            log(`  maxSim1 vs coverage1 on real paraphrases (base vs. substituted positives, lower AUC = more `
+              + `paraphrase-robust): maxSim1 ${para.maxSim1 ? para.maxSim1.separationAuc : 'n/a'} `
+              + `(mean ${para.maxSim1 ? para.maxSim1.meanBase : 'n/a'} -> ${para.maxSim1 ? para.maxSim1.meanSubstituted : 'n/a'}) `
+              + `vs coverage1 ${para.coverage1.separationAuc} (mean ${para.coverage1.meanBase} -> ${para.coverage1.meanSubstituted})`);
+          }
+        }
       }
     }
   } finally {
@@ -138,12 +161,23 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         fitAuc: calibrationSummary.fitAuc,
         cvAuc: calibrationSummary.cvAuc,
         cvAucHard: calibrationSummary.cvAucHard,
+        // A regression specific to the substituted (low-coverage) class is
+        // exactly the failure the pooled numbers above can hide — see
+        // calibrate.mjs's design note.
+        cvAucByGenKind: calibrationSummary.cvAucByGenKind,
         verifiedPositiveQueries: calibrationSummary.verifiedPositiveQueries,
+        positivesByGenKind: calibrationSummary.positivesByGenKind,
         ablationNegativeQueries: calibrationSummary.ablationNegativeQueries,
+        entitySwapNegativeQueries: calibrationSummary.entitySwapNegativeQueries,
         weakQueries: calibrationSummary.weakQueries,
         humanCalibrationQueries: calibrationSummary.humanCalibrationQueries,
         realQueryAuc: calibrationSummary.realQueryAuc,
         realQueryAbstentionRate: calibrationSummary.realQueryAbstentionRate,
+        // Standalone separation power of coverage1 vs. maxSim1 (not what
+        // the shipped grounding1 = max(coverage1, maxSim1) term does —
+        // see calibrate.mjs's GROUNDING_FEAT design note).
+        maxSimVsCoverage: calibrationSummary.maxSimVsCoverage,
+        maxSimInFit: calibrationSummary.maxSimInFit,
       },
     } : { calibration: null }),
   }), 'utf8');

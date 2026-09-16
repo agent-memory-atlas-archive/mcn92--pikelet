@@ -618,8 +618,8 @@ export async function openPikeletFile(input, options = {}) {
         let scoreQuality;
         let encoderInfo;
         let encoderVerified = null;
-        const retrievalScorer = () => {
-            const scorer = createAbstentionScorer(calibrationJson.asset, base64Bytes(calibrationJson.vocabBloomBase64));
+        const retrievalScorer = (embedWords = null) => {
+            const scorer = createAbstentionScorer(calibrationJson.asset, base64Bytes(calibrationJson.vocabBloomBase64), embedWords);
             const VERDICTS = { answer: 'strong', weak: 'weak', abstain: 'none' };
             return async (hits, context, fusedHits) => {
                 if (!scorer) return { match_quality: 'unscored' };
@@ -639,22 +639,23 @@ export async function openPikeletFile(input, options = {}) {
                 // skew its verdict.
                 const passageSource = fusedHits?.length ? fusedHits : hits;
                 // A record's text starts with its own heading echoed as the
-                // first line (ingest.mjs's section-to-chunk join); coverage
-                // is meant to measure whether the passage BODY supports the
-                // query, not whether the query already knows the heading —
-                // stripped here to match calibrate.mjs's bodyOnly exactly
-                // (build-time and serve-time coverage must agree, or the
-                // fitted thresholds are scoring a different signal than the
-                // one they were calibrated against).
-                const bodyOnly = (text) => {
+                // first line (ingest.mjs's section-to-chunk join). A
+                // heading match still grounds the query but at reduced
+                // credit — see retrieval-abstention.mjs's coverageFrac and
+                // calibrate.mjs's HEADING_COVERAGE_WEIGHT, which this split
+                // must match exactly (build-time and serve-time coverage
+                // must agree, or the fitted thresholds are scoring a
+                // different signal than the one they were calibrated
+                // against).
+                const splitHeadingBody = (text) => {
                     const nl = String(text || '').indexOf('\n');
-                    return nl === -1 ? text : text.slice(nl + 1);
+                    return nl === -1 ? { heading: text, body: '' } : { heading: text.slice(0, nl), body: text.slice(nl + 1) };
                 };
                 const topTexts = scorer.usesPassage && passageSource.length
                     ? (await Promise.all(passageSource.slice(0, scorer.passagesNeeded || 1)
-                        .map((hit) => hydrate(hit.id)))).map((record) => bodyOnly(record?.text))
+                        .map((hit) => hydrate(hit.id)))).map((record) => splitHeadingBody(record?.text))
                     : [];
-                const scored = scorer.score(context.text, hits, topTexts);
+                const scored = await scorer.score(context.text, hits, topTexts);
                 return { match_quality: VERDICTS[scored.verdict] || scored.verdict, confidence: scored.p };
             };
         };
@@ -771,7 +772,12 @@ export async function openPikeletFile(input, options = {}) {
                 const { vector } = await embedder.embed(`${declaration.prefixPolicy?.query || ''}${text}`);
                 return { vector: toFloat32(vector, dim, 'inline transformer encoder'), text };
             };
-            scoreQuality = retrievalScorer();
+            // grounding1's maxSim1 half (asset.coverage.useMaxSim) needs
+            // per-word encoder vectors, not the per-query embedding above
+            // — same embedder, different pooling (embedWords), so it only
+            // exists for kind-3 (the only profile with a reader-owned
+            // encoder to call per word).
+            scoreQuality = retrievalScorer(async (text) => (await ensureEmbedder()).embedder.embedWords(text));
         } else {
             throw new Error(`unsupported query-interpretation kind ${qiKind}`);
         }

@@ -307,6 +307,7 @@ async function callVerifyPack(packs, args) {
     calibration: calibration ? {
       cvAuc: calibration.cvAuc,
       cvAucHard: calibration.cvAucHard,
+      cvAucByGenKind: calibration.cvAucByGenKind ?? null,
       fitAuc: calibration.fitAuc,
       humanCalibrationQueries: calibration.humanCalibrationQueries ?? 0,
       realQueryAuc: calibration.realQueryAuc ?? null,
@@ -315,7 +316,8 @@ async function callVerifyPack(packs, args) {
         + 'realQueryAbstentionRate when humanCalibrationQueries > 0 (the stronger signal — it is '
         + 'measured on queries the fit never trained on). A high realQueryAbstentionRate means real '
         + 'paraphrases get wrongly withheld even if cvAucHard looks fine — "none" verdicts should '
-        + 'not be trusted without showAbstained.',
+        + 'not be trusted without showAbstained. cvAucByGenKind.substituted scoring notably worse '
+        + 'than .base means the fit leans on lexical coverage more than genuine answerability.',
     } : null,
     ...(goldenResults.length === 0 && probeResults.length === 0
       ? { note: 'This pack embeds no runnable tests (older build, or calibration was skipped); encoder and integrity state above still apply.' }

@@ -64,5 +64,27 @@ export function createWordPiece(vocabText) {
       ids.push(SEP);
       return ids;
     },
+    // Same as encode(), but also reports which basic (whitespace/punct-
+    // split) word each output token belongs to, as a same-length array of
+    // word indices (CLS and SEP get -1 — they belong to no word). A word
+    // that WordPiece splits into several sub-tokens (e.g. "quantization"
+    // -> "quant" + "##ization") reports the same word index for all of
+    // them, so a caller building one vector per word can average or
+    // otherwise pool the sub-token hidden states back into a single
+    // word-level vector — needed for MaxSim-style token-level grounding,
+    // where coverage must be measured in words, not WordPiece pieces.
+    encodeWithWordMap(text) {
+      const ids = [CLS];
+      const wordOf = [-1];
+      const words = basicTokenize(text);
+      words.forEach((word, wi) => {
+        const pieces = wordpiece(word);
+        ids.push(...pieces);
+        for (let i = 0; i < pieces.length; i++) wordOf.push(wi);
+      });
+      ids.push(SEP);
+      wordOf.push(-1);
+      return { ids, wordOf, words };
+    },
   };
 }

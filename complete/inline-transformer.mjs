@@ -112,11 +112,70 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
     return { vector: pooled, text, windows };
   }
 
+  // Per-word vectors from the same forward pass embed() already runs — the
+  // kernel's outHidden buffer holds every token's final-layer hidden state
+  // (encoder.cpp's encoder_forward does no pooling itself; JS pools it),
+  // so this is not a second, slower embedding path: it is the same
+  // forward pass, with the per-token buffer copied out and pooled per
+  // WORD (via encodeWithWordMap's word alignment, merging WordPiece
+  // sub-tokens like "quant"+"##ization" into one vector) instead of
+  // discarded after sentence-level pooling. Used for MaxSim-style
+  // token-level grounding (complete/retrieval-abstention.mjs, calibrate.
+  // mjs), an alternative to coverage1's exact/stemmed word match that
+  // measures semantic closeness instead of lexical identity — so a query
+  // and passage that use different words for the same idea can still
+  // ground each other, the case coverage1 structurally cannot handle.
+  // Windowing/CLS-pooling limits mirror embed(): a word that falls past
+  // the first window under CLS pooling, or past the last window under
+  // mean pooling's cap, has no vector and is left out of the result.
+  async function embedWords(text) {
+    const { ids: allIds, wordOf: allWordOf, words } = tokenizer.encodeWithWordMap(String(text || ''));
+    const interior = allIds.slice(1, -1);
+    const interiorWordOf = allWordOf.slice(1, -1);
+    const windowLen = maxSeq - 2;
+    const windows = Math.max(1, Math.ceil(interior.length / windowLen));
+    const windowsToEncode = usesClsPooling ? 1 : windows;
+    // Accumulate per-word sums, then average — a word split into several
+    // WordPiece pieces gets one vector, not several.
+    const wordSums = words.map(() => new Float64Array(dim));
+    const wordCounts = words.map(() => 0);
+    for (let w = 0; w < windowsToEncode; w++) {
+      const idSlice = interior.slice(w * windowLen, (w + 1) * windowLen);
+      const wordOfSlice = interiorWordOf.slice(w * windowLen, (w + 1) * windowLen);
+      const tokenIds = [allIds[0], ...idSlice, allIds[allIds.length - 1]];
+      new Int32Array(EM.HEAP32.buffer, idsPtr, tokenIds.length).set(tokenIds);
+      const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0);
+      if (rc !== tokenIds.length) throw new Error(`inline encoder failed: ${rc}`);
+      const hidden = new Float32Array(EM.HEAPF32.buffer, hiddenPtr, tokenIds.length * dim);
+      // Offset by 1: tokenIds[0] is [CLS], so idSlice's tokens start at
+      // hidden row 1, matching wordOfSlice's own indexing into idSlice.
+      for (let t = 0; t < wordOfSlice.length; t++) {
+        const wi = wordOfSlice[t];
+        if (wi === -1) continue;
+        const row = (t + 1) * dim;
+        for (let d = 0; d < dim; d++) wordSums[wi][d] += hidden[row + d];
+        wordCounts[wi]++;
+      }
+    }
+    const vectors = new Map();
+    for (let wi = 0; wi < words.length; wi++) {
+      if (wordCounts[wi] === 0) continue;
+      const v = new Float32Array(dim);
+      let norm = 0;
+      for (let d = 0; d < dim; d++) { v[d] = wordSums[wi][d] / wordCounts[wi]; norm += v[d] ** 2; }
+      norm = Math.sqrt(norm) || 1;
+      for (let d = 0; d < dim; d++) v[d] /= norm;
+      vectors.set(words[wi], v);
+    }
+    return vectors;
+  }
+
   const embedder = {
     declaration,
     dim,
     maxSeq,
     embed,
+    embedWords,
     dispose() {
       EM._free(hiddenPtr);
       EM._free(idsPtr);
