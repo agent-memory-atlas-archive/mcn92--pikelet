@@ -42,6 +42,22 @@ export function createAbstentionScorer(asset, bloomBytes) {
     // reduced weight — mirrors pikelet/src/calibrate.mjs
     // coverageFrac exactly (the weight ships in the asset).
     const commonWordWeight = coverageCfg?.commonWordWeight ?? 1 / 3;
+    // Light suffix stripping so "quantize" grounds against "quantization"
+    // and "configure" against "configuration" — kept byte-identical to
+    // pikelet/src/calibrate.mjs's stem() (same suffix list and order):
+    // present() otherwise only forgave plurals, so any word-form mismatch
+    // at all scored zero coverage for a passage that plainly answers the
+    // query. Deliberately conservative (STEM_MIN_LEN guards short words
+    // like "king" from over-stripping); not a general stemmer.
+    const STEM_MIN_LEN = 4;
+    const STEM_SUFFIXES = ['ization', 'isation', 'ication', 'ation', 'ition', 'tion', 'ing', 'ed', 'ate', 'ize', 'ise'];
+    function stem(w) {
+        for (const suf of STEM_SUFFIXES) {
+            if (w.length - suf.length >= STEM_MIN_LEN && w.endsWith(suf)) return w.slice(0, -suf.length);
+        }
+        if (w.length - 1 >= STEM_MIN_LEN && w.endsWith('e')) return w.slice(0, -1);
+        return w;
+    }
     function coverageFrac(text, passageTexts) {
         const content = (String(text).toLowerCase().match(/[a-z0-9']+/g) || [])
             .filter((w) => w.length >= coverageMinLen && !coverageStopwords.has(w));
@@ -50,9 +66,12 @@ export function createAbstentionScorer(asset, bloomBytes) {
         const weightSum = weights.reduce((a, c) => a + c, 0);
         let best = 0;
         for (const passageText of passageTexts || []) {
-            const passage = new Set(String(passageText || '').toLowerCase().match(/[a-z0-9']+/g) || []);
+            const passageWords = String(passageText || '').toLowerCase().match(/[a-z0-9']+/g) || [];
+            const passage = new Set(passageWords);
+            const passageStems = new Set(passageWords.map(stem));
             const present = (w) => passage.has(w) || passage.has(`${w}s`) || passage.has(`${w}es`)
-                || (w.endsWith('s') && passage.has(w.slice(0, -1)));
+                || (w.endsWith('s') && passage.has(w.slice(0, -1)))
+                || passageStems.has(stem(w));
             const grounded = content.reduce((sum, w, i) => sum + (present(w) ? weights[i] : 0), 0);
             best = Math.max(best, grounded / weightSum);
         }

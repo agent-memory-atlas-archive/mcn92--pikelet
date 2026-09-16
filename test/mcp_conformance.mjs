@@ -183,25 +183,24 @@ await withServer(async ({ send, waitFor }) => {
     check('search inputSchema declares showAbstained as boolean',
         searchTool.inputSchema.properties.showAbstained?.type === 'boolean');
 
-    const withheld = await call(1, { query: 'abstained query' });
-    check('a none verdict withholds results by default',
-        withheld.sections[0].matchQuality === 'none' && withheld.sections[0].results.length === 0);
-    check('withheld response carries a note pointing at showAbstained',
-        typeof withheld.note === 'string' && withheld.note.includes('showAbstained'));
-
-    const shown = await call(2, { query: 'abstained query', showAbstained: true });
-    check('showAbstained: true surfaces the withheld result',
+    const shown = await call(1, { query: 'abstained query' });
+    check('a none verdict shows results by default (showAbstained defaults true)',
         shown.sections[0].matchQuality === 'none' && shown.sections[0].results.length === 1
         && shown.sections[0].results[0].id === 1);
+    check('default-shown response carries a caveat note, not a withholding one',
+        typeof shown.note === 'string' && shown.note.includes('weigh'));
+
+    const withheld = await call(2, { query: 'abstained query', showAbstained: false });
+    check('showAbstained: false withholds results under none',
+        withheld.sections[0].matchQuality === 'none' && withheld.sections[0].results.length === 0);
     check('showAbstained never changes matchQuality or confidence',
         shown.sections[0].matchQuality === withheld.sections[0].matchQuality
         && shown.sections[0].confidence === withheld.sections[0].confidence);
-    check('showAbstained response still notes the abstention, differently worded',
-        typeof shown.note === 'string' && shown.note.includes('shown anyway'));
+    check('withheld response points back at showAbstained: false to recover the note',
+        typeof withheld.note === 'string' && withheld.note.includes('showAbstained: false'));
 
-    const answered = await call(3, { query: 'what is a stub', showAbstained: true });
-    check('a strong verdict carries no note even with showAbstained',
-        answered.note === undefined && answered.sections[0].matchQuality === 'strong');
+    const answered = await call(3, { query: 'what is a stub' });
+    check('a strong verdict carries no note', answered.note === undefined && answered.sections[0].matchQuality === 'strong');
 
     // A rejected call is a tool error (isError, plain text), not JSON — call
     // its own protocol round trip directly instead of the JSON-parsing helper.

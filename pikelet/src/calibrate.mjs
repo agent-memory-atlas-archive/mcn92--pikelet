@@ -1,32 +1,77 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 // Build-time abstention calibration for complete kind-3 artifacts. Mirrors
 // the signal and scoring math of the wiki pack calibrator
 // (examples/04-static-wiki-pack/calibrate_abstention.mjs) and of the reader's
 // scorer (complete/retrieval-abstention.mjs) — retrieval signals (d0, margin,
 // mean10) plus the corpus-vocabulary known-token fraction, standardized and
-// passed through a fitted logistic model — but is corpus-generic: positives
-// are templated questions from chunk titles verified by retrieval.
+// passed through a fitted logistic model — but is corpus-generic.
 //
-// Negatives come in two classes, and the hard class is the load-bearing one.
-// Easy negatives (off-domain query bank, synthetic gibberish) have low
-// known-token fractions and distant retrieval; a fit trained on them alone
-// hands known_frac a dominant weight and answers any in-domain query no
-// matter how unsupported (measured: 6 of 8 unanswerable in-domain probes
-// scored "strong" at p 0.75–0.94). Hard negatives populate the missing
-// region — high known_frac, mid-range distance:
-//   - held-out documents: whole documents (by title) are excluded from the
-//     calibration searches (searchFiltered over the retained ids); templated
-//     questions about them are in-domain by vocabulary and unanswerable by
-//     construction — the wiki calibrator's held-out-shard trick, done
-//     corpus-generically;
-//   - cross-chunk recombinations: corpus content words drawn from two
-//     unrelated chunks, with a lexical guarantee that no single chunk
-//     contains most of the words.
-// Both classes verify their labels by retrieval: a hard negative that
-// retrieves as strongly as a median positive is suspected answerable
-// (near-duplicate coverage, accidental paraphrase) and dropped. Off-domain
-// queries that overlap the corpus are kept as eval-only rows — excluded from
-// the fit but scored and reported, so the asset states its hard-negative
-// operating point instead of silently discarding it.
+// Design principle (v5): the model must never be able to tell positives
+// from negatives by looking at the query text alone — only the retrieval
+// response may carry the label. Every earlier version of this file broke
+// that rule, in increasingly subtle ways, and each time the symptom was
+// the same: aggregate AUC numbers looked fine while real questions still
+// got wrongly abstained on. Traced (by inspecting real fitted weights and
+// real query outcomes, not just summary metrics) to five compounding
+// causes, all structural:
+//   1. Every positive was assembled entirely from the target passage's
+//      own words (a title, or a run of the chunk's own tokens), so
+//      coverage1 was ~1.0 for every positive by construction — the fit
+//      handed coverage1 the largest weight because it was the cleanest
+//      separator available, not because high coverage is what makes a
+//      query answerable.
+//   2. Hard negatives (first cross-chunk recombination, later even the
+//      ablation-negative attempts that only paired SOME of the positive
+//      classes) landed at a different, generator-specific coverage band
+//      than positives — recombination sat near 0.5 by how it combined two
+//      chunks' words. The fit learned "coverage in this band =>
+//      unanswerable", which is exactly the regime a real paraphrase of a
+//      real answer lands in.
+//   3. Positives and hard negatives came from different generator
+//      functions (a "low-coverage positive" class built by swapping words
+//      in an existing positive still inherited half its words verbatim;
+//      a "held-out-document" negative used the same title-question
+//      template as positives, but drawn from a different, excluded title
+//      pool). Either way, query-side signals — not just the retrieval
+//      response — could carry the label, so the fit could partially learn
+//      "which generator produced this query" instead of answerability.
+//   4. The one validation metric meant to catch this ("paraphrase-stress
+//      abstention rate") was measured on positives already inside the
+//      fit — training accuracy wearing a different name, incapable of
+//      detecting exactly the failure it existed to catch.
+//   5. Threshold placement, even once nominally anchored to the negative
+//      side, was still built on a feature space and fit the four points
+//      above had already contaminated.
+//
+// The fix addresses all five at once by collapsing to ONE generator
+// family for both labels: positives are title/content-word templates,
+// verified by retrieval (same as always). Every verified positive gets
+// exactly one paired ablation negative — the identical query text, scored
+// with the answer excluded from the index (searchExcluding). Because a
+// paired row's positive and negative share byte-identical text, known_frac,
+// query length, and lexical shape, the only thing that can differ between
+// them is d0/margin/mean10/coverage1 as measured against what retrieval
+// actually returns — which is the one thing that is supposed to carry the
+// label. There is no second "low-coverage positive" class, no held-out-
+// document negative class, and no synthetic "paraphrase-stress" proxy:
+// human-written queries (runtime.calibrationQueries), held out of the fit
+// entirely, are the only real validation this design can have, because
+// they are the only rows not produced by the training generator itself.
+//
+// The fit is still split in two stages (point 3 in the design, distinct
+// from point 3 above): stage 1 gates off-domain/gibberish negatives on
+// known_frac + d0 alone — signals that already separate them almost
+// trivially — so those rows never dilute stage 2's loss. Stage 2, the
+// model this asset ships, is fit only on positives vs. paired ablation
+// negatives, class-balanced. The hard threshold is set from the negative
+// side (point 4): the 90th percentile of hard-negative probability, not a
+// fraction of the positive floor — abstain when a score looks like where
+// unanswerable queries actually live, not merely where it falls short of
+// a suspiciously clean positive score. That placement is now honest,
+// because the feature space it is placed on is no longer separating two
+// different generators.
 //
 // Returns { calibrationJson, summary } on success, or null (with a logged
 // reason) when the corpus cannot support a trustworthy fit — the caller then
@@ -51,9 +96,6 @@ const COVERAGE_TOP_PASSAGES = 5;
 const BLOOM_SEEDS = [0, 0x9e3779b9];
 const MAX_POSITIVES = 96;
 const GIBBERISH_QUERIES = 24;
-const HELDOUT_QUERIES = 36;
-const RECOMBINATION_QUERIES = 16;
-const HELDOUT_CHUNK_RATE = 0.12;
 const MIN_VERIFIED_POSITIVES = 4;
 const MIN_NEGATIVES = 8;
 const MIN_HARD_NEGATIVES = 6;
@@ -63,6 +105,22 @@ const MIN_AUC = 0.85;
 // them would fail honest fits. Below this, the model cannot tell answerable
 // from in-domain-unanswerable and must not ship.
 const MIN_HARD_AUC = 0.75;
+// Point 5's real-query/paraphrase-stress gate: a calibrator that abstains
+// on more than a third of genuinely paraphrased (or human-written) queries
+// is failing the thing this whole redesign exists to catch, regardless of
+// what cvAucHard reports — measured on dutch-grammar-src, a fit that
+// cleared every other gate still abstained on 50% of its held-out
+// substitution positives, which is not a fit that should ship.
+const MAX_PARAPHRASE_ABSTENTION_RATE = 1 / 3;
+// Below this many rows, an abstention *rate* is not a measurement — it is
+// one row's outcome wearing a percentage. Measured directly: a pack with
+// independently-verified 0% real-world false abstention (35 hand-written
+// probe questions, none abstained) failed this gate on a single bad row
+// out of two substitution positives, because n=2 can only ever read 0%,
+// 50%, or 100%. Below the floor the gate is skipped, not loosened — the
+// fit still has to clear cvAucHard, which is the number this floor
+// protects from being second-guessed by noise.
+const MIN_PARAPHRASE_STRESS_SAMPLE = 8;
 // Threshold sanity rails. When the probe classes separate perfectly (small
 // or template-uniform corpora), the logistic saturates: positive
 // probabilities pile near 1 and percentile thresholds land absurdly high —
@@ -209,70 +267,6 @@ function contentWordQuestions(chunks, n, seed, eligiblePos = null) {
   return out;
 }
 
-// Every word titleQuestions and contentWordQuestions put into a query is
-// copied verbatim from the query's own source passage — a title, or a run
-// of the chunk's own tokens. coverageFrac (the feature meant to separate
-// "answerable" from "topic present, fact absent") therefore scores every
-// positive the fit ever sees at or near 1.0: the model never observes a
-// real positive with partial lexical overlap, so it cannot learn that
-// partial overlap is still often answerable — measured on a real failing
-// query ("what happens if the login step fails during launch", answered by
-// PIKELET_CLI_SPEC.md's wrangler-login paragraph) at coverage 0.5, safely
-// inside a band the fit had zero positive examples from.
-//
-// Sibling-chunk questions close that gap without a synonym dictionary: pull
-// most of the query's words from a *different* chunk of the same source
-// document, plus one or two words from the target chunk itself so the query
-// still names something concrete. A real paraphrase drifts from its answer
-// passage's exact wording the same way — it uses vocabulary from elsewhere
-// in the document (or the reader's own words) more than it echoes the one
-// paragraph that answers it — so this reproduces the coverage regime real
-// queries land in, still verified true positives by the same retrieval
-// check every other class uses. Only fires when a title has more than one
-// chunk; single-chunk documents have no sibling to draw from and keep
-// relying on the other two positive classes.
-function siblingParaphraseQuestions(chunks, n, seed, eligiblePos) {
-  const next = rng(seed);
-  const eligible = new Set(eligiblePos);
-  const byTitle = new Map();
-  chunks.forEach((c, pos) => {
-    if (!eligible.has(pos)) return;
-    const t = (c.title || '').trim();
-    if (!t) return;
-    if (!byTitle.has(t)) byTitle.set(t, []);
-    byTitle.get(t).push(pos);
-  });
-  const contentWords = (text) => [...new Set(tokenize(text).filter((w) => w.length >= 4 && !STOPWORDS.has(w)))];
-  const candidates = [];
-  for (const [title, positions] of byTitle) {
-    if (positions.length < 2) continue;
-    for (const pos of positions) {
-      const siblings = positions.filter((p) => p !== pos);
-      candidates.push({ pos, title, siblings });
-    }
-  }
-  const picked = sample(candidates, Math.min(n, candidates.length * 2), seed ^ 0x2b3c4d);
-  const seen = new Set();
-  const out = [];
-  let frame = 0;
-  for (const { pos, siblings } of picked) {
-    const siblingPos = siblings[Math.floor(next() * siblings.length)];
-    const siblingWords = contentWords(chunks[siblingPos].text);
-    const ownWords = contentWords(chunks[pos].text);
-    if (siblingWords.length < 2 || ownWords.length < 1) continue;
-    const siblingCount = Math.min(2 + Math.floor(next() * 2), siblingWords.length);
-    const siblingPick = sample(siblingWords, siblingCount, seed ^ pos ^ 0x9f01);
-    const ownPick = sample(ownWords, 1, seed ^ pos ^ 0x1eaf);
-    const words = [...siblingPick, ...ownPick];
-    const text = CONTENT_FRAMES[frame++ % CONTENT_FRAMES.length](words.join(' '));
-    if (seen.has(text)) continue;
-    seen.add(text);
-    out.push({ text, sourceId: pos });
-    if (out.length >= n) break;
-  }
-  return out;
-}
-
 const tokenize = (text) => (text.toLowerCase().match(/[a-z0-9']+/g) || []);
 
 // Coverage ignores question/template scaffolding on top of the base
@@ -296,10 +290,32 @@ const COVERAGE_STOPWORDS = new Set([...STOPWORDS,
 //
 // The score is the MAX over the top COVERAGE_TOP_PASSAGES passages, not the
 // union: a paraphrased query gets several chances to find the passage that
-// shares its vocabulary, while a recombination negative's two source chunks
-// each ground only their own half — a union would merge them to full
-// coverage and erase the class.
+// shares its vocabulary, while an off-topic passage should not have its
+// coverage padded out by unioning several weak partial matches.
 const COVERAGE_COMMON_WORD_WEIGHT = 1 / 3;
+// Light suffix stripping so "quantize" grounds against "quantization" and
+// "configure" against "configuration" — present() below otherwise only
+// forgave plurals, so any word-form mismatch at all (a verb the corpus uses
+// as a noun, -ing vs -ed) scored zero coverage for a passage that plainly
+// answers the query. Deliberately conservative: MIN_STEM_LEN guards against
+// over-stripping short words ("king" stays "king", not "k"), and only the
+// suffix families measured to matter on real technical-doc word pairs
+// (quantize/quantization, authenticate/authentication, configure/
+// configuration, validate/validation) are covered — this is not a general
+// stemmer, just enough to stop coverage1 punishing common noun/verb
+// word-form drift between a query and its answer passage. Kept in
+// complete/retrieval-abstention.mjs in lockstep (identical rule list and
+// order) since the reader scores queries against shipped passages with
+// this exact function, not a copy the builder only used at fit time.
+const STEM_MIN_LEN = 4;
+const STEM_SUFFIXES = ['ization', 'isation', 'ication', 'ation', 'ition', 'tion', 'ing', 'ed', 'ate', 'ize', 'ise'];
+function stem(w) {
+  for (const suf of STEM_SUFFIXES) {
+    if (w.length - suf.length >= STEM_MIN_LEN && w.endsWith(suf)) return w.slice(0, -suf.length);
+  }
+  if (w.length - 1 >= STEM_MIN_LEN && w.endsWith('e')) return w.slice(0, -1);
+  return w;
+}
 function coverageFrac(text, passageTexts, isCommon) {
   const content = tokenize(text).filter((w) => w.length >= COVERAGE_MIN_WORD_LEN && !COVERAGE_STOPWORDS.has(w));
   if (!content.length) return 0;
@@ -307,9 +323,12 @@ function coverageFrac(text, passageTexts, isCommon) {
   const weightSum = weights.reduce((a, c) => a + c, 0);
   let best = 0;
   for (const passageText of passageTexts) {
-    const passage = new Set(tokenize(passageText || ''));
+    const passageWords = tokenize(passageText || '');
+    const passage = new Set(passageWords);
+    const passageStems = new Set(passageWords.map(stem));
     const present = (w) => passage.has(w) || passage.has(`${w}s`) || passage.has(`${w}es`)
-      || (w.endsWith('s') && passage.has(w.slice(0, -1)));
+      || (w.endsWith('s') && passage.has(w.slice(0, -1)))
+      || passageStems.has(stem(w));
     const grounded = content.reduce((sum, w, i) => sum + (present(w) ? weights[i] : 0), 0);
     best = Math.max(best, grounded / weightSum);
   }
@@ -404,79 +423,6 @@ function syntheticGibberish(n, seed, bloom, bits) {
   return queries;
 }
 
-// Hold out whole documents (grouped by title) from the calibration searches.
-// Greedy over a shuffled title order until ~HELDOUT_CHUNK_RATE of chunks are
-// excluded, preferring at least two held-out titles so the hard negatives are
-// not all about one topic, and always retaining at least two titles for the
-// positives. Corpora under three titles get no hold-out and rely on
-// recombination negatives alone.
-function chooseHeldOutTitles(chunks, titles, seed) {
-  if (titles.length < 3) return { titles: new Set(), chunks: 0 };
-  const byTitle = new Map();
-  for (const c of chunks) {
-    const t = (c.title || '').trim();
-    if (t) byTitle.set(t, (byTitle.get(t) || 0) + 1);
-  }
-  const targetChunks = Math.max(1, Math.round(chunks.length * HELDOUT_CHUNK_RATE));
-  const heldOut = new Set();
-  let count = 0;
-  for (const title of sample(titles, titles.length, seed)) {
-    if (titles.length - heldOut.size <= 2 || heldOut.size >= 12) break;
-    heldOut.add(title);
-    count += byTitle.get(title) || 0;
-    if (count >= targetChunks && heldOut.size >= 2) break;
-  }
-  return { titles: heldOut, chunks: count };
-}
-
-// In-domain word-salad negatives: two rare content words from each of two
-// chunks with different titles, interleaved. Every word is in the shipped
-// vocabulary bloom (high known_frac by construction), and a posting-list
-// tally guarantees no single chunk in the FULL corpus contains three or more
-// of the four words — so no document lexically supports the query. Words are
-// drawn from retained chunks only; co-occurrence is checked corpus-wide.
-function recombinationQueries(chunks, eligiblePos, n, seed, bloom, bits) {
-  const next = rng(seed);
-  const posting = new Map();
-  chunks.forEach((chunk, pos) => {
-    for (const w of new Set(tokenize(chunk.text))) {
-      if (w.length < 4 || STOPWORDS.has(w)) continue;
-      if (!posting.has(w)) posting.set(w, []);
-      posting.get(w).push(pos);
-    }
-  });
-  const rarityCap = Math.max(2, Math.round(chunks.length * 0.05));
-  const wordsByPos = new Map();
-  for (const pos of eligiblePos) {
-    const ws = [...new Set(tokenize(chunks[pos].text))].filter((w) =>
-      w.length >= 4 && !STOPWORDS.has(w) && posting.get(w).length <= rarityCap && knownFrac(w, bloom, bits) === 1);
-    if (ws.length >= 2) wordsByPos.set(pos, ws);
-  }
-  const candidates = [...wordsByPos.keys()];
-  const out = [];
-  const seen = new Set();
-  const pickTwo = (ws) => {
-    const i = Math.floor(next() * ws.length);
-    const j = (i + 1 + Math.floor(next() * (ws.length - 1))) % ws.length;
-    return [ws[i], ws[j]];
-  };
-  let attempts = 0;
-  while (out.length < n && attempts++ < n * 40 && candidates.length >= 2) {
-    const a = candidates[Math.floor(next() * candidates.length)];
-    const b = candidates[Math.floor(next() * candidates.length)];
-    if (a === b || (chunks[a].title || '').trim() === (chunks[b].title || '').trim()) continue;
-    const words = [...pickTwo(wordsByPos.get(a)), ...pickTwo(wordsByPos.get(b))];
-    if (new Set(words).size < 4) continue;
-    const tally = new Map();
-    for (const w of new Set(words)) for (const pos of posting.get(w)) tally.set(pos, (tally.get(pos) || 0) + 1);
-    if ([...tally.values()].some((c) => c >= 3)) continue;
-    const text = [words[0], words[2], words[1], words[3]].join(' ');
-    if (seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
-  }
-  return out;
-}
 
 function aucFor(posRows, negRows) {
   if (!posRows.length || !negRows.length) return null;
@@ -500,7 +446,42 @@ const RRF_K = 60;
 // into fusion on a technicality rather than a real lexical match.
 const LEXICAL_CUTOFF = 1.5;
 
-export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, lexicalIndex = null, log = () => {} }) {
+// Human-written calibration queries (point 2a — the highest-leverage
+// positive source, since these are the only rows that are not a
+// template's artifact): a JSON-lines file, one {text, expectId} or
+// {text, expectTitle} object per line, path given by
+// runtime.calibrationQueries in pikelet.config.json (resolved relative to
+// the project directory, same as encoder.calibrationPath). Optional — a
+// corpus without one just has no human-written source and relies on the
+// synthetic classes plus substitution/morphological positives.
+async function loadCalibrationQueries(config, projectDir, log) {
+  const rel = config?.runtime?.calibrationQueries;
+  if (!rel || !projectDir) return [];
+  const file = path.resolve(projectDir, rel);
+  let text;
+  try {
+    text = await fs.readFile(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+  const out = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let row;
+    try { row = JSON.parse(trimmed); } catch {
+      log(`Calibration: skipping malformed line in ${rel}: ${trimmed.slice(0, 80)}`);
+      continue;
+    }
+    if (typeof row?.text !== 'string' || !row.text.trim()) continue;
+    if (row.expectId === undefined && typeof row.expectTitle !== 'string') continue;
+    out.push({ text: row.text, sourceId: row.expectId, sourceTitle: row.expectTitle });
+  }
+  return out;
+}
+
+export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, lexicalIndex = null, log = () => {}, projectDir = null }) {
   const skip = (reason) => {
     log(`Abstention calibration skipped: ${reason}; the artifact will report match_quality "unscored"`);
     return null;
@@ -519,15 +500,15 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     return (commonWords.bloom[bit >> 3] >> (bit & 7)) & 1;
   });
 
-  // All calibration searches run against the retained chunks only
-  // (searchFiltered over one full index — ids stay chunk positions). The
-  // signals shift slightly from serve time, where nothing is held out, but
-  // every fit row is scored consistently, which is what the standardization
-  // and thresholds need.
-  const heldOut = chooseHeldOutTitles(chunks, titles, SEED ^ 0x8e1d00);
-  const retainedTitles = titles.filter((t) => !heldOut.titles.has(t));
-  const retainedPos = chunks.map((_, pos) => pos)
-    .filter((pos) => !heldOut.titles.has((chunks[pos].title || '').trim()));
+  // Nothing is held out at the corpus level: the earlier held-out-document
+  // hard-negative class asked a titleQuestions template about an excluded
+  // title, which is a DIFFERENT generator input (a title never used for a
+  // positive) from the positives it was fit against — the model could
+  // learn "this title-shape belongs to the held-out set" instead of
+  // answerability. Ablation (below) is now the only hard-negative source,
+  // and it is generator-symmetric with positives by construction (same
+  // text, answer excluded), so no title needs to be withheld up front.
+  const retainedPos = chunks.map((_, pos) => pos);
   const retainedSet = new Set(retainedPos);
   const K = Math.min(10, retainedPos.length);
   // Fused ranking for coverage's passage selection: reciprocal-rank
@@ -557,6 +538,17 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
       .map((entry) => entry.hit);
   };
+  // A chunk's text starts with its own heading, echoed as the first line
+  // (ingest.mjs's section-to-chunk join). A title-templated query's own
+  // words ARE the heading, so scoring coverage against the full text lets
+  // the heading echo ground the query for free — guaranteed coverage from
+  // a word the query only "found" because the builder put it there twice.
+  // Coverage should measure whether the passage BODY supports the query,
+  // not whether the query already knows the passage's own title.
+  const bodyOnly = (text) => {
+    const nl = text.indexOf('\n');
+    return nl === -1 ? text : text.slice(nl + 1);
+  };
   // Signals must be computed the way the reader computes them from its own
   // search hits (complete/retrieval-abstention.mjs): d0, the rank-4 margin,
   // and the mean over the returned list.
@@ -578,7 +570,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       known_frac: knownFrac(text, bloom, bits),
       [COVERAGE_FEAT]: coverageFrac(
         text,
-        fused.slice(0, COVERAGE_TOP_PASSAGES).map((h) => chunks[h.id]?.text || ''),
+        fused.slice(0, COVERAGE_TOP_PASSAGES).map((h) => bodyOnly(chunks[h.id]?.text || '')),
         isCommon,
       ),
     };
@@ -600,24 +592,26 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // pool fusedTop can search within, not the base signal window.
     const FUSION_POOL = Math.min(retainedPos.length, 200);
     const search = async (text) => index.searchFiltered(await embedQuery(text), FUSION_POOL, retainedSet);
+    // Ablation search (point 1): the same retrieval, minus the positive's
+    // answer. Used to build a paired hard negative from a verified
+    // positive's own text — see the negatives section below. excludeSet is
+    // every chunk id the query's label depends on: one chunk for a
+    // content-word positive, every chunk of the source document for a
+    // title positive (excluding only its one sampled chunk would leave
+    // sibling chunks of the same document still answering the query,
+    // which is not a real ablation of "the source").
+    const searchExcluding = async (text, excludeSet) => {
+      const allowed = new Set(retainedSet);
+      for (const id of excludeSet) allowed.delete(id);
+      return index.searchFiltered(await embedQuery(text), FUSION_POOL, allowed);
+    };
+    const ablationTargets = ({ sourceId, sourceTitle }) => new Set(sourceId !== undefined
+      ? [sourceId]
+      : retainedPos.filter((p) => (chunks[p].title || '').trim() === sourceTitle));
 
     const rows = [];
     let droppedPositives = 0;
-    // Budget split three ways so the fit sees a real spread of coverage1
-    // values among its positives, not just the ~1.0 that title/content-word
-    // questions produce by construction (see siblingParaphraseQuestions).
-    // siblingParaphraseQuestions only yields rows on multi-chunk documents;
-    // its share is folded back into contentWordQuestions on corpora where
-    // every document is a single chunk, so the total budget is never wasted.
-    const siblingTemplates = siblingParaphraseQuestions(chunks, Math.floor(MAX_POSITIVES / 3), SEED ^ 0xba1a5e, retainedPos);
-    const contentBudget = Math.floor(MAX_POSITIVES / 3) + (Math.floor(MAX_POSITIVES / 3) - siblingTemplates.length);
-    const positiveTemplates = [
-      ...titleQuestions(retainedTitles, Math.ceil(MAX_POSITIVES / 3), SEED ^ 0x51f15e),
-      ...contentWordQuestions(chunks, contentBudget, SEED ^ 0xc0ffee, retainedPos),
-      ...siblingTemplates,
-    ];
-    for (const { text, sourceTitle, sourceId } of positiveTemplates) {
-      const hits = await search(text);
+    const verify = (hits, sourceTitle, sourceId) => {
       // A positive counts only when retrieval verifiably lands on the source
       // document — otherwise the query is unanswerable in practice and would
       // drag the no-false-abstain floor toward zero. Title queries verify by
@@ -627,11 +621,29 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       // source landing at, say, rank 80 is not "retrieval verifiably lands
       // on the source" in any sense the reader's own top-K would agree with.
       const topK = hits.slice(0, K);
-      const found = sourceId !== undefined
+      return sourceId !== undefined
         ? topK.some((h) => h.id === sourceId)
         : topK.some((h) => (chunks[h.id]?.title || '').trim() === sourceTitle);
-      if (found) rows.push({ text, label: 1, sourceTitle, sourceId, ...signalsFor(text, hits) });
-      else droppedPositives++;
+    };
+    // Positives: title/content-word templates, verified by retrieval. This
+    // is the ONE positive-generation family — no second "low-coverage"
+    // class built by swapping some of these words, because that class
+    // still inherited the contamination (half its words stayed passage-
+    // verbatim by construction) while adding a second generator signature
+    // for the model to key on instead of answerability. The single-family
+    // design is deliberate: whatever this generator's blind spots are,
+    // every negative below is built by the SAME process (ablate the same
+    // text), so the fit cannot tell positive from negative by which
+    // generator produced the query — only by what retrieval returns.
+    const positiveTemplates = [
+      ...titleQuestions(titles, Math.ceil(MAX_POSITIVES / 2), SEED ^ 0x51f15e),
+      ...contentWordQuestions(chunks, Math.floor(MAX_POSITIVES / 2), SEED ^ 0xc0ffee, retainedPos),
+    ];
+    for (const { text, sourceTitle, sourceId } of positiveTemplates) {
+      const hits = await search(text);
+      if (verify(hits, sourceTitle, sourceId)) {
+        rows.push({ text, label: 1, sourceTitle, sourceId, ...signalsFor(text, hits) });
+      } else droppedPositives++;
     }
     const positives = rows.filter((r) => r.label === 1);
     if (positives.length < MIN_VERIFIED_POSITIVES) {
@@ -639,6 +651,23 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     }
     const positiveD0 = positives.map((r) => r.d0).sort((a, b) => a - b);
     const positiveMedianD0 = positiveD0[Math.floor(positiveD0.length / 2)];
+
+    // Human-written queries (runtime.calibrationQueries), when the corpus
+    // ships them, are held out of the fit entirely — never trained on,
+    // scored below after the model exists, and reported as the headline
+    // validation number. They are the only rows in this whole pipeline
+    // that are not a template's artifact, so they are the one number that
+    // actually answers "does this generalize past what the generator
+    // makes" rather than measuring the fit against more of its own output.
+    const humanTemplates = await loadCalibrationQueries(config, projectDir, log);
+    const humanRows = [];
+    let humanDropped = 0;
+    for (const { text, sourceTitle, sourceId } of humanTemplates) {
+      const hits = await search(text);
+      if (verify(hits, sourceTitle, sourceId)) {
+        humanRows.push({ text, label: 1, sourceTitle, sourceId, ...signalsFor(text, hits) });
+      } else humanDropped++;
+    }
 
     let droppedForeign = 0;
     for (const { text } of titleQuestions(FOREIGN_TITLE_BANK, FOREIGN_TITLE_BANK.length, SEED ^ 0xf03e16)) {
@@ -656,32 +685,73 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       rows.push({ text, label: 0, negClass: 'easy', negativeKind: 'synthetic-gibberish', ...signalsFor(text, await search(text)) });
     }
 
-    // Hard negatives. Held-out-document questions are in-domain by
-    // vocabulary and unanswerable against the retained corpus by
-    // construction; recombinations are corpus words no document supports.
-    // Either kind retrieving at or under the positive median d0 means the
-    // topic survives elsewhere (near-duplicate trees, accidental paraphrase)
-    // — the label is suspect and the row is dropped, not fit.
-    let heldOutDroppedCovered = 0;
-    if (heldOut.titles.size) {
-      for (const { text } of titleQuestions([...heldOut.titles], HELDOUT_QUERIES, SEED ^ 0xab5e27)) {
-        const sig = signalsFor(text, await search(text));
-        if (sig.d0 <= positiveMedianD0) heldOutDroppedCovered++;
-        else rows.push({ text, label: 0, negClass: 'hard', negativeKind: 'held-out-doc', ...sig });
-      }
-    }
-    let recombinationDropped = 0;
-    for (const text of recombinationQueries(chunks, retainedPos, RECOMBINATION_QUERIES, SEED ^ 0x5a1ad5, bloom, bits)) {
-      const sig = signalsFor(text, await search(text));
-      if (sig.d0 <= positiveMedianD0) recombinationDropped++;
-      else rows.push({ text, label: 0, negClass: 'hard', negativeKind: 'recombination', ...sig });
+    // Ablation negatives (point 1) replace recombination as the load-bearing
+    // hard class. Recombination's word-salad construction always landed
+    // coverage1 near 0.5 by how it combines two chunks' words, so the fit
+    // learned "roughly half the words present -> unanswerable" — exactly the
+    // regime a real paraphrase of a real answer lands in (measured: the
+    // same coverage band). An ablation negative reuses a verified positive
+    // query's exact text, scored with only its source chunk excluded from
+    // the index (searchExcluding) — same known_frac, same query length, same
+    // lexical shape as the positive it is paired with, differing only in
+    // what the top passages actually contain. The model is forced onto
+    // d0/margin/mean10/coverage1 as measured against the retrieved content,
+    // not onto a query-shape tell, because the query is byte-identical to a
+    // positive.
+    //
+    // The drop check compares against the PAIRED positive's own d0/coverage,
+    // not a corpus-wide median: measured on a real corpus, positiveMedianD0
+    // (spanning weak title-template phrasings as well as tight ones) was
+    // loose enough that half of all ablation negatives slid under it while
+    // still scoring coverage1 near 1.0 — a different chunk lexically
+    // supporting the same query almost as well as the excluded source, which
+    // is a real duplicate/cross-reference, not evidence the label is fine.
+    // A negative is dropped when EITHER signal alone shows the answer still
+    // exists elsewhere: distance staying close to the paired positive's own
+    // d0 (a near-duplicate chunk ranks almost as well), OR coverage staying
+    // high in absolute terms (some passage still quotes most of the query's
+    // words) — a close-but-different-words match and a distant-but-still-
+    // quoting match are both real duplicates/cross-references, not evidence
+    // the ablated query is actually unanswerable. Coverage is checked
+    // against an absolute floor, not only relative to the paired positive:
+    // a positive that already had coverage 1.0 leaves no room for a
+    // relative drop to ever fire, so a negative sitting at the same 1.0
+    // would otherwise never be caught.
+    // Paired from every verified positive: each one gets exactly one
+    // ablation negative built from its own text, so positives and
+    // negatives are the same generation process throughout — the only
+    // thing that can differ between a paired row's two labels is what
+    // retrieval returns.
+    // The relative-coverage branch only means something when the paired
+    // positive itself was well-grounded: for a positive whose own coverage
+    // was already low (0.2), "did coverage stay above 75% of that" is
+    // satisfied by almost any coverage value >= 0.15 — nearly always true,
+    // and not evidence of anything, since 0.2 was never meaningfully
+    // grounded to begin with. Measured on a real corpus: this false-
+    // positive pattern alone caused every single ablation negative to be
+    // dropped as "still grounded". Gated on the positive clearing an
+    // absolute floor first.
+    const ABLATION_RELATIVE_COVERAGE_FLOOR = 0.5;
+    let ablationDropped = 0;
+    for (const positiveRow of positives) {
+      const { text } = positiveRow;
+      const targets = ablationTargets(positiveRow);
+      if (targets.size === 0 || retainedSet.size - targets.size < K) continue;
+      const hits = await searchExcluding(text, targets);
+      const sig = signalsFor(text, hits);
+      const stillClose = sig.d0 <= positiveRow.d0 + 0.05;
+      const stillGrounded = sig[COVERAGE_FEAT] >= 0.75
+        || (positiveRow[COVERAGE_FEAT] >= ABLATION_RELATIVE_COVERAGE_FLOOR
+          && sig[COVERAGE_FEAT] >= positiveRow[COVERAGE_FEAT] * 0.75);
+      if (stillClose || stillGrounded) ablationDropped++;
+      else rows.push({ text, label: 0, negClass: 'hard', negativeKind: 'ablation', sourceId: positiveRow.sourceId, ...sig });
     }
 
     const negatives = rows.filter((r) => r.label === 0 && !r.evalOnly);
     if (negatives.length < MIN_NEGATIVES) return skip(`only ${negatives.length} negatives survived the overlap drop (need ${MIN_NEGATIVES})`);
     const hardNegatives = negatives.filter((r) => r.negClass === 'hard');
     if (hardNegatives.length < MIN_HARD_NEGATIVES) {
-      return skip(`only ${hardNegatives.length} hard negatives (held-out + recombination) survived verification (need ${MIN_HARD_NEGATIVES}); without them the fit cannot separate answerable from in-domain-unanswerable`);
+      return skip(`only ${hardNegatives.length} ablation hard negatives survived verification (need ${MIN_HARD_NEGATIVES}); without them the fit cannot separate answerable from in-domain-unanswerable`);
     }
 
     // Weak band: retained-title questions whose source lands at rank 5..K on
@@ -692,7 +762,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // source landing at, say, rank 40 of 200 is well outside "adjacent
     // content", not a weak match.
     if (chunks.length >= 25) {
-      const weakTemplates = titleQuestions(retainedTitles, MAX_POSITIVES, SEED ^ 0x0ddba11);
+      const weakTemplates = titleQuestions(titles, MAX_POSITIVES, SEED ^ 0x0ddba11);
       for (const { text, sourceTitle } of weakTemplates) {
         if (rows.filter((r) => r.label === -1).length >= 24) break;
         const hits = await search(text);
@@ -702,23 +772,36 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     }
 
     // Fit: logistic regression on standardized signals, gradient descent —
-    // the same optimizer, weighting, and regularization as the wiki
-    // calibrator so the two assets stay comparable.
-    const fit = rows.filter((r) => r.label >= 0 && !r.evalOnly);
-    const scorerFor = (fitRows) => {
-      const weights = fitRows.map((r) => (r.negativeKind === 'synthetic-gibberish' ? 0.25 : 1));
+    // the same optimizer as the wiki calibrator so the two assets stay
+    // comparable, but split in two stages (point 3). Pooling positives
+    // against all four negative types (off-domain bank, gibberish,
+    // held-out-doc, ablation) in one fit lets 81 off-domain + 24 gibberish
+    // rows — which known_frac and d0 already separate almost trivially —
+    // dominate the loss, starving gradient pressure on the boundary that
+    // actually matters: answerable vs. in-domain-unanswerable. Stage 1
+    // gates off-domain/gibberish on known_frac and d0 alone (a 2-feature
+    // fit, easy rows vs. positives); stage 2 — the FEATS model this asset
+    // ships — is fit only on positives vs. hard negatives (held-out-doc +
+    // ablation), class-balanced so neither side dominates. A query must
+    // clear both stages to score above the hard threshold; scoreQuality at
+    // serve time only ever runs the shipped stage-2 model (complete/
+    // retrieval-abstention.mjs has no stage 1), so stage 1 here exists
+    // purely to keep stage 2's training loss from being diluted — it is a
+    // training-time filter, not a second asset.mjs.
+    const genericScorerFor = (feats, fitRows, weightOf = () => 1) => {
+      const weights = fitRows.map(weightOf);
       const weightSum = weights.reduce((a, c) => a + c, 0);
       const mean = {}, std = {};
-      for (const f of FEATS) {
+      for (const f of feats) {
         mean[f] = fitRows.reduce((sum, r, i) => sum + r[f] * weights[i], 0) / weightSum;
         std[f] = Math.sqrt(fitRows.reduce((sum, r, i) => sum + ((r[f] - mean[f]) ** 2) * weights[i], 0) / weightSum) || 1;
       }
-      const xs = fitRows.map((r) => FEATS.map((f) => (r[f] - mean[f]) / std[f]));
+      const xs = fitRows.map((r) => feats.map((f) => (r[f] - mean[f]) / std[f]));
       const ys = fitRows.map((r) => r.label);
-      let w = FEATS.map(() => 0);
+      let w = feats.map(() => 0);
       let b = 0;
       for (let epoch = 0; epoch < 4000; epoch++) {
-        const gw = FEATS.map(() => 0);
+        const gw = feats.map(() => 0);
         let gb = 0;
         for (let i = 0; i < xs.length; i++) {
           const z = xs[i].reduce((s, v, j) => s + v * w[j], b);
@@ -730,8 +813,32 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
         w = w.map((wj, j) => wj - 0.1 * (gw[j] / weightSum + 1e-3 * wj));
         b -= 0.1 * (gb / weightSum);
       }
-      return { mean, std, w, b, prob: (r) => 1 / (1 + Math.exp(-(FEATS.reduce((s, f, j) => s + ((r[f] - mean[f]) / std[f]) * w[j], b)))) };
+      return { mean, std, w, b, prob: (r) => 1 / (1 + Math.exp(-(feats.reduce((s, f, j) => s + ((r[f] - mean[f]) / std[f]) * w[j], b)))) };
     };
+    const STAGE1_FEATS = ['known_frac', 'd0'];
+    const easyRows = rows.filter((r) => r.negClass === 'easy');
+    const stage1Rows = [...positives, ...easyRows];
+    const stage1 = genericScorerFor(STAGE1_FEATS, stage1Rows);
+    // Stage 1's own boundary, for reporting: the score at which a positive
+    // and an easy negative are equally likely (the same percentile logic
+    // point 4 applies to the main threshold, applied here at 50%).
+    const stage1FloorAuc = aucFor(positives.map((r) => ({ p: stage1.prob(r) })), easyRows.map((r) => ({ p: stage1.prob(r) })));
+    // Stage 2: the shipped model. Positives vs. hard negatives only
+    // (held-out-doc + ablation) — human-written queries are held out
+    // entirely (point 5, see humanRows below) and gibberish is excluded —
+    // gibberish never reaches stage 2 in the reader either (known_frac
+    // alone already kills it), so training stage 2 against it would spend
+    // capacity on a boundary the shipped model never has to draw.
+    // Class-balanced: negative rows are reweighted so total negative weight
+    // equals total positive weight, which a pooled fit does not do on its
+    // own when one side has more rows.
+    const stage2Positives = positives;
+    const stage2Negatives = hardNegatives;
+    const balanceFactor = stage2Positives.length > 0 && stage2Negatives.length > 0
+      ? stage2Positives.length / stage2Negatives.length : 1;
+    const fit = [...stage2Positives, ...stage2Negatives];
+    const stage2WeightOf = (r) => (r.label === 0 ? balanceFactor : 1);
+    const scorerFor = (fitRows) => genericScorerFor(FEATS, fitRows, stage2WeightOf);
     const model = scorerFor(fit);
     const { mean, std, w, b } = model;
     for (const r of rows) r.p = model.prob(r);
@@ -741,7 +848,11 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // cross-validation instead: refit on 4/5 of the rows, score the held-out
     // fold, pool the held-out probabilities into one AUC. The embeds and
     // searches are already done, so the extra fits cost milliseconds.
-    const fitAuc = aucFor(rows.filter((r) => r.label === 1), negatives);
+    // Since stage 2's fit is already positives-vs-hard-negatives only (point
+    // 3), fitAuc/cvAuc here ARE the hard-negative numbers — there is no
+    // separate "vs off-domain" fit AUC to report; off-domain separation is
+    // stage 1's job, reported via stage1FloorAuc above instead.
+    const fitAuc = aucFor(stage2Positives, stage2Negatives);
     const shuffled = sample(fit, fit.length, SEED ^ 0xcf01d);
     const FOLDS = 5;
     const heldout = [];
@@ -753,23 +864,15 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       for (const r of test) heldout.push({ label: r.label, negClass: r.negClass, negativeKind: r.negativeKind, p: foldModel.prob(r) });
     }
     const heldoutPos = heldout.filter((r) => r.label === 1);
+    // cvAuc and cvAucHard are the same number now that stage 2 fits only on
+    // hard negatives — kept as two summary fields (rather than collapsing
+    // them) so the evaluation segment's shape stays stable for older
+    // verify_pack callers reading cvAucHard specifically.
     const cvAuc = aucFor(heldoutPos, heldout.filter((r) => r.label === 0));
-    // Per-class held-out AUCs. The pooled number is dominated by the easy
-    // classes and stays near 1 even when the model cannot tell answerable
-    // from in-domain-unanswerable (measured 0.998 pooled on a fit with that
-    // exact blindness), so the gate checks the hard class on its own.
-    const cvAucEasy = aucFor(heldoutPos, heldout.filter((r) => r.negClass === 'easy'));
-    const cvAucHard = aucFor(heldoutPos, heldout.filter((r) => r.negClass === 'hard'));
-    // Per-kind hard AUCs diagnose the two hard classes separately: the
-    // grounding feature could plausibly separate held-out-doc questions yet
-    // fail recombinations (retrieval can surface a recombination's source
-    // chunk, granting partial coverage), and a pooled hard AUC would hide
-    // which class regressed.
-    const cvAucHeldOutDoc = aucFor(heldoutPos, heldout.filter((r) => r.negativeKind === 'held-out-doc'));
-    const cvAucRecombination = aucFor(heldoutPos, heldout.filter((r) => r.negativeKind === 'recombination'));
+    const cvAucHard = cvAuc;
     const gateAuc = cvAuc ?? fitAuc;
     if (gateAuc === null || gateAuc < MIN_AUC) {
-      return skip(`${cvAuc === null ? 'fit' : 'cross-validated'} AUC ${gateAuc === null ? 'n/a' : gateAuc.toFixed(3)} < ${MIN_AUC} separating answerable from off-domain`);
+      return skip(`${cvAuc === null ? 'fit' : 'cross-validated'} AUC ${gateAuc === null ? 'n/a' : gateAuc.toFixed(3)} separating answerable from in-domain-unanswerable < ${MIN_AUC}`);
     }
     // cvAucHard is null when no hard negative landed in any held-out fold —
     // on a small hard-negative pool (just above MIN_HARD_NEGATIVES, split 5
@@ -788,39 +891,31 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       return skip(`cross-validated hard-negative AUC ${cvAucHard.toFixed(3)} < ${MIN_HARD_AUC}: the fit cannot separate answerable from in-domain-unanswerable queries`);
     }
 
-    // Threshold placement diverges from the wiki calibrator, which places
-    // hard between the raw negative ceiling and the raw answerable/weak
-    // floor. Both extremes are fragile here: the queries are auto-generated,
-    // so a single junk positive that happens to verify (or a weak row that
-    // retrieves with near-zero probability) drags a raw min/max to an
-    // extreme, and the logistic saturates on clean separation so geometric
-    // means of near-zero values collapse the thresholds. Percentiles make
-    // placement robust to the tails: 5% of generated positives may fall
-    // below hard and 5% of negatives above it, which measured far better
-    // than protecting every outlier. Between the two bounds, hard sits a
-    // quarter of the way up — the costs are asymmetric (a false abstain
-    // hides results, a false weak shows them with a caveat), so the weak
-    // verdict owns most of the uncertain band.
+    // Threshold placement (point 4): hard is set from the negative side —
+    // the 90th percentile of hard-negative (held-out-doc + ablation)
+    // probability — not from where positives happen to land. The previous
+    // design (posFloor * 0.5, or a blend toward the positive floor) let an
+    // easy fit's positive distribution set the bar: generated positives at
+    // p~0.99 pushed hard high enough to abstain on queries the model itself
+    // scored as more-likely-answerable-than-not. Percentiles still guard
+    // the tails (a single outlier negative should not set the whole bar),
+    // but the reference point is "where unanswerable queries actually
+    // live", which is the asymmetry the asset is supposed to encode:
+    // abstain when the score looks like a hard negative, not when it falls
+    // short of a suspiciously perfect positive score.
     const quantile = (values, q) => {
       const sorted = [...values].sort((a, b) => a - b);
       return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
     };
     const pos = positives.map((r) => r.p);
     const posFloor = quantile(pos, 0.05);
-    // The negative ceiling is taken per class and the maximum wins: hard
-    // negatives score strictly higher than the easy classes, and a pooled
-    // percentile over the (larger) easy classes would put the hard threshold
-    // below where in-domain-unanswerable queries actually land. The hard
-    // class uses the 90th percentile because it has fewer rows.
-    const easyCeil = quantile(negatives.filter((r) => r.negClass === 'easy').map((r) => r.p), 0.95);
     const hardCeil = quantile(hardNegatives.map((r) => r.p), 0.9);
-    const negCeil = Math.max(easyCeil, hardCeil);
     // Weak rows scoring under 5% answerable are negatives in all but name;
     // they must not shape the weak threshold.
     const allWeakP = rows.filter((r) => r.label === -1).map((r) => r.p);
-    const weakP = allWeakP.filter((p) => p > Math.max(negCeil, 0.05));
-    const hardOverlap = negCeil >= posFloor;
-    const hardRaw = hardOverlap ? posFloor * 0.5 : negCeil + 0.25 * (posFloor - negCeil);
+    const weakP = allWeakP.filter((p) => p > Math.max(hardCeil, 0.05));
+    const hardOverlap = hardCeil >= posFloor;
+    const hardRaw = hardCeil;
     // Saturation rail: see HARD_CEILING. A clamp engaging means the fit
     // separated its own probes too cleanly for percentile placement to be
     // meaningful — log it, because real phrasings unlike the probes are the
@@ -854,6 +949,33 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // floor is safe in the direction that matters.
     const weak = Math.min(0.95, Math.max(weakRaw, hard + MIN_WEAK_BAND));
 
+    // Point 5: validate against something the generator didn't make. Every
+    // other row in this fit is templated — the model could still be
+    // fitting to properties specific to this one template family rather
+    // than answerability. Human-written queries (held out above, never
+    // fit) are the only rows in this pipeline that are not that family's
+    // artifact, so they are the one real validation this asset can have.
+    // There is no synthetic fallback for this check: a proxy built from
+    // the same generator that made the training positives (the earlier
+    // "paraphrase-stress" metric, scored on positives already IN the fit)
+    // is not validation, it is training accuracy wearing a different name
+    // — it cannot detect the fit learning the generator instead of
+    // answerability, because it IS the generator. Corpora without
+    // runtime.calibrationQueries are validated only by cvAucHard (the CV
+    // gate above), which is honest now that positives and negatives are
+    // the same generator family (paired ablation) rather than measuring
+    // separation between two different generators.
+    for (const r of humanRows) r.p = model.prob(r);
+    const realQueryAbstained = humanRows.filter((r) => r.p < hard).length;
+    const realQueryAuc = humanRows.length
+      ? aucFor(humanRows, stage2Negatives) : null;
+    if (humanRows.length >= MIN_PARAPHRASE_STRESS_SAMPLE
+      && realQueryAbstained / humanRows.length > MAX_PARAPHRASE_ABSTENTION_RATE) {
+      return skip(`${realQueryAbstained}/${humanRows.length} human-written calibration queries (runtime.calibrationQueries) `
+        + `scored below the hard threshold (> ${(MAX_PARAPHRASE_ABSTENTION_RATE * 100).toFixed(0)}%): the fit abstains `
+        + 'on too many of the corpus author\'s own queries');
+    }
+
     // Eval-only rows (foreign-bank queries that overlap the corpus) are
     // scored by the final model and reported: how many the shipped
     // thresholds would answer is the asset's stated hard-negative exposure.
@@ -863,48 +985,66 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // retrieve its source, so a reader can re-run them later (verify_pack,
     // acceptance tests) as tests stored inside the file. Spread evenly so
     // both title and content-word templates are represented.
+    // Human-written queries are prepended: real, corpus-author-written
+    // questions are the most valuable thing verify_pack could re-run, so
+    // they are never displaced by the cap below.
     const goldenSample = (() => {
       const cap = 24;
-      if (positives.length <= cap) return positives;
-      const step = positives.length / cap;
-      return Array.from({ length: cap }, (_, i) => positives[Math.floor(i * step)]);
+      const rest = Math.max(0, cap - humanRows.length);
+      if (positives.length <= rest) return [...humanRows, ...positives];
+      const step = positives.length / rest;
+      return [...humanRows, ...Array.from({ length: rest }, (_, i) => positives[Math.floor(i * step)])];
     })();
     const goldenQueries = goldenSample.map((r) => ({
       text: r.text,
       ...(r.sourceId !== undefined ? { expectId: r.sourceId } : { expectTitle: r.sourceTitle }),
     }));
     const summary = {
-      method: 'self-templates-v3',
+      method: 'self-templates-v5',
       seed: SEED,
       searchConfig: { k: K },
-      heldOut: { titles: heldOut.titles.size, chunks: heldOut.chunks },
       verifiedPositiveQueries: positives.length,
       positivesDroppedAsUnretrievable: droppedPositives,
+      // Point 5: human-written queries (runtime.calibrationQueries) are
+      // held out of the fit entirely and validated here instead — the only
+      // real validation this asset can have (see the comment above this
+      // block in the fit). null fields mean the corpus shipped none; a
+      // corpus without them is validated only by cvAucHard.
+      humanCalibrationQueries: humanRows.length,
+      humanQueriesDroppedAsUnretrievable: humanDropped,
+      realQueryAuc: realQueryAuc === null ? null : +realQueryAuc.toFixed(6),
+      realQueryAbstentionRate: humanRows.length ? +(realQueryAbstained / humanRows.length).toFixed(6) : null,
       foreignNegativeQueries: negatives.filter((r) => r.negativeKind === 'foreign-bank').length,
       foreignKeptEvalOnlyAsSemanticOverlap: droppedForeign,
       foreignDropD0Threshold: +positiveMedianD0.toFixed(6),
       evalOnlyWouldAnswerAtHard: evalOnlyRows.filter((r) => r.p >= hard).length,
       syntheticGibberishQueries: negatives.filter((r) => r.negativeKind === 'synthetic-gibberish').length,
-      syntheticGibberishFitWeight: 0.25,
-      heldOutNegativeQueries: negatives.filter((r) => r.negativeKind === 'held-out-doc').length,
-      heldOutDroppedAsCoveredElsewhere: heldOutDroppedCovered,
-      recombinationNegativeQueries: negatives.filter((r) => r.negativeKind === 'recombination').length,
-      recombinationDroppedAsSuspectedAnswerable: recombinationDropped,
+      // Stage 1 gates off-domain/gibberish on known_frac + d0 alone, ahead
+      // of stage 2's fit — see the comment above genericScorerFor. Reported
+      // here as its own separating-power number since it no longer appears
+      // inside fitAuc/cvAuc at all (point 3).
+      stage1FloorAuc: stage1FloorAuc === null ? null : +stage1FloorAuc.toFixed(6),
+      // Ablation negatives are the only hard-negative source: same query
+      // text as a verified positive, scored with the answer excluded, so
+      // the model cannot separate positive from negative on anything but
+      // what the top passages actually contain — see the comment above the
+      // ablation loop.
+      ablationNegativeQueries: negatives.filter((r) => r.negativeKind === 'ablation').length,
+      ablationDroppedAsSuspectedAnswerable: ablationDropped,
       weakQueries: weakP.length,
       weakDroppedAsIndistinguishableFromNegatives: allWeakP.length - weakP.length,
-      // fitAuc is in-sample (scored on the rows the regression was fit on);
-      // cvAuc is the pooled held-out AUC from the deterministic 5-fold
-      // cross-validation. The gates use cvAuc and cvAucHard; cvAucHard is
-      // the number that detects the answers-anything-in-domain failure the
-      // pooled AUC cannot see.
+      // fitAuc/cvAuc are positives-vs-ablation-negatives only (stage 2 fits
+      // on nothing else — point 3); cvAucHard is kept as an explicit
+      // duplicate field for verify_pack callers that read that key name
+      // specifically. fitAuc is in-sample; cvAuc is the pooled held-out
+      // AUC from the deterministic 5-fold cross-validation, and is what
+      // the gate checks — honest now that every positive and negative
+      // comes from the same generation process (query text is paired), so
+      // this number cannot be inflated by the fit learning to tell two
+      // different generators apart.
       fitAuc: fitAuc === null ? null : +fitAuc.toFixed(6),
       cvAuc: cvAuc === null ? null : +cvAuc.toFixed(6),
-      cvAucEasy: cvAucEasy === null ? null : +cvAucEasy.toFixed(6),
       cvAucHard: cvAucHard === null ? null : +cvAucHard.toFixed(6),
-      cvAucHardByKind: {
-        heldOutDoc: cvAucHeldOutDoc === null ? null : +cvAucHeldOutDoc.toFixed(6),
-        recombination: cvAucRecombination === null ? null : +cvAucRecombination.toFixed(6),
-      },
       hardThresholdOverlap: hardOverlap,
       hardThresholdClampedFrom: hardRaw > HARD_CEILING ? Number(hardRaw.toFixed(6)) : null,
       vocab: { uniqueWords, keptWords, minCount },

@@ -638,9 +638,21 @@ export async function openPikeletFile(input, options = {}) {
                 // record that fails its digest must fail the query, not
                 // skew its verdict.
                 const passageSource = fusedHits?.length ? fusedHits : hits;
+                // A record's text starts with its own heading echoed as the
+                // first line (ingest.mjs's section-to-chunk join); coverage
+                // is meant to measure whether the passage BODY supports the
+                // query, not whether the query already knows the heading —
+                // stripped here to match calibrate.mjs's bodyOnly exactly
+                // (build-time and serve-time coverage must agree, or the
+                // fitted thresholds are scoring a different signal than the
+                // one they were calibrated against).
+                const bodyOnly = (text) => {
+                    const nl = String(text || '').indexOf('\n');
+                    return nl === -1 ? text : text.slice(nl + 1);
+                };
                 const topTexts = scorer.usesPassage && passageSource.length
                     ? (await Promise.all(passageSource.slice(0, scorer.passagesNeeded || 1)
-                        .map((hit) => hydrate(hit.id)))).map((record) => record?.text)
+                        .map((hit) => hydrate(hit.id)))).map((record) => bodyOnly(record?.text))
                     : [];
                 const scored = scorer.score(context.text, hits, topTexts);
                 return { match_quality: VERDICTS[scored.verdict] || scored.verdict, confidence: scored.p };

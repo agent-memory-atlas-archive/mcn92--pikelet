@@ -58,7 +58,7 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
     } else if (runtime.calibration === 'auto') {
       const embedQuery = async (text) => (await (await getEmbedder()).embed(`${declaration.prefixPolicy?.query || ''}${text}`)).vector;
       const lexicalIndex = openLexicalIndex(lexical.bytes);
-      const calibrated = await calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, lexicalIndex, log });
+      const calibrated = await calibrateRetrievalAbstention({ Pikelet, chunks, vectors, config, embedQuery, lexicalIndex, log, projectDir });
       if (calibrated) {
         calibrationBytes = Buffer.from(JSON.stringify(calibrated.calibrationJson), 'utf8');
         // Retrieval-verified positives double as golden queries: embedded
@@ -69,10 +69,17 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         // calibration quality is auditable after the fact — verify_pack can
         // report it instead of the numbers being build-log-only.
         calibrationSummary = calibrated.summary;
-        const { verifiedPositiveQueries, foreignNegativeQueries, syntheticGibberishQueries, heldOutNegativeQueries, recombinationNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard } = calibrated.summary;
-        log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${heldOutNegativeQueries + recombinationNegativeQueries} hard in-domain (${heldOutNegativeQueries} held-out-doc, ${recombinationNegativeQueries} recombination) / `
+        const {
+          verifiedPositiveQueries, foreignNegativeQueries, syntheticGibberishQueries,
+          ablationNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard, humanCalibrationQueries, realQueryAuc,
+          realQueryAbstentionRate,
+        } = calibrated.summary;
+        const validation = humanCalibrationQueries
+          ? `${humanCalibrationQueries} human queries: AUC ${realQueryAuc ?? 'n/a'}, abstention rate ${((realQueryAbstentionRate ?? 0) * 100).toFixed(0)}%`
+          : 'no human queries (runtime.calibrationQueries) — validated by cvAucHard only';
+        log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${ablationNegativeQueries} ablation hard negatives / `
           + `${foreignNegativeQueries} off-domain / ${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
-          + `5-fold CV AUC ${cvAuc ?? 'n/a'} pooled, ${cvAucHard ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample)`);
+          + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
       }
     }
   } finally {
@@ -117,24 +124,26 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
     // this artifact's recommendedRerank.
     rerankSweep,
     // Calibration quality, kept for audit after the file ships: fitAuc is
-    // in-sample and optimistic; cvAuc is pooled 5-fold held-out AUC;
-    // cvAucHard is the number that actually detects the
-    // answers-anything-in-domain failure (pooled AUC alone stays near 1
-    // even when the fit cannot separate answerable from in-domain-
-    // unanswerable — see calibrate.mjs). A pack that shipped without
+    // in-sample and optimistic; cvAuc/cvAucHard (the same number — stage 2
+    // fits only on positives vs. paired ablation negatives, see
+    // calibrate.mjs) is the pooled 5-fold held-out AUC. realQueryAuc/
+    // realQueryAbstentionRate are the only real validation this asset can
+    // have: human-written queries (runtime.calibrationQueries), held out
+    // of the fit entirely. null when the corpus shipped none — such a
+    // pack is validated by cvAucHard alone. A pack that shipped without
     // calibration (encoder.calibrationPath set, or the corpus failed the
     // fit gates) carries calibration: null here.
     ...(calibrationSummary ? {
       calibration: {
         fitAuc: calibrationSummary.fitAuc,
         cvAuc: calibrationSummary.cvAuc,
-        cvAucEasy: calibrationSummary.cvAucEasy,
         cvAucHard: calibrationSummary.cvAucHard,
-        cvAucHardByKind: calibrationSummary.cvAucHardByKind,
         verifiedPositiveQueries: calibrationSummary.verifiedPositiveQueries,
-        heldOutNegativeQueries: calibrationSummary.heldOutNegativeQueries,
-        recombinationNegativeQueries: calibrationSummary.recombinationNegativeQueries,
+        ablationNegativeQueries: calibrationSummary.ablationNegativeQueries,
         weakQueries: calibrationSummary.weakQueries,
+        humanCalibrationQueries: calibrationSummary.humanCalibrationQueries,
+        realQueryAuc: calibrationSummary.realQueryAuc,
+        realQueryAbstentionRate: calibrationSummary.realQueryAbstentionRate,
       },
     } : { calibration: null }),
   }), 'utf8');

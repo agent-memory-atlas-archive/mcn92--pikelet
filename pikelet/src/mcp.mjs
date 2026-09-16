@@ -60,11 +60,13 @@ function toolDefinitions(packs) {
       description: 'Search the mounted .pikelet knowledge packs. Returns the most relevant '
         + 'chunks with full provenance (pack, immutable pack identity, title, heading path, '
         + 'source) plus a calibrated matchQuality per pack: "strong" means the pack answers '
-        + 'this, "weak" means treat results with caution, "none" means this pack does not '
-        + 'contain the answer — do not force a citation from a pack that says none. The '
-        + 'calibrator can be wrong, especially on paraphrases that share few word forms with '
-        + 'the source text; if a "none" verdict looks suspicious, rerun with showAbstained '
-        + 'true to see what was withheld before concluding the pack has no answer.',
+        + 'this with confidence, "weak" means treat results with caution, "none" means the '
+        + 'calibrator scored no confident answer. The calibrator can be wrong, especially on '
+        + 'paraphrases that share few word forms with the source text, so results ship even '
+        + 'under a "none" verdict by default — weigh matchQuality and confidence yourself '
+        + 'rather than treating "none" as certain proof the pack has no answer, but also do '
+        + 'not cite a "none" result with the same confidence as "strong". Pass '
+        + 'showAbstained: false for the stricter behavior (zero results on "none").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -73,9 +75,11 @@ function toolDefinitions(packs) {
           k: { type: 'number', description: `Results per pack, 1-${MAX_K} (default 5).` },
           showAbstained: {
             type: 'boolean',
-            description: 'Return results even when matchQuality is "none" for a section, so a '
-              + 'suspicious abstention can be inspected instead of trusted blindly. Never '
-              + 'changes matchQuality or confidence — only whether results ship.',
+            description: 'Whether to return results when matchQuality is "none" for a section '
+              + '(default true — the calibrator can misjudge paraphrases, so withholding by '
+              + 'default hides real answers too often). Pass false to withhold results under '
+              + '"none" instead. Never changes matchQuality or confidence — only whether '
+              + 'results ship.',
           },
         },
         required: ['query'],
@@ -160,7 +164,15 @@ async function callSearch(packs, args) {
   if (args.showAbstained !== undefined && typeof args.showAbstained !== 'boolean') {
     throw new Error('search: showAbstained must be a boolean');
   }
-  const showAbstained = args.showAbstained === true;
+  // Defaults to showing results under a 'none' verdict: the calibrator can
+  // misjudge paraphrases (word-form mismatches it has no data to weigh
+  // correctly), and a caller that receives zero results plus "no answer"
+  // has no signal that retrying with showAbstained would recover anything.
+  // matchQuality and confidence still carry the calibrator's real verdict,
+  // so a caller that wants strict withholding gets it with showAbstained:
+  // false — the risk moves from "silently hides a real answer" to "shows a
+  // result that needs weighing", which a model reading matchQuality can do.
+  const showAbstained = args.showAbstained !== false;
   const names = resolvePack(packs, args.pack, 'search');
   const sections = [];
   for (const name of names) {
@@ -174,20 +186,23 @@ async function callSearch(packs, args) {
       results: out.results.map((r) => provenanced(name, mounted.identity, r)),
     });
   }
-  // With showAbstained, a 'none' section can still carry results, so
+  // A 'none' section can carry results (showAbstained default), so
   // "answered" has to read matchQuality — not just whether results shipped.
   const answered = sections.filter((s) => s.matchQuality !== 'none');
+  const noneSections = sections.filter((s) => s.matchQuality === 'none');
   return {
     query: args.query,
     packsSearched: names,
-    ...(answered.length === 0 ? {
+    ...(answered.length === 0 && noneSections.length > 0 ? {
       note: showAbstained
-        ? 'No mounted pack scored an answer to this query above the abstention threshold. '
-          + 'Results are shown anyway (showAbstained) — the calibrator can be wrong, '
-          + 'especially on paraphrases; weigh these before concluding no pack has an answer.'
-        : 'No mounted pack contains an answer to this query. Say so rather than guessing, or '
-          + 'rerun search with showAbstained true to inspect what was withheld — the '
-          + 'calibrator can misjudge paraphrases that share few word forms with the source.',
+        ? 'No mounted pack scored a confident answer to this query. Results are shown anyway '
+          + '(matchQuality "none") because the calibrator can misjudge paraphrases — weigh '
+          + 'them yourself rather than trusting or dismissing them outright; do not cite one '
+          + 'with "strong" confidence.'
+        : 'No mounted pack contains an answer to this query with showAbstained: false. Say so '
+          + 'rather than guessing, or rerun without showAbstained: false to see what the '
+          + 'calibrator withheld — it can misjudge paraphrases that share few word forms with '
+          + 'the source.',
     } : {}),
     sections,
   };
@@ -260,17 +275,28 @@ async function callVerifyPack(packs, args) {
     goldenQueries: { total: goldenResults.length, passed: goldenPassed, results: goldenResults },
     abstentionProbes: { total: probeResults.length, passed: probesPassed, results: probeResults },
     // fitAuc is in-sample and near-uninformative on its own; cvAucHard is
-    // the number that matters — it is the only check that catches a
-    // calibrator that answers anything in-domain regardless of whether the
-    // passage actually supports it. null means the pack shipped without a
-    // fitted calibrator (calibration skipped, or a pre-audit build).
+    // the number that catches a calibrator that answers anything in-domain
+    // regardless of whether the passage actually supports it. realQueryAuc/
+    // realQueryAbstentionRate — human-written calibration queries, held out
+    // of the fit entirely — is the only real validation this pack's
+    // calibrator can have; humanCalibrationQueries: 0 means the corpus
+    // shipped none and this pack is validated by cvAucHard alone (see
+    // pikelet/src/calibrate.mjs's design note on why there is no synthetic
+    // substitute for real held-out queries). null means the pack shipped
+    // without a fitted calibrator (calibration skipped, or a pre-audit
+    // build without this field).
     calibration: calibration ? {
       cvAuc: calibration.cvAuc,
       cvAucHard: calibration.cvAucHard,
       fitAuc: calibration.fitAuc,
-      note: 'matchQuality verdicts on this pack are only as trustworthy as cvAucHard; a low or '
-        + 'missing cvAucHard means abstention was not verified against in-domain-unanswerable '
-        + 'queries and "none" verdicts should not be trusted without showAbstained.',
+      humanCalibrationQueries: calibration.humanCalibrationQueries ?? 0,
+      realQueryAuc: calibration.realQueryAuc ?? null,
+      realQueryAbstentionRate: calibration.realQueryAbstentionRate ?? null,
+      note: 'matchQuality verdicts on this pack are only as trustworthy as cvAucHard, or '
+        + 'realQueryAbstentionRate when humanCalibrationQueries > 0 (the stronger signal — it is '
+        + 'measured on queries the fit never trained on). A high realQueryAbstentionRate means real '
+        + 'paraphrases get wrongly withheld even if cvAucHard looks fine — "none" verdicts should '
+        + 'not be trusted without showAbstained.',
     } : null,
     ...(goldenResults.length === 0 && probeResults.length === 0
       ? { note: 'This pack embeds no runnable tests (older build, or calibration was skipped); encoder and integrity state above still apply.' }
@@ -520,11 +546,14 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
           supportedVersions,
           capabilities: { tools: {} },
           instructions: 'This server mounts .pikelet knowledge packs. Use search to retrieve '
-            + 'provenanced passages; matchQuality "none" means the pack does not contain the '
-            + 'answer — say so rather than guessing, or rerun search with showAbstained true '
-            + 'if the verdict looks wrong (the calibrator can misjudge paraphrases). '
-            + 'verify_pack runs the tests a pack carries inside itself; list_packs reports '
-            + 'identities for citation pinning.',
+            + 'provenanced passages with a calibrated matchQuality; "none" means the '
+            + 'calibrator scored no confident answer, but results ship even under "none" by '
+            + 'default since the calibrator can misjudge paraphrases — weigh matchQuality and '
+            + 'confidence yourself rather than treating "none" as proof the pack has no '
+            + 'answer, and do not cite a "none" result as confidently as a "strong" one. '
+            + 'verify_pack runs the tests a pack carries inside itself, including the '
+            + 'calibration quality (cvAucHard) behind matchQuality verdicts; list_packs '
+            + 'reports identities for citation pinning.',
           ...CACHE_HINTS,
         });
       } else if (method === 'initialize') {
