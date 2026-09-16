@@ -1,5 +1,42 @@
 # One-file search
 
+## Live browser demo
+
+Open:
+
+```text
+https://pikelet-wiki-playground.pages.dev/
+```
+
+That page is static HTML/JS hosted on Cloudflare Pages. It mounts the
+Simple English Wikipedia pack from R2:
+
+```text
+https://pub-6da2384a3bca4a44b2b2fa29a94cc811.r2.dev/wikipedia.pikelet
+```
+
+The pack is a 648.5 MiB `.pikelet` file with 456,153 records, an embedded
+MiniLM query encoder, semantic and lexical retrieval, integrity metadata,
+and calibrated abstention. There is no `/search`, `/embed`, `/query`, or
+`/api` backend; the browser reads byte ranges from that one URL and the
+playground shows the range requests as they happen.
+
+To rebuild the playground from this checkout:
+
+```bash
+cd examples/05-one-file-search/web/playground-src
+npx vite build
+```
+
+The output is `examples/05-one-file-search/web/playground-dist/`. If you
+serve it yourself and keep the default pack URL, the browser still mounts
+the public R2-hosted wiki pack.
+
+If you paste a different pack URL into the playground, that host must support
+`HEAD`, byte-range `GET`, and browser CORS for the `Range` and `If-Range`
+request headers while exposing `Accept-Ranges`, `Content-Length`,
+`Content-Range`, and `ETag`.
+
 A search engine as a single static file. This example compiles the five
 Search Artifact components — corpus, index, encoder, evaluation,
 calibration — into one content-addressed `.pikelet`
@@ -17,13 +54,22 @@ node test-browser.mjs                 # Chromium acceptance (needs playwright ch
 ```
 
 ```js
-import { openPancakeFile } from 'pikelet-wasm/complete';
-const search = await openPancakeFile('pikelet-docs.pikelet');   // or a range source
+import { openPikeletFile } from 'pikelet-wasm/complete';
+const search = await openPikeletFile('pikelet-docs.pikelet');   // or a range source
 const out = await search.query('how do workers restore snapshots');
 // { matchQuality: 'strong', confidence: 0.94, results: [{ title, text, sourcePath, ... }] }
 ```
 
 ## Wiki scale
+
+The live demo uses the current kind-3 inline Simple English Wikipedia pack:
+456,153 records in a 648.5 MiB `wikipedia.pikelet`. The file carries the
+corpus, semantic sketch, lexical index, inline MiniLM query encoder,
+integrity commitments, and calibration data; the browser mounts it over
+HTTP Range without downloading the whole file.
+
+The `compile-wiki.mjs` notes below describe the older wiki-scale compiler and
+historical kind-2 layout kept in this example for acceptance testing.
 
 The same container compiles the Simple English Wikipedia pack (456,153
 chunks, `examples/04-static-wiki-pack/data-full`) into a 512 MiB
@@ -50,10 +96,11 @@ either way, and the JS scan keeps serving if staging fails.
 
 ## Inline wiki artifact
 
-The kind-3 inline transformer artifact is published as a GitHub release asset,
-not committed to git. Run one command; if the 649 MiB file is missing locally,
-the test downloads it into this ignored directory, verifies the manifest
-identity, and runs the self-contained query path:
+The kind-3 inline transformer artifact is published as a GitHub release asset
+and mirrored to R2 for the live browser demo, not committed to git. Run one
+command; if the 649 MiB file is missing locally, the test downloads it into
+this ignored directory, verifies the manifest identity, and runs the
+self-contained query path:
 
 ```bash
 node test-inline.mjs
@@ -93,6 +140,9 @@ smoke, provenance, identity, abstention, and embedded-evaluation checks.
   ablation demo (same question against a full pack and one missing/
   contradicting a record) — `npm run demo:veyra` fetches its packs first
   (see `web/veyra-corpus/README.md` for the source and rebuild recipe).
+- `web/playground-src/` / `web/playground-dist/` - the public live
+  playground source and built static output. The default pack URL points at
+  the R2-hosted Wikipedia pack above.
 - `search-reader.mjs`, `demo.mjs`, `test.mjs` — the original composition
   spike over 03's six separate asset files, kept as the reference the
   one-file reader is tested against.

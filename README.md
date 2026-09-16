@@ -82,6 +82,22 @@ Search is the interface. **The file is the knowledge deployment unit.**
 
 A real Pikelet pack contains **456,153 Simple English Wikipedia records** in a **648.5 MiB** artifact.
 
+Try the live browser demo:
+
+```text
+https://pikelet-wiki-playground.pages.dev/
+```
+
+The page is static HTML/JS on Cloudflare Pages. It mounts the pack from R2:
+
+```text
+https://pub-6da2384a3bca4a44b2b2fa29a94cc811.r2.dev/wikipedia.pikelet
+```
+
+There is no `/search`, `/embed`, `/query`, or `/api` backend behind the demo.
+The browser opens the `.pikelet` file over HTTP Range, verifies the artifact,
+loads the embedded query encoder, and shows the byte ranges it reads.
+
 That file was served by a deliberately dumb HTTP server whose only relevant capability was:
 
 ```text
