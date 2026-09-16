@@ -209,6 +209,70 @@ function contentWordQuestions(chunks, n, seed, eligiblePos = null) {
   return out;
 }
 
+// Every word titleQuestions and contentWordQuestions put into a query is
+// copied verbatim from the query's own source passage — a title, or a run
+// of the chunk's own tokens. coverageFrac (the feature meant to separate
+// "answerable" from "topic present, fact absent") therefore scores every
+// positive the fit ever sees at or near 1.0: the model never observes a
+// real positive with partial lexical overlap, so it cannot learn that
+// partial overlap is still often answerable — measured on a real failing
+// query ("what happens if the login step fails during launch", answered by
+// PIKELET_CLI_SPEC.md's wrangler-login paragraph) at coverage 0.5, safely
+// inside a band the fit had zero positive examples from.
+//
+// Sibling-chunk questions close that gap without a synonym dictionary: pull
+// most of the query's words from a *different* chunk of the same source
+// document, plus one or two words from the target chunk itself so the query
+// still names something concrete. A real paraphrase drifts from its answer
+// passage's exact wording the same way — it uses vocabulary from elsewhere
+// in the document (or the reader's own words) more than it echoes the one
+// paragraph that answers it — so this reproduces the coverage regime real
+// queries land in, still verified true positives by the same retrieval
+// check every other class uses. Only fires when a title has more than one
+// chunk; single-chunk documents have no sibling to draw from and keep
+// relying on the other two positive classes.
+function siblingParaphraseQuestions(chunks, n, seed, eligiblePos) {
+  const next = rng(seed);
+  const eligible = new Set(eligiblePos);
+  const byTitle = new Map();
+  chunks.forEach((c, pos) => {
+    if (!eligible.has(pos)) return;
+    const t = (c.title || '').trim();
+    if (!t) return;
+    if (!byTitle.has(t)) byTitle.set(t, []);
+    byTitle.get(t).push(pos);
+  });
+  const contentWords = (text) => [...new Set(tokenize(text).filter((w) => w.length >= 4 && !STOPWORDS.has(w)))];
+  const candidates = [];
+  for (const [title, positions] of byTitle) {
+    if (positions.length < 2) continue;
+    for (const pos of positions) {
+      const siblings = positions.filter((p) => p !== pos);
+      candidates.push({ pos, title, siblings });
+    }
+  }
+  const picked = sample(candidates, Math.min(n, candidates.length * 2), seed ^ 0x2b3c4d);
+  const seen = new Set();
+  const out = [];
+  let frame = 0;
+  for (const { pos, siblings } of picked) {
+    const siblingPos = siblings[Math.floor(next() * siblings.length)];
+    const siblingWords = contentWords(chunks[siblingPos].text);
+    const ownWords = contentWords(chunks[pos].text);
+    if (siblingWords.length < 2 || ownWords.length < 1) continue;
+    const siblingCount = Math.min(2 + Math.floor(next() * 2), siblingWords.length);
+    const siblingPick = sample(siblingWords, siblingCount, seed ^ pos ^ 0x9f01);
+    const ownPick = sample(ownWords, 1, seed ^ pos ^ 0x1eaf);
+    const words = [...siblingPick, ...ownPick];
+    const text = CONTENT_FRAMES[frame++ % CONTENT_FRAMES.length](words.join(' '));
+    if (seen.has(text)) continue;
+    seen.add(text);
+    out.push({ text, sourceId: pos });
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
 const tokenize = (text) => (text.toLowerCase().match(/[a-z0-9']+/g) || []);
 
 // Coverage ignores question/template scaffolding on top of the base
@@ -539,9 +603,18 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
 
     const rows = [];
     let droppedPositives = 0;
+    // Budget split three ways so the fit sees a real spread of coverage1
+    // values among its positives, not just the ~1.0 that title/content-word
+    // questions produce by construction (see siblingParaphraseQuestions).
+    // siblingParaphraseQuestions only yields rows on multi-chunk documents;
+    // its share is folded back into contentWordQuestions on corpora where
+    // every document is a single chunk, so the total budget is never wasted.
+    const siblingTemplates = siblingParaphraseQuestions(chunks, Math.floor(MAX_POSITIVES / 3), SEED ^ 0xba1a5e, retainedPos);
+    const contentBudget = Math.floor(MAX_POSITIVES / 3) + (Math.floor(MAX_POSITIVES / 3) - siblingTemplates.length);
     const positiveTemplates = [
-      ...titleQuestions(retainedTitles, Math.ceil(MAX_POSITIVES / 2), SEED ^ 0x51f15e),
-      ...contentWordQuestions(chunks, Math.floor(MAX_POSITIVES / 2), SEED ^ 0xc0ffee, retainedPos),
+      ...titleQuestions(retainedTitles, Math.ceil(MAX_POSITIVES / 3), SEED ^ 0x51f15e),
+      ...contentWordQuestions(chunks, contentBudget, SEED ^ 0xc0ffee, retainedPos),
+      ...siblingTemplates,
     ];
     for (const { text, sourceTitle, sourceId } of positiveTemplates) {
       const hits = await search(text);
@@ -698,7 +771,20 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     if (gateAuc === null || gateAuc < MIN_AUC) {
       return skip(`${cvAuc === null ? 'fit' : 'cross-validated'} AUC ${gateAuc === null ? 'n/a' : gateAuc.toFixed(3)} < ${MIN_AUC} separating answerable from off-domain`);
     }
-    if (cvAucHard !== null && cvAucHard < MIN_HARD_AUC) {
+    // cvAucHard is null when no hard negative landed in any held-out fold —
+    // on a small hard-negative pool (just above MIN_HARD_NEGATIVES, split 5
+    // ways) a fold can easily draw zero. That is not "no evidence of a
+    // problem"; it means the one check that catches the
+    // answers-anything-in-domain failure (comment above, measured 0.998
+    // pooled AUC on exactly that failure) never ran. Ship the unscored
+    // placeholder rather than a fit that was never tested against its
+    // hardest case.
+    if (cvAucHard === null) {
+      return skip(`cross-validated hard-negative AUC is unavailable (no hard negative landed in any held-out fold, `
+        + `out of ${hardNegatives.length} hard negatives total): the fit was never tested against in-domain-unanswerable `
+        + 'queries and must not ship unverified');
+    }
+    if (cvAucHard < MIN_HARD_AUC) {
       return skip(`cross-validated hard-negative AUC ${cvAucHard.toFixed(3)} < ${MIN_HARD_AUC}: the fit cannot separate answerable from in-domain-unanswerable queries`);
     }
 

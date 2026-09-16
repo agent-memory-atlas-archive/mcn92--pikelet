@@ -33,11 +33,24 @@ function stubPack() {
             lexical: null,
             sampleQueries: ['what is a stub'],
         }),
-        query: async () => ({
-            matchQuality: 'strong',
-            confidence: 0.9,
-            results: [{ id: 0, title: 'Stub', headingPath: [], anchor: null, sourcePath: 'stub.md', text: 'stub text', distance: 0.1 }],
-        }),
+        // Mirrors the real reader's showAbstained contract (complete/index.mjs):
+        // a 'none' verdict withholds results unless showAbstained is true, and
+        // showAbstained never changes matchQuality or confidence.
+        query: async (queryText, opts = {}) => {
+            if (queryText === 'abstained query') {
+                const withheld = [{ id: 1, title: 'Withheld', headingPath: [], anchor: null, sourcePath: 'withheld.md', text: 'withheld text', distance: 0.3 }];
+                return {
+                    matchQuality: 'none',
+                    confidence: 0.1,
+                    results: opts.showAbstained ? withheld : [],
+                };
+            }
+            return {
+                matchQuality: 'strong',
+                confidence: 0.9,
+                results: [{ id: 0, title: 'Stub', headingPath: [], anchor: null, sourcePath: 'stub.md', text: 'stub text', distance: 0.1 }],
+            };
+        },
         record: async (id) => ({ title: 'Stub', text: 'stub text', sourcePath: 'stub.md', id }),
         evaluation: async () => null,
         close: async () => {},
@@ -152,6 +165,50 @@ await withServer(async ({ send, waitFor }) => {
         (await waitFor(4)).result.protocolVersion === '2025-11-25');
     send({ jsonrpc: '2.0', id: 5, method: 'no/such/method' });
     check('unknown method is -32601', (await waitFor(5)).error?.code === -32601);
+});
+
+console.log('\nsearch tool: showAbstained');
+await withServer(async ({ send, waitFor }) => {
+    const call = async (id, args) => {
+        send({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'search', arguments: args } });
+        const result = (await waitFor(id)).result;
+        return JSON.parse(result.content[0].text);
+    };
+
+    const inputSchemaList = () => new Promise((resolve) => {
+        send({ jsonrpc: '2.0', id: 100, method: 'tools/list' });
+        waitFor(100).then((r) => resolve(r.result.tools.find((t) => t.name === 'search')));
+    });
+    const searchTool = await inputSchemaList();
+    check('search inputSchema declares showAbstained as boolean',
+        searchTool.inputSchema.properties.showAbstained?.type === 'boolean');
+
+    const withheld = await call(1, { query: 'abstained query' });
+    check('a none verdict withholds results by default',
+        withheld.sections[0].matchQuality === 'none' && withheld.sections[0].results.length === 0);
+    check('withheld response carries a note pointing at showAbstained',
+        typeof withheld.note === 'string' && withheld.note.includes('showAbstained'));
+
+    const shown = await call(2, { query: 'abstained query', showAbstained: true });
+    check('showAbstained: true surfaces the withheld result',
+        shown.sections[0].matchQuality === 'none' && shown.sections[0].results.length === 1
+        && shown.sections[0].results[0].id === 1);
+    check('showAbstained never changes matchQuality or confidence',
+        shown.sections[0].matchQuality === withheld.sections[0].matchQuality
+        && shown.sections[0].confidence === withheld.sections[0].confidence);
+    check('showAbstained response still notes the abstention, differently worded',
+        typeof shown.note === 'string' && shown.note.includes('shown anyway'));
+
+    const answered = await call(3, { query: 'what is a stub', showAbstained: true });
+    check('a strong verdict carries no note even with showAbstained',
+        answered.note === undefined && answered.sections[0].matchQuality === 'strong');
+
+    // A rejected call is a tool error (isError, plain text), not JSON — call
+    // its own protocol round trip directly instead of the JSON-parsing helper.
+    send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'search', arguments: { query: 'q', showAbstained: 'yes' } } });
+    const bad = (await waitFor(4)).result;
+    check('non-boolean showAbstained is rejected as a tool error',
+        bad.isError === true && bad.content[0].text.includes('showAbstained'));
 });
 
 console.log(`\nMCP protocol conformance: ${passed} passed, ${failed} failed`);

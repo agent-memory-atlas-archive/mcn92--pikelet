@@ -61,13 +61,22 @@ function toolDefinitions(packs) {
         + 'chunks with full provenance (pack, immutable pack identity, title, heading path, '
         + 'source) plus a calibrated matchQuality per pack: "strong" means the pack answers '
         + 'this, "weak" means treat results with caution, "none" means this pack does not '
-        + 'contain the answer — do not force a citation from a pack that says none.',
+        + 'contain the answer — do not force a citation from a pack that says none. The '
+        + 'calibrator can be wrong, especially on paraphrases that share few word forms with '
+        + 'the source text; if a "none" verdict looks suspicious, rerun with showAbstained '
+        + 'true to see what was withheld before concluding the pack has no answer.',
       inputSchema: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Natural-language question or keyword query.' },
           pack: { type: 'string', description: `Pack to search. ${packDescription}` },
           k: { type: 'number', description: `Results per pack, 1-${MAX_K} (default 5).` },
+          showAbstained: {
+            type: 'boolean',
+            description: 'Return results even when matchQuality is "none" for a section, so a '
+              + 'suspicious abstention can be inspected instead of trusted blindly. Never '
+              + 'changes matchQuality or confidence — only whether results ship.',
+          },
         },
         required: ['query'],
       },
@@ -84,9 +93,11 @@ function toolDefinitions(packs) {
       description: 'Run the tests a pack carries inside itself: golden queries (each verified '
         + 'at build time to retrieve its source) and abstention probes (queries the pack must '
         + 'answer or must refuse). Reports pass/fail per test plus the pack\'s encoder and '
-        + 'integrity verification state. This is self-verification: it proves the artifact is '
-        + 'intact and behaves as it did when built — not that its content is true or its '
-        + 'publisher trustworthy.',
+        + 'integrity verification state, and the calibration quality (cvAuc, cvAucHard) behind '
+        + 'its matchQuality verdicts — a low or missing cvAucHard means "none" verdicts from '
+        + 'this pack were never tested against in-domain-unanswerable queries. This is '
+        + 'self-verification: it proves the artifact is intact and behaves as it did when '
+        + 'built — not that its content is true or its publisher trustworthy.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -146,11 +157,15 @@ async function callSearch(packs, args) {
     }
     k = args.k;
   }
+  if (args.showAbstained !== undefined && typeof args.showAbstained !== 'boolean') {
+    throw new Error('search: showAbstained must be a boolean');
+  }
+  const showAbstained = args.showAbstained === true;
   const names = resolvePack(packs, args.pack, 'search');
   const sections = [];
   for (const name of names) {
     const mounted = packs.get(name);
-    const out = await mounted.search.query(args.query, { k });
+    const out = await mounted.search.query(args.query, { k, showAbstained });
     sections.push({
       pack: name,
       packIdentity: mounted.identity,
@@ -159,12 +174,20 @@ async function callSearch(packs, args) {
       results: out.results.map((r) => provenanced(name, mounted.identity, r)),
     });
   }
-  const answered = sections.filter((s) => s.results.length > 0);
+  // With showAbstained, a 'none' section can still carry results, so
+  // "answered" has to read matchQuality — not just whether results shipped.
+  const answered = sections.filter((s) => s.matchQuality !== 'none');
   return {
     query: args.query,
     packsSearched: names,
     ...(answered.length === 0 ? {
-      note: 'No mounted pack contains an answer to this query. Say so rather than guessing.',
+      note: showAbstained
+        ? 'No mounted pack scored an answer to this query above the abstention threshold. '
+          + 'Results are shown anyway (showAbstained) — the calibrator can be wrong, '
+          + 'especially on paraphrases; weigh these before concluding no pack has an answer.'
+        : 'No mounted pack contains an answer to this query. Say so rather than guessing, or '
+          + 'rerun search with showAbstained true to inspect what was withheld — the '
+          + 'calibrator can misjudge paraphrases that share few word forms with the source.',
     } : {}),
     sections,
   };
@@ -227,6 +250,7 @@ async function callVerifyPack(packs, args) {
   // Read info after the queries: a deferred kind-3 encoder verifies its
   // test vectors on first load, so encoderVerified is only meaningful now.
   const info = mounted.search.info();
+  const calibration = evaluation?.calibration ?? null;
   return {
     pack: names[0],
     packIdentity: mounted.identity,
@@ -235,6 +259,19 @@ async function callVerifyPack(packs, args) {
     indexRowIntegrity: info.indexRowIntegrity,
     goldenQueries: { total: goldenResults.length, passed: goldenPassed, results: goldenResults },
     abstentionProbes: { total: probeResults.length, passed: probesPassed, results: probeResults },
+    // fitAuc is in-sample and near-uninformative on its own; cvAucHard is
+    // the number that matters — it is the only check that catches a
+    // calibrator that answers anything in-domain regardless of whether the
+    // passage actually supports it. null means the pack shipped without a
+    // fitted calibrator (calibration skipped, or a pre-audit build).
+    calibration: calibration ? {
+      cvAuc: calibration.cvAuc,
+      cvAucHard: calibration.cvAucHard,
+      fitAuc: calibration.fitAuc,
+      note: 'matchQuality verdicts on this pack are only as trustworthy as cvAucHard; a low or '
+        + 'missing cvAucHard means abstention was not verified against in-domain-unanswerable '
+        + 'queries and "none" verdicts should not be trusted without showAbstained.',
+    } : null,
     ...(goldenResults.length === 0 && probeResults.length === 0
       ? { note: 'This pack embeds no runnable tests (older build, or calibration was skipped); encoder and integrity state above still apply.' }
       : {}),
@@ -484,8 +521,10 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
           capabilities: { tools: {} },
           instructions: 'This server mounts .pikelet knowledge packs. Use search to retrieve '
             + 'provenanced passages; matchQuality "none" means the pack does not contain the '
-            + 'answer — say so rather than guessing. verify_pack runs the tests a pack carries '
-            + 'inside itself; list_packs reports identities for citation pinning.',
+            + 'answer — say so rather than guessing, or rerun search with showAbstained true '
+            + 'if the verdict looks wrong (the calibrator can misjudge paraphrases). '
+            + 'verify_pack runs the tests a pack carries inside itself; list_packs reports '
+            + 'identities for citation pinning.',
           ...CACHE_HINTS,
         });
       } else if (method === 'initialize') {

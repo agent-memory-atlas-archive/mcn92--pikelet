@@ -43,6 +43,7 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
   log(`Built lexical index: ${lexical.meta.terms.toLocaleString()} terms over ${lexical.meta.docCount.toLocaleString()} records (${(lexical.bytes.length / 1024).toFixed(0)} KiB)`);
   let calibrationBytes = null;
   let goldenQueries = [];
+  let calibrationSummary = null;
   try {
     if (!Array.isArray(declaration.testVectors) || declaration.testVectors.length === 0) {
       // Contract section 4.4 mode 1: an inline encoder carries verification
@@ -64,6 +65,10 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         // in the evaluation segment, so any later reader can re-run the
         // pack's own tests from inside the file (mcp verify_pack).
         goldenQueries = calibrated.goldenQueries || [];
+        // Kept for the evaluation segment (below) so a shipped pack's own
+        // calibration quality is auditable after the fact — verify_pack can
+        // report it instead of the numbers being build-log-only.
+        calibrationSummary = calibrated.summary;
         const { verifiedPositiveQueries, foreignNegativeQueries, syntheticGibberishQueries, heldOutNegativeQueries, recombinationNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard } = calibrated.summary;
         log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${heldOutNegativeQueries + recombinationNegativeQueries} hard in-domain (${heldOutNegativeQueries} held-out-doc, ${recombinationNegativeQueries} recombination) / `
           + `${foreignNegativeQueries} off-domain / ${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
@@ -111,6 +116,27 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
     // COMPLETE_PROFILE.md section 5.4: the recall-vs-C measurements behind
     // this artifact's recommendedRerank.
     rerankSweep,
+    // Calibration quality, kept for audit after the file ships: fitAuc is
+    // in-sample and optimistic; cvAuc is pooled 5-fold held-out AUC;
+    // cvAucHard is the number that actually detects the
+    // answers-anything-in-domain failure (pooled AUC alone stays near 1
+    // even when the fit cannot separate answerable from in-domain-
+    // unanswerable — see calibrate.mjs). A pack that shipped without
+    // calibration (encoder.calibrationPath set, or the corpus failed the
+    // fit gates) carries calibration: null here.
+    ...(calibrationSummary ? {
+      calibration: {
+        fitAuc: calibrationSummary.fitAuc,
+        cvAuc: calibrationSummary.cvAuc,
+        cvAucEasy: calibrationSummary.cvAucEasy,
+        cvAucHard: calibrationSummary.cvAucHard,
+        cvAucHardByKind: calibrationSummary.cvAucHardByKind,
+        verifiedPositiveQueries: calibrationSummary.verifiedPositiveQueries,
+        heldOutNegativeQueries: calibrationSummary.heldOutNegativeQueries,
+        recombinationNegativeQueries: calibrationSummary.recombinationNegativeQueries,
+        weakQueries: calibrationSummary.weakQueries,
+      },
+    } : { calibration: null }),
   }), 'utf8');
   const outPath = path.join(assetsDir, runtime.fileName || 'search.pikelet');
   const corpusSegment = buildCorpusSegment(records);
