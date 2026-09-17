@@ -87,9 +87,11 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
           + `${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
           + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
         // maxSim1 is comparison-only (see calibrate.mjs's GROUNDING_FEAT
-        // design note: max(coverage1, maxSim1) inflated the fitted
-        // threshold and caused false abstention in production — reverted).
-        // Logged so it's visible without pulling apart the artifact.
+        // design note: max(coverage1, maxSim1) has been tried twice —
+        // unrescaled, then rescaled and damped — and reverted both times,
+        // the second time for making real-query behavior worse despite a
+        // better AUC number). Logged so it's visible without pulling
+        // apart the artifact.
         if (maxSimVsCoverage?.maxSimSeparationAuc !== null && maxSimVsCoverage !== undefined) {
           log(`  maxSim1 vs coverage1 vs ablation hard negatives (comparison only, not used in the fit): separation AUC `
             + `${maxSimVsCoverage.maxSimSeparationAuc ?? 'n/a'} vs ${maxSimVsCoverage.coverageSeparationAuc ?? 'n/a'}; `
@@ -173,9 +175,11 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         humanCalibrationQueries: calibrationSummary.humanCalibrationQueries,
         realQueryAuc: calibrationSummary.realQueryAuc,
         realQueryAbstentionRate: calibrationSummary.realQueryAbstentionRate,
-        // maxSim1 is comparison-only and does not feed the fit (always
-        // false) — see calibrate.mjs's GROUNDING_FEAT design note for why
-        // blending it via max() into grounding1 was reverted.
+        // Comparison-only: how a semantic (embedding) word-grounding signal
+        // would separate positives from hard negatives versus the lexical
+        // coverage1 feature that actually feeds the fit. Not used for
+        // scoring — two attempts at blending it in (see calibrate.mjs's
+        // GROUNDING_FEAT design note) both made real-query behavior worse.
         maxSimVsCoverage: calibrationSummary.maxSimVsCoverage,
         maxSimInFit: calibrationSummary.maxSimInFit,
       },

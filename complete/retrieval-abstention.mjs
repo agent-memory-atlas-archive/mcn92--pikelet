@@ -18,17 +18,23 @@
 // builder and reader cannot drift.
 //
 // asset.coverage.useMaxSim + a semantic word-cosine grounding term
-// (maxSim1, folded in via Math.max with coverage1) was tried and reverted
-// — see pikelet/src/calibrate.mjs's GROUNDING_FEAT design note. maxSim1
-// has no meaningful zero the way coverage1 does (encoder word-cosine
-// rarely drops near 0 even for unrelated words), so max()-ing it in
-// inflated grounding1's floor on genuinely unrelated content and pushed
-// the fitted hard threshold up sharply, causing widespread false
-// abstention in production. The builder no longer sets useMaxSim, so this
-// reader's useMaxSim/maxSimFrac code below is unreachable in practice; it
-// stays only as a documented degradation path if an asset ever sets that
-// flag again, and must not be re-enabled without fixing maxSim1's baseline
-// first.
+// (maxSim1, folded in via Math.max with coverage1) has been tried twice
+// and reverted twice — see pikelet/src/calibrate.mjs's GROUNDING_FEAT
+// design note. Attempt 1: raw cosine similarity between encoder word
+// vectors has no meaningful zero (unrelated words still cluster
+// somewhat), so max()-ing it in inflated grounding1's floor and pushed
+// the fitted threshold up sharply, causing widespread false abstention in
+// production. Attempt 2: rescaling maxSim1 against a corpus-specific
+// baseline (and damping it further) fixed the floor-inflation and even
+// recovered the held-out AUC number, but made real-query behavior WORSE
+// — more false abstention on answerable questions, more false-confidence
+// verdicts on unsupported ones — than plain coverage1 alone. The builder
+// no longer sets useMaxSim, so this reader's useMaxSim/maxSimFrac code
+// below is unreachable in practice; it stays only as a documented
+// degradation path if an asset ever sets that flag again, and must not
+// be re-enabled without a fundamentally different mechanism, not another
+// rescale/damping constant — two attempts at tuning this one have now
+// both failed on real queries despite looking fine on paper.
 
 export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
     if (!asset || !Array.isArray(asset.weights) || !asset.thresholds) return null;
@@ -130,7 +136,18 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
     // heading/body split and HEADING_COVERAGE_WEIGHT asymmetry, but "is
     // this word present" becomes "what's the best cosine similarity to any
     // word in the passage" — kept byte-identical to
-    // pikelet/src/calibrate.mjs's maxSimFrac.
+    // pikelet/src/calibrate.mjs's maxSimFrac, rescale included: a raw
+    // cosine similarity has no meaningful zero, so every similarity is
+    // rescaled against maxSimBaseline (this corpus's own "how similar do
+    // two unrelated words look by chance" ceiling, shipped in the asset),
+    // then MAXSIM_GAMMA further suppresses marginal, barely-above-baseline
+    // credit (a power curve, not just linear) — see
+    // pikelet/src/calibrate.mjs's MAXSIM_GAMMA header comment for why a
+    // linear rescale alone was still enough noise to tip a corpus's
+    // held-out AUC across the calibration quality gate.
+    const MAXSIM_GAMMA = 3;
+    const maxSimBaseline = coverageCfg?.maxSimBaseline ?? 0;
+    const rescaleMaxSim = (sim) => (maxSimBaseline >= 1 ? 0 : Math.max(0, (sim - maxSimBaseline) / (1 - maxSimBaseline)) ** MAXSIM_GAMMA);
     async function maxSimFrac(text, passages) {
         const content = (String(text).toLowerCase().match(/[a-z0-9']+/g) || [])
             .filter((w) => w.length >= coverageMinLen && !coverageStopwords.has(w));
@@ -160,7 +177,7 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
                 let simHeading = 0;
                 for (const hv of headingVecs) simHeading = Math.max(simHeading, cosine(queryVecs[i], hv));
                 simBest = Math.max(simBest, simHeading * HEADING_COVERAGE_WEIGHT);
-                simSum += Math.max(0, simBest) * weights[i];
+                simSum += rescaleMaxSim(simBest) * weights[i];
             }
             best = Math.max(best, simSum / weightSum);
         }

@@ -91,29 +91,30 @@ const SEED = 424242;
 const BASE_FEATS = ['d0', 'margin', 'mean10', 'known_frac'];
 const COVERAGE_FEAT = 'coverage1';
 const MAXSIM_FEAT = 'maxSim1';
-// grounding1 was briefly max(coverage1, maxSim1) — the idea being that
-// either exact/stemmed lexical match (coverage1) or encoder-level semantic
-// similarity (maxSim1) should be enough to ground a word, so combine by
-// max rather than fit as separate linear terms (a joint fit gives
-// coverage1 nearly all the weight, since it's a sharper hard-negative
-// separator for reasons unrelated to which one is the better grounding
-// signal — see the comment that used to be here, and git history).
-// REVERTED: maxSim1 has no meaningful zero the way coverage1 does — cosine
-// similarity between encoder word vectors rarely drops near 0 even for
-// unrelated words (measured meanMaxSimHardNegative ~0.52 vs
-// meanCoverageHardNegative ~0.27 on the SAME hard negatives, i.e. rows the
-// fit itself labels "answer absent"). Since max() takes the larger value,
-// every row's grounding1 got dragged up toward maxSim1's inflated floor,
-// which pushed the fitted hard threshold up by nearly 2x on a real corpus
-// (0.26 -> 0.48) and caused widespread false abstention in production use
-// — confirmed by a real user's before/after probe set showing new false
-// abstentions and, worse, new false-confidence strong/weak verdicts on
-// genuinely unsupported questions. grounding1 is coverage1 again;
-// maxSim1 stays computed and reported (maxSimVsCoverage, comparison only)
-// for whoever next tries to fix coverage1's real paraphrase weakness, but
-// it must not feed the fit as a raw max until it has its own comparable
-// zero point (e.g. calibrated against this corpus's own baseline
-// cross-word similarity, not a global cosine value).
+// grounding1 = max(coverage1, maxSim1) was tried twice and reverted both
+// times:
+//   1. Raw cosine similarity between encoder word vectors has no
+//      meaningful zero (unrelated words still cluster somewhat), so
+//      max()-ing the raw value in dragged every row's floor up toward
+//      maxSim1's baseline and pushed the fitted threshold up sharply —
+//      confirmed causing widespread false abstention in production.
+//   2. Rescaling maxSim1 against a corpus-specific "how similar do two
+//      unrelated words look by chance" baseline (estimateMaxSimBaseline)
+//      fixed the floor-inflation, but even correctly rescaled and further
+//      damped (a MAXSIM_GAMMA power curve, since a linear rescale alone
+//      was still enough boundary noise to tip Pride and Prejudice's
+//      held-out AUC across the MIN_AUC gate), the ACTUAL behavior on real
+//      probe questions got worse, not better: more false abstention on
+//      genuinely answerable questions, and more false-confidence
+//      strong/weak verdicts on genuinely unsupported ones, than plain
+//      coverage1 alone. Damping the blend numerically recovered the AUC
+//      number but not the thing the AUC number is supposed to predict.
+// grounding1 is coverage1 again. maxSim1 stays computed and reported
+// (maxSimVsCoverage, comparison only) for whoever next attempts this —
+// the standalone paraphrase-robustness numbers are real (see
+// maxSimVsCoverage.paraphrase), but two attempts at folding it into the
+// fit via max() have now made real-query behavior worse in practice, so
+// it needs a different mechanism entirely, not another constant.
 const GROUNDING_FEAT = COVERAGE_FEAT;
 const FEATS = [...BASE_FEATS, GROUNDING_FEAT];
 const COVERAGE_MIN_WORD_LEN = 3;
@@ -135,6 +136,27 @@ const MIN_AUC = 0.85;
 const SUBSTITUTION_BUDGET = 32;
 const SUBSTITUTION_VOCAB_TOP = 800;
 const SUBSTITUTION_MIN_COS = 0.55;
+// Paraphrase-agreement was tried and abandoned (comparison telemetry
+// only): every grounding feature above measures resemblance between a
+// query and a passage's text, and each gave a topically-adjacent-but-
+// unanswered passage the same high score a truly answered one gets, since
+// resemblance is exactly what a topically-close passage has plenty of.
+// paraphraseAgreement1 asked a structurally different question instead —
+// not "does this look like a match" but "does retrieval agree with
+// itself under rewording": several independent paraphrases of the SAME
+// question (via the encoder-guided substitution mechanism below, run
+// with different seeds) were searched independently, scored by the
+// fraction whose rank-1 hit landed back on the original source. It
+// measured a good base rate on genuinely answerable questions (0.83 mean
+// agreement on internal-docs), but tested directly against real Pride and
+// Prejudice questions with hand-varied wording, it did not separate
+// answerable from unanswerable at all — both classes drifted to
+// different top-1 passages under rewording at similar, high rates (~65-
+// 75% either way). Retrieval instability under paraphrasing turned out to
+// be common regardless of whether the question is actually answered,
+// likely because many topically-similar chapters compete for rank 1 in a
+// novel — so retrieval stability is not, on this evidence, a reliable
+// proxy for fact-presence either.
 // The hard-negative bar is lower than the pooled bar: these queries sit near
 // the decision boundary by design, and demanding easy-class separation from
 // them would fail honest fits. Below this, the model cannot tell answerable
@@ -385,23 +407,108 @@ function coverageFrac(text, passages, isCommon) {
   return best;
 }
 
-// MaxSim grounding (comparison feature, not yet used in the fit — see the
-// design note near MAXSIM_FEAT below): coverageFrac requires exact or
-// stemmed word identity, so a query and its answer passage that use
-// different words for the same idea ("login" vs "authentication", "big"
-// vs "huge") ground each other at zero — a real, structural blind spot on
-// a system built around a semantic, paraphrase-tolerant retriever.
-// maxSimFrac replaces exact match with per-word embedding cosine
-// similarity (ColBERT-style late interaction, computed cheaply here: the
-// inline encoder's per-token hidden states are already produced by the
-// same forward pass embed() uses for the sentence vector — see
-// embedWords() in complete/inline-transformer.mjs — so this costs one
-// extra encoder call per scored passage, not one per word). For each
-// query content word, the score is the best cosine similarity against
-// any content word in the passage (heading words at reduced credit, same
-// asymmetry as coverageFrac and for the same reason), averaged across
-// query words with the same common-word downweighting coverageFrac uses.
-async function maxSimFrac(text, passages, isCommon, embedWordVec) {
+// Proximity grounding was tried and abandoned (comparison telemetry only,
+// never shipped): coverageFrac and maxSim1 both score each query word
+// independently against the whole passage, so a passage that happens to
+// mention every query word — without ever stating the relation connecting
+// them — scores as if it answered the question ("what colour were Jane's
+// eyes" against a passage that separately discusses Jane's manner and
+// someone else's eyes). proximityFrac required a query's own content
+// words to co-occur within a token-distance window (12 tokens) as a
+// cheap, dependency-free proxy for "this passage asserts something about
+// these things together," not just "these things are each mentioned
+// somewhere." Two negative results killed it: (1) it was maximally fooled
+// by paraphrasing — a word swapped for a synonym is no longer at the
+// "expected" position, so requiring literal co-location made the existing
+// paraphrase-robustness problem worse, not better (paraphrase separation
+// AUC 1.0, the worst possible score); (2) tested directly against real
+// Pride and Prejudice chunks, it did not separate answerable from
+// genuinely-unanswered questions at all — continuous narrative prose puts
+// unrelated words within 12 tokens of each other constantly by pure
+// happenstance, so proximity in flowing text is not a reliable proxy for
+// "these words are asserting a relationship," only for "these words are
+// in the same paragraph." A token window is the wrong tool for this;
+// fixing it would need actual relation/predicate identification, which
+// this codebase deliberately avoids (see buildEntityIndex's no-NLP-tagger
+// approach) rather than a distance heuristic.
+
+// MaxSim grounding (comparison feature — see the design note near
+// MAXSIM_FEAT below): coverageFrac requires exact or stemmed word
+// identity, so a query and its answer passage that use different words
+// for the same idea ("login" vs "authentication", "big" vs "huge") ground
+// each other at zero — a real, structural blind spot on a system built
+// around a semantic, paraphrase-tolerant retriever. maxSimFrac replaces
+// exact match with per-word embedding cosine similarity (ColBERT-style
+// late interaction, computed cheaply here: the inline encoder's per-token
+// hidden states are already produced by the same forward pass embed()
+// uses for the sentence vector — see embedWords() in
+// complete/inline-transformer.mjs — so this costs one extra encoder call
+// per scored passage, not one per word). For each query content word, the
+// score is the best cosine similarity against any content word in the
+// passage (heading words at reduced credit, same asymmetry as
+// coverageFrac and for the same reason), averaged across query words with
+// the same common-word downweighting coverageFrac uses.
+//
+// Raw cosine similarity between two encoder word vectors does not have a
+// meaningful zero: unrelated words in the same embedding space still
+// cluster somewhat, so even a passage that shares nothing with the query
+// scores well above 0 — measured on real corpora, ~0.45-0.55 for pairs of
+// genuinely unrelated corpus words, depending on the corpus's own
+// vocabulary and encoder. Using the raw value as-is (as an earlier
+// version of this file did, blended via max() with coverage1 into the
+// fit) inflated the grounding signal's floor on every row, not just
+// grounded ones, and pushed the fitted abstention threshold up sharply —
+// confirmed causing widespread false abstention in production on a real
+// corpus. estimateMaxSimBaseline fixes this the same way a z-score fixes
+// an uncentered measurement: sample random pairs of distinct corpus
+// words, take a high percentile of their cosine similarities as "how
+// similar do two unrelated words look by chance in THIS corpus, under
+// THIS encoder," and rescale every maxSimFrac call so that baseline maps
+// to 0 and a perfect match still maps to 1. A word pair that's no more
+// similar than corpus-typical unrelated words now correctly scores near
+// 0, the same way coverageFrac would.
+//
+// A linear rescale alone still lets marginal, barely-above-baseline
+// similarity through at meaningful (if small) credit, which is enough
+// noise on a small hard-negative pool to tip a corpus's held-out AUC
+// across the MIN_AUC gate — measured directly: Pride and Prejudice went
+// from clearing the gate comfortably on coverage1 alone (~0.86) to
+// missing it (0.849 < 0.85) once maxSim1 (correctly rescaled) joined the
+// blend, reproducibly across identical reruns. MAXSIM_GAMMA compresses
+// that low end further (a power curve, not just linear) — matched
+// similarity credit above baseline still approaches 1, but the marginal
+// range right above baseline now contributes closer to 0, so maxSim1 can
+// still rescue a genuine, strongly-similar paraphrase without adding
+// boundary jitter from near-chance similarity everywhere else.
+const MAXSIM_BASELINE_PAIRS = 400;
+const MAXSIM_BASELINE_PERCENTILE = 0.95;
+const MAXSIM_GAMMA = 3;
+async function estimateMaxSimBaseline(vocabWords, embedWordVec, seed) {
+  if (vocabWords.length < 2) return 0;
+  const cosine = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += a[i] * b[i]; return d; };
+  const next = rng(seed);
+  const sims = [];
+  const n = Math.min(MAXSIM_BASELINE_PAIRS, Math.floor((vocabWords.length * (vocabWords.length - 1)) / 2));
+  let attempts = 0;
+  while (sims.length < n && attempts < n * 20) {
+    attempts++;
+    const i = Math.floor(next() * vocabWords.length);
+    let j = Math.floor(next() * vocabWords.length);
+    if (j === i) j = (j + 1) % vocabWords.length;
+    const a = vocabWords[i], b = vocabWords[j];
+    if (a === b) continue;
+    // Suffix-sharing pairs ("configure"/"configuration") are genuinely
+    // related, not a noise sample — excluded so the baseline measures
+    // unrelated-word similarity, not near-duplicate-word similarity.
+    if (a.startsWith(b) || b.startsWith(a)) continue;
+    sims.push(cosine(await embedWordVec(a), await embedWordVec(b)));
+  }
+  if (!sims.length) return 0;
+  sims.sort((x, y) => x - y);
+  return sims[Math.min(sims.length - 1, Math.floor(sims.length * MAXSIM_BASELINE_PERCENTILE))];
+}
+
+async function maxSimFrac(text, passages, isCommon, embedWordVec, baseline = 0) {
   const content = tokenize(text).filter((w) => w.length >= COVERAGE_MIN_WORD_LEN && !COVERAGE_STOPWORDS.has(w));
   if (!content.length) return 0;
   const weights = content.map((w) => (isCommon && isCommon(w) ? COVERAGE_COMMON_WORD_WEIGHT : 1));
@@ -412,6 +519,13 @@ async function maxSimFrac(text, passages, isCommon, embedWordVec) {
     for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
     return dot; // both sides are already L2-normalized by embedWords()
   };
+  // Rescale so the corpus's own unrelated-word baseline maps to 0 and a
+  // perfect match (cosine 1) still maps to 1, then apply MAXSIM_GAMMA to
+  // suppress marginal, barely-above-baseline credit further — see this
+  // function's and MAXSIM_GAMMA's header comments. A raw similarity at or
+  // below baseline is exactly the "no better than chance" case
+  // coverageFrac would score 0.
+  const rescale = (sim) => (baseline >= 1 ? 0 : Math.max(0, (sim - baseline) / (1 - baseline)) ** MAXSIM_GAMMA);
   let best = 0;
   for (const { heading, body } of passages) {
     const bodyWords = [...new Set(tokenize(body || '').filter((w) => w.length >= COVERAGE_MIN_WORD_LEN))];
@@ -426,12 +540,29 @@ async function maxSimFrac(text, passages, isCommon, embedWordVec) {
       let simHeading = 0;
       for (const hv of headingVecs) simHeading = Math.max(simHeading, cosine(queryVecs[i], hv));
       simBest = Math.max(simBest, simHeading * HEADING_COVERAGE_WEIGHT);
-      simSum += Math.max(0, simBest) * weights[i];
+      simSum += rescale(simBest) * weights[i];
     }
     best = Math.max(best, simSum / weightSum);
   }
   return best;
 }
+
+// Passage-direction grounding was tried and abandoned (not reverted from a
+// shipped state — this never got past comparison telemetry): instead of
+// comparing the query against individual passage words (maxSim1's
+// approach), find each passage's own dominant semantic direction via
+// power iteration over its content words' embeddings (the top principal
+// component — "what this passage is about"), then score cosine(query
+// embedding, that direction). Measured on internal-docs: the top
+// component captured only 8-13% of a passage's total variance (26-120
+// content words per chunk) — nowhere near dominant, so the resulting
+// "direction" tracked closer to embedding-space noise (the same common
+// direction nearly all transformer word vectors share, which is also why
+// raw maxSim1 cosine similarity has no real zero) than any genuine topic
+// axis. Standalone hard-negative separation AUC came in at 0.61 versus
+// coverage1's 0.98, confirming it. Short chunks (the common case here)
+// are the wrong scale for small-sample PCA to find a stable direction;
+// might behave differently on much longer passages, untested.
 
 function buildCommonWordsBloom(chunks) {
   const df = new Map();
@@ -663,6 +794,13 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     }
     return wordVecCache.get(w);
   } : null;
+  // maxSim1's noise floor for THIS corpus under THIS encoder — see
+  // estimateMaxSimBaseline's header comment. Computed once, up front,
+  // from the same content-word vocabulary maxSimFrac itself draws from.
+  const maxSimVocab = embedWordVec
+    ? [...new Set(chunks.flatMap((c) => tokenize(c.text || '').filter((w) => w.length >= COVERAGE_MIN_WORD_LEN && !COVERAGE_STOPWORDS.has(w))))]
+    : [];
+  const maxSimBaseline = embedWordVec ? await estimateMaxSimBaseline(maxSimVocab, embedWordVec, SEED ^ 0xba5e11e) : 0;
 
   // Nothing is held out at the corpus level: the earlier held-out-document
   // hard-negative class asked a titleQuestions template about an excluded
@@ -747,7 +885,7 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // external-encoder build, where word-level embedding would mean a live
     // call to a host encoder per word — a cost this feature isn't asking
     // anyone to pay yet).
-    const maxSim1 = embedWordVec ? await maxSimFrac(text, passages, isCommon, embedWordVec) : null;
+    const maxSim1 = embedWordVec ? await maxSimFrac(text, passages, isCommon, embedWordVec, maxSimBaseline) : null;
     return {
       d0,
       margin,
@@ -755,7 +893,8 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       known_frac: knownFrac(text, bloom, bits),
       // GROUNDING_FEAT (the actual fit feature) is coverage1 itself — see
       // its design note above for why maxSim1 doesn't safely fold in via
-      // max(). maxSim1 is still computed and reported for comparison only.
+      // max(), even rescaled and damped. maxSim1 is still computed and
+      // reported for comparison only.
       [COVERAGE_FEAT]: coverage1,
       [MAXSIM_FEAT]: maxSim1,
     };
@@ -1356,6 +1495,10 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     const maxSimParaphrase = paraphraseRows(MAXSIM_FEAT);
     const coverageParaphrase = paraphraseRows(COVERAGE_FEAT);
     const maxSimVsCoverage = {
+      // "How similar do two unrelated words in this corpus look by
+      // chance" — see estimateMaxSimBaseline. maxSim1 is already rescaled
+      // against this before every other number below is computed.
+      maxSimBaseline: +maxSimBaseline.toFixed(4),
       maxSimSeparationAuc: maxSimRows ? aucFor(maxSimRows.pos, maxSimRows.neg) : null,
       coverageSeparationAuc: aucFor(coverageRows.pos, coverageRows.neg),
       meanMaxSimPositive: maxSimRows ? +(maxSimRows.pos.reduce((s, r) => s + r.p, 0) / maxSimRows.pos.length).toFixed(4) : null,
@@ -1449,9 +1592,9 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     // scores the topic-only model against the same thresholds
     // (conservative — it lacks a term that is positive for answerable
     // queries) instead of feeding an unknown feature name NaN into the
-    // logistic. useMaxSim is deliberately omitted/false: see
-    // GROUNDING_FEAT's design note for why blending maxSim1 in in at
-    // serve time is unsafe here — a reader must compute plain coverageFrac.
+    // logistic. useMaxSim is deliberately omitted: see GROUNDING_FEAT's
+    // design note for why blending maxSim1 in at serve time is unsafe
+    // here — a reader must compute plain coverageFrac.
     const asset = {
       version: 1,
       corpus: config.name,
