@@ -217,12 +217,203 @@
   .log-verb { color: var(--log-accent); margin-right: 8px; }
   .log-range { color: var(--log-ink); }
   .log-len { color: var(--log-dim); }
+  .log-file { color: var(--log-accent); margin-right: 6px; }
 
   .no-endpoints {
     font: 500 12px 'JetBrains Mono', monospace;
     color: var(--ink-dim);
   }
   .no-endpoints .x { color: var(--error); margin-right: 6px; }
+
+  #abl-request-log {
+    background: var(--log-bg);
+    border-radius: 8px;
+    padding: 10px 12px;
+    height: 100px;
+    overflow-y: auto;
+    font: 400 12px/1.7 'JetBrains Mono', monospace;
+    margin: 12px 0;
+  }
+  #tab-ablation .counters { grid-template-columns: repeat(2, 1fr); }
+
+  .run-query-btn {
+    display: block;
+    margin: 14px 0;
+    padding: 10px 16px;
+    height: auto;
+  }
+
+  .identity-card {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+    padding-top: 4px;
+    border-top: 1px solid var(--rule);
+  }
+  .identity-card > div.wide { grid-column: 1 / -1; }
+  .identity-card dt {
+    font: 600 10px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 3px;
+  }
+  .identity-card dd {
+    margin: 0;
+    font: 600 14px/1.3 'JetBrains Mono', monospace;
+    color: var(--ink);
+    word-break: break-word;
+  }
+  .identity-card dd.hash {
+    color: var(--accent);
+    font-weight: 500;
+    font-size: 13px;
+  }
+
+  .transfer-banner {
+    text-align: center;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    font: 700 15px/1.4 'JetBrains Mono', monospace;
+    color: var(--accent);
+  }
+  .transfer-banner .dim { color: var(--ink-dim); font-weight: 500; }
+
+  .suggested-queries {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .chip {
+    background: var(--surface-2);
+    color: var(--ink-dim);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font: 500 12px/1.3 'Inter', sans-serif;
+    white-space: normal;
+    text-align: left;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--accent); }
+  .chip.selected {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .agent-proof-link {
+    max-width: 760px;
+    margin: -8px auto 0;
+    padding: 0 20px;
+    text-align: center;
+    font: 400 13px/1.6 'Inter', sans-serif;
+    color: var(--ink-dim);
+  }
+  .agent-proof-link a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .agent-proof-link a:hover { text-decoration: underline; }
+  .agent-proof-link code {
+    font: 400 12px 'JetBrains Mono', monospace;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .tab {
+    background: transparent;
+    color: var(--ink-dim);
+    border: none;
+    border-radius: 8px 8px 0 0;
+    padding: 10px 16px;
+    font: 600 13px/1 'Inter', sans-serif;
+    cursor: pointer;
+    position: relative;
+    top: 1px;
+  }
+  .tab.active {
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-bottom-color: var(--surface);
+  }
+  #tab-search[hidden], #tab-ablation[hidden] { display: none; }
+  #tab-search, #tab-ablation {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .lede.small {
+    max-width: none;
+    font-size: 14px;
+  }
+  .lede.small code {
+    font: 400 12px 'JetBrains Mono', monospace;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .lede.small a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  .lede.small a:hover { text-decoration: underline; }
+
+  .ablation-question {
+    font: 600 16px/1.4 'Inter', sans-serif;
+    color: var(--ink);
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-radius: 8px;
+  }
+  .ablation-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .ablation-side {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ablation-answer {
+    margin: 0;
+    font-size: 15px;
+    color: var(--ink);
+    min-height: 1.4em;
+  }
+  .ablation-record {
+    margin: 0;
+    font: 400 11px/1.5 'JetBrains Mono', monospace;
+    color: var(--ink-dim);
+    border-top: 1px solid var(--rule);
+    padding-top: 8px;
+  }
+  .ablation-removed {
+    text-align: center;
+    color: var(--ink-dim);
+    font: 400 12px/1.5 'JetBrains Mono', monospace;
+    margin: 0;
+  }
+  .ablation-removed code {
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  @media (max-width: 560px) {
+    .ablation-panels { grid-template-columns: 1fr; }
+  }
 
   form#query-form {
     display: flex;
@@ -288,9 +479,10 @@
   @media (max-width: 480px) {
     h1 { font-size: 26px; }
     .counters { grid-template-columns: 1fr; }
+    .identity-card { grid-template-columns: 1fr; }
   }
 </style>
-  <script type="module" crossorigin src="./assets/index-DKFXKj0L.js"></script>
+  <script type="module" crossorigin src="./assets/index-C2NqF45v.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -305,35 +497,127 @@
     </p>
   </header>
 
-  <section class="panel">
-    <div class="panel-label">Mounted pack</div>
-    <div class="pack-row">
-      <input type="url" id="pack-url" spellcheck="false" autocomplete="off">
-      <button id="mount-btn" type="button">Mount</button>
-    </div>
-    <div id="status" class="status">—</div>
-  </section>
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab active" id="tab-btn-search" role="tab" aria-selected="true" aria-controls="tab-search">Search</button>
+    <button type="button" class="tab" id="tab-btn-ablation" role="tab" aria-selected="false" aria-controls="tab-ablation">Remove a fact</button>
+  </div>
 
-  <section class="panel">
-    <div class="panel-label">Network activity</div>
-    <div class="counters">
-      <div class="counter"><span class="n" id="req-count">0</span><span class="l">Range reads</span></div>
-      <div class="counter"><span class="n" id="byte-count">0 B</span><span class="l">Bytes fetched</span></div>
-      <div class="counter"><span class="n" id="pct-count">—</span><span class="l">Of the file</span></div>
-    </div>
-    <div id="request-log" aria-live="off"></div>
-    <div class="no-endpoints"><span class="x">✕</span>No /search · <span class="x">✕</span>No /embed · <span class="x">✕</span>No /query · <span class="x">✕</span>No /api — only <code>bytes=X-Y</code> against one URL.</div>
-  </section>
+  <div id="tab-search" role="tabpanel" aria-labelledby="tab-btn-search">
+    <section class="panel">
+      <div class="panel-label">Mounted pack</div>
+      <div class="pack-row">
+        <input type="url" id="pack-url" spellcheck="false" autocomplete="off">
+        <button id="mount-btn" type="button">Mount</button>
+      </div>
+      <div id="status" class="status">—</div>
+      <dl id="identity-card" class="identity-card" hidden>
+        <div><dt>File</dt><dd id="id-filename">—</dd></div>
+        <div><dt>Size</dt><dd id="id-size">—</dd></div>
+        <div><dt>Records</dt><dd id="id-records">—</dd></div>
+        <div><dt>Encoder</dt><dd id="id-encoder">—</dd></div>
+        <div class="wide"><dt>Artifact identity</dt><dd id="id-hash" class="hash">—</dd></div>
+      </dl>
+    </section>
 
-  <section class="panel">
-    <div class="panel-label">Ask it something</div>
-    <form id="query-form">
-      <input type="text" id="query-input" placeholder="ask anything…" disabled autocomplete="off">
-      <button type="submit">Search</button>
-    </form>
-    <div id="verdict" class="verdict"></div>
-    <div id="results"></div>
-  </section>
+    <section class="panel">
+      <div class="panel-label">Network activity</div>
+      <div class="counters">
+        <div class="counter"><span class="n" id="req-count">0</span><span class="l">Range reads</span></div>
+        <div class="counter"><span class="n" id="byte-count">0 B</span><span class="l">Bytes fetched</span></div>
+        <div class="counter"><span class="n" id="pct-count">—</span><span class="l">Of the file</span></div>
+      </div>
+      <div id="transfer-banner" class="transfer-banner" hidden>
+        <span id="transfer-headline">—</span>
+      </div>
+      <div id="request-log" aria-live="off"></div>
+      <div class="no-endpoints"><span class="x">✕</span>No /search · <span class="x">✕</span>No /embed · <span class="x">✕</span>No /query · <span class="x">✕</span>No /api — only <code>bytes=X-Y</code> against one URL.</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-label">Ask it something</div>
+      <p class="lede small">
+        The badge on each answer is match quality, not a fact-check: it measures how well the
+        retrieved passage matches your question, not whether that passage actually contains the
+        specific claim you asked about. At Wikipedia's scale almost every question has some
+        topically related article, so <code>strong</code> mostly means "an article about this
+        exists" — it can be confidently wrong on a specific detail the article doesn't cover. The
+        one place this file reliably withholds is when the topic itself is missing, which is what
+        the <a href="#" id="link-to-ablation-tab">fact-removal tab</a> shows.
+      </p>
+      <div class="suggested-queries" id="suggested-queries">
+        <button type="button" class="chip" data-q="Why do tectonic plates cause earthquakes?">Why do tectonic plates cause earthquakes?</button>
+        <button type="button" class="chip" data-q="What animals use tools?">What animals use tools?</button>
+        <button type="button" class="chip" data-q="How did the printing press affect literacy?">How did the printing press affect literacy?</button>
+        <button type="button" class="chip" data-q="What makes a disease infectious?">What makes a disease infectious?</button>
+      </div>
+      <form id="query-form">
+        <input type="text" id="query-input" placeholder="ask anything…" disabled autocomplete="off">
+        <button type="submit">Search</button>
+      </form>
+      <div id="verdict" class="verdict"></div>
+      <div id="results"></div>
+    </section>
+
+    <p class="agent-proof-link">
+      You just searched this file yourself, with the network log open. <a href="https://github.com/mcn92/pikelet#attach-a-pack-to-an-llm" target="_blank" rel="noopener">Watch Claude use this exact file over MCP →</a>
+      Same artifact, same read path, restricted to <code>search</code> / <code>list_packs</code> / <code>get_record</code> — no web tool, no filesystem tool.
+    </p>
+  </div>
+
+  <div id="tab-ablation" role="tabpanel" aria-labelledby="tab-btn-ablation" hidden>
+    <section class="panel">
+      <div class="panel-label">Network activity</div>
+      <div class="counters">
+        <div class="counter"><span class="n" id="abl-req-count">0</span><span class="l">Range reads</span></div>
+        <div class="counter"><span class="n" id="abl-byte-count">0 B</span><span class="l">Bytes fetched</span></div>
+      </div>
+      <div id="abl-request-log" aria-live="off"></div>
+      <div class="no-endpoints"><span class="x">✕</span>No /search · <span class="x">✕</span>No /embed · <span class="x">✕</span>No /query · <span class="x">✕</span>No /api — only <code>bytes=X-Y</code> against each of these files.</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-label">Same question, one fact removed</div>
+      <p class="lede small">
+        Two identical <code>.pikelet</code> files, compiled from the same fictional research-station
+        corpus. The right-hand file is missing a single record — pick which one. Same model, same
+        code path, no other change — the answer is a function of the file's contents, nothing else.
+      </p>
+      <div class="suggested-queries" id="fact-picker"></div>
+      <div class="ablation-question" id="ablation-question">loading…</div>
+      <button type="button" class="run-query-btn" id="ablation-run-btn">Run query on both files</button>
+      <div class="ablation-panels">
+        <div class="ablation-side">
+          <div class="panel-label">Full pack</div>
+          <div id="abl-full-badge" class="verdict"></div>
+          <p class="ablation-answer" id="abl-full-answer">Press "Run query on both files" above.</p>
+          <p class="ablation-record" id="abl-full-record"></p>
+        </div>
+        <div class="ablation-side">
+          <div class="panel-label">Missing one fact</div>
+          <div id="abl-ablated-badge" class="verdict"></div>
+          <p class="ablation-answer" id="abl-ablated-answer">Press "Run query on both files" above.</p>
+          <p class="ablation-record" id="abl-ablated-record"></p>
+        </div>
+      </div>
+      <p class="ablation-removed" id="ablation-removed"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-label">Same fact, contradicted</div>
+      <p class="lede small">
+        A third file for the fact selected above: identical to the full pack except that this one
+        record was edited to state a different, still-plausible value. The model answers
+        confidently either way — confidence measures how well the passage matches the question,
+        not whether the file's facts are internally consistent.
+      </p>
+      <div class="ablation-question" id="ablation-question-c43">loading…</div>
+      <button type="button" class="run-query-btn" id="ablation-c43-run-btn">Run query on the contradicted file</button>
+      <div id="abl-c43-badge" class="verdict"></div>
+      <p class="ablation-answer" id="abl-c43-answer">Press "Run query on the contradicted file" above.</p>
+      <p class="ablation-record" id="abl-c43-record"></p>
+      <p class="ablation-removed" id="ablation-c43-note"></p>
+    </section>
+  </div>
 
   <footer>
     the file is the search environment · <a href="https://github.com/mcn92/pikelet" target="_blank" rel="noopener">github.com/mcn92/pikelet</a>
