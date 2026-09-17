@@ -91,28 +91,30 @@ const SEED = 424242;
 const BASE_FEATS = ['d0', 'margin', 'mean10', 'known_frac'];
 const COVERAGE_FEAT = 'coverage1';
 const MAXSIM_FEAT = 'maxSim1';
-// grounding1: max(coverage1, maxSim1) — one word can ground a query either
-// by exact/stemmed lexical match (coverage1) or by encoder-level semantic
-// similarity (maxSim1); either is sufficient, so the two are combined by
-// max, not summed or fit as separate linear terms. This is deliberate, not
-// a simplification: measured on two real corpora, coverage1 alone
-// separates positives from ablation hard negatives better than maxSim1
-// alone (it's a sharp "the answer is truly absent" signal), which means a
-// joint logistic fit over both as independent features gives coverage1
-// nearly all the weight (measured ~5-19x maxSim1's) — the fit optimizes
-// hard-negative separation, which is exactly the objective coverage1 is
-// artificially good at for the same reason it over-penalizes paraphrases:
-// ablation negatives keep the query's own words while only removing the
-// answer, so raw word-overlap-with-retrieved-passage is a sharp
-// discriminator there specifically. That leaves maxSim1's real advantage —
-// it penalizes a genuine paraphrase (retrieval-verified answerable,
-// deliberately reduced lexical overlap with its own source — see the
-// "substituted" positive class below) roughly 2x less than coverage1 does
-// — almost unused by the fit. Taking the max at the feature level instead
-// of the coefficient level lets a paraphrase's semantic similarity rescue
-// it from coverage1's false penalty directly, without depending on
-// gradient descent to discover that trade against the wrong objective.
-const GROUNDING_FEAT = 'grounding1';
+// grounding1 was briefly max(coverage1, maxSim1) — the idea being that
+// either exact/stemmed lexical match (coverage1) or encoder-level semantic
+// similarity (maxSim1) should be enough to ground a word, so combine by
+// max rather than fit as separate linear terms (a joint fit gives
+// coverage1 nearly all the weight, since it's a sharper hard-negative
+// separator for reasons unrelated to which one is the better grounding
+// signal — see the comment that used to be here, and git history).
+// REVERTED: maxSim1 has no meaningful zero the way coverage1 does — cosine
+// similarity between encoder word vectors rarely drops near 0 even for
+// unrelated words (measured meanMaxSimHardNegative ~0.52 vs
+// meanCoverageHardNegative ~0.27 on the SAME hard negatives, i.e. rows the
+// fit itself labels "answer absent"). Since max() takes the larger value,
+// every row's grounding1 got dragged up toward maxSim1's inflated floor,
+// which pushed the fitted hard threshold up by nearly 2x on a real corpus
+// (0.26 -> 0.48) and caused widespread false abstention in production use
+// — confirmed by a real user's before/after probe set showing new false
+// abstentions and, worse, new false-confidence strong/weak verdicts on
+// genuinely unsupported questions. grounding1 is coverage1 again;
+// maxSim1 stays computed and reported (maxSimVsCoverage, comparison only)
+// for whoever next tries to fix coverage1's real paraphrase weakness, but
+// it must not feed the fit as a raw max until it has its own comparable
+// zero point (e.g. calibrated against this corpus's own baseline
+// cross-word similarity, not a global cosine value).
+const GROUNDING_FEAT = COVERAGE_FEAT;
 const FEATS = [...BASE_FEATS, GROUNDING_FEAT];
 const COVERAGE_MIN_WORD_LEN = 3;
 const COVERAGE_TOP_PASSAGES = 5;
@@ -751,13 +753,11 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       margin,
       mean10,
       known_frac: knownFrac(text, bloom, bits),
+      // GROUNDING_FEAT (the actual fit feature) is coverage1 itself — see
+      // its design note above for why maxSim1 doesn't safely fold in via
+      // max(). maxSim1 is still computed and reported for comparison only.
       [COVERAGE_FEAT]: coverage1,
       [MAXSIM_FEAT]: maxSim1,
-      // The actual fit feature — see GROUNDING_FEAT's design note.
-      // Degrades to plain coverage1 when maxSim1 isn't available so a
-      // kind-2 build (no per-word encoder access) still gets a grounding
-      // term instead of losing one outright.
-      [GROUNDING_FEAT]: maxSim1 === null ? coverage1 : Math.max(coverage1, maxSim1),
     };
   };
 
@@ -1155,12 +1155,6 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       ? stage2Positives.length / stage2Negatives.length : 1;
     const fit = [...stage2Positives, ...stage2Negatives];
     const stage2WeightOf = (r) => (r.label === 0 ? balanceFactor : 1);
-    // Whether maxSim1 actually reached grounding1 on this build (reported
-    // in the summary below) — informational only now; grounding1 itself is
-    // never null (see its definition in signalsFor), so FEATS never
-    // changes shape here the way it used to when maxSim1 was a separate
-    // linear term.
-    const maxSimAvailable = fit.length > 0 && fit.every((r) => r[MAXSIM_FEAT] !== null);
     const scorerFor = (fitRows) => genericScorerFor(FEATS, fitRows, stage2WeightOf);
     const model = scorerFor(fit);
     const { mean, std, w, b } = model;
@@ -1443,23 +1437,21 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       vocab: { uniqueWords, keptWords, minCount },
       coverage: { topPassages: COVERAGE_TOP_PASSAGES, commonWords: commonWords.commonWords, commonDfCap: commonWords.dfCap },
       // Standalone separation power of coverage1 and maxSim1 (see
-      // GROUNDING_FEAT's design note) — what each grounding signal does
-      // alone, not what grounding1 = max(coverage1, maxSim1) does once
-      // it's the one term the fit actually sees.
+      // GROUNDING_FEAT's design note) — comparison only. maxSim1 does NOT
+      // feed the fit (grounding1 is plain coverage1) and asset.coverage
+      // below does not set useMaxSim, so the reader must not blend it in
+      // either — the fit was calibrated against coverage1 alone.
       maxSimVsCoverage,
-      maxSimInFit: maxSimAvailable,
+      maxSimInFit: false,
     };
     // features[]/weights[] carry only the base topic features; grounding1
-    // rides in asset.coverage (name kept for backward compatibility — see
-    // below) so a reader that predates it scores the topic-only model
-    // against the same thresholds (conservative — it lacks a term that is
-    // positive for answerable queries) instead of feeding an unknown
-    // feature name NaN into the logistic. A reader with per-word encoder
-    // access (asset.coverage.useMaxSim + embedWords provided) computes
-    // max(coverageFrac, maxSimFrac); one without either just computes
-    // coverageFrac — both score the same weight/mean/std, since
-    // grounding1 degrades to coverage1 exactly the same way at build time
-    // when maxSim1 wasn't available (see signalsFor).
+    // (== coverage1) rides in asset.coverage so a reader that predates it
+    // scores the topic-only model against the same thresholds
+    // (conservative — it lacks a term that is positive for answerable
+    // queries) instead of feeding an unknown feature name NaN into the
+    // logistic. useMaxSim is deliberately omitted/false: see
+    // GROUNDING_FEAT's design note for why blending maxSim1 in in at
+    // serve time is unsafe here — a reader must compute plain coverageFrac.
     const asset = {
       version: 1,
       corpus: config.name,
@@ -1477,7 +1469,6 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
         stopwords: [...COVERAGE_STOPWORDS],
         topK: COVERAGE_TOP_PASSAGES,
         commonWordWeight: COVERAGE_COMMON_WORD_WEIGHT,
-        useMaxSim: maxSimAvailable,
         commonBloom: {
           bits: commonWords.bits,
           hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'],

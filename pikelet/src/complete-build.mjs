@@ -86,12 +86,12 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
           + `${entitySwapNegativeQueries} entity-swap hard negatives / ${foreignNegativeQueries} off-domain / `
           + `${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
           + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
-        log(`  grounding1 = max(coverage1, maxSim1): ${maxSimInFit ? 'maxSim1 available, blended in' : 'maxSim1 unavailable, coverage1 only'}`);
-        // Standalone separation power of each half of grounding1 (see
-        // calibrate.mjs's GROUNDING_FEAT design note); logged so it's
-        // visible without pulling apart the artifact.
+        // maxSim1 is comparison-only (see calibrate.mjs's GROUNDING_FEAT
+        // design note: max(coverage1, maxSim1) inflated the fitted
+        // threshold and caused false abstention in production — reverted).
+        // Logged so it's visible without pulling apart the artifact.
         if (maxSimVsCoverage?.maxSimSeparationAuc !== null && maxSimVsCoverage !== undefined) {
-          log(`  maxSim1 vs coverage1 vs ablation hard negatives (standalone, not the blended grounding1): separation AUC `
+          log(`  maxSim1 vs coverage1 vs ablation hard negatives (comparison only, not used in the fit): separation AUC `
             + `${maxSimVsCoverage.maxSimSeparationAuc ?? 'n/a'} vs ${maxSimVsCoverage.coverageSeparationAuc ?? 'n/a'}; `
             + `mean positive/hard-negative ${maxSimVsCoverage.meanMaxSimPositive}/${maxSimVsCoverage.meanMaxSimHardNegative} `
             + `vs ${maxSimVsCoverage.meanCoveragePositive}/${maxSimVsCoverage.meanCoverageHardNegative}`);
@@ -173,9 +173,9 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         humanCalibrationQueries: calibrationSummary.humanCalibrationQueries,
         realQueryAuc: calibrationSummary.realQueryAuc,
         realQueryAbstentionRate: calibrationSummary.realQueryAbstentionRate,
-        // Standalone separation power of coverage1 vs. maxSim1 (not what
-        // the shipped grounding1 = max(coverage1, maxSim1) term does —
-        // see calibrate.mjs's GROUNDING_FEAT design note).
+        // maxSim1 is comparison-only and does not feed the fit (always
+        // false) — see calibrate.mjs's GROUNDING_FEAT design note for why
+        // blending it via max() into grounding1 was reverted.
         maxSimVsCoverage: calibrationSummary.maxSimVsCoverage,
         maxSimInFit: calibrationSummary.maxSimInFit,
       },

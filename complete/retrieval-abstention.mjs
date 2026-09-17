@@ -6,25 +6,29 @@
 // distant — shown with a caveat), 'abstain' (nothing useful in the pack).
 //
 // Assets calibrated by pikelet's self-templates-v2+ may carry an additional
-// grounding term (asset.coverage): grounding1 = max(coverage1, maxSim1),
-// the fraction of the query's content words that appear in the top
-// retrieved passage's text (coverage1, exact/stemmed match), or the best
-// encoder-level word-cosine similarity when that scores higher (maxSim1,
-// only computed when asset.coverage.useMaxSim is set and the caller passed
-// embedWords — kind-3 only, since it needs per-word encoder access). Every
-// base feature measures topic similarity, so "the corpus discusses this
-// area" and "this passage answers this question" are indistinguishable
-// without a grounding term. The two are combined by max rather than fit as
-// separate linear terms deliberately — see pikelet/src/calibrate.mjs's
-// GROUNDING_FEAT design note: a joint fit gives coverage1 nearly all the
-// weight because it's artificially sharp at separating positives from
-// ablation hard negatives, which drowns out maxSim1's real advantage
-// (penalizing a genuine paraphrase far less than coverage1 does). The term
-// is serialized outside features[]/weights[] deliberately: a reader that
+// grounding term (asset.coverage): the fraction of the query's content
+// words that appear in the top retrieved passage's text (coverage1,
+// exact/stemmed match). Every base feature measures topic similarity, so
+// "the corpus discusses this area" and "this passage answers this
+// question" are indistinguishable without a grounding term. The term is
+// serialized outside features[]/weights[] deliberately: a reader that
 // predates it scores the topic-only model against the same thresholds (a
 // conservative degradation) instead of hitting an unknown feature name and
 // computing NaN. Word rules (min length, stopwords) ship in the asset so
 // builder and reader cannot drift.
+//
+// asset.coverage.useMaxSim + a semantic word-cosine grounding term
+// (maxSim1, folded in via Math.max with coverage1) was tried and reverted
+// — see pikelet/src/calibrate.mjs's GROUNDING_FEAT design note. maxSim1
+// has no meaningful zero the way coverage1 does (encoder word-cosine
+// rarely drops near 0 even for unrelated words), so max()-ing it in
+// inflated grounding1's floor on genuinely unrelated content and pushed
+// the fitted hard threshold up sharply, causing widespread false
+// abstention in production. The builder no longer sets useMaxSim, so this
+// reader's useMaxSim/maxSimFrac code below is unreachable in practice; it
+// stays only as a documented degradation path if an asset ever sets that
+// flag again, and must not be re-enabled without fixing maxSim1's baseline
+// first.
 
 export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
     if (!asset || !Array.isArray(asset.weights) || !asset.thresholds) return null;
