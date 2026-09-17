@@ -368,11 +368,14 @@ function switchTab(name) {
 
 async function runAblationPanel(url, question, badgeEl, answerEl, recordEl) {
     badgeEl.innerHTML = '';
-    answerEl.textContent = 'loading…';
+    let filename = url;
+    try { filename = new URL(url).pathname.split('/').pop() || url; } catch { /* relative path */ }
+    answerEl.textContent = `Mounting ${filename}…`;
     recordEl.innerHTML = '';
     try {
         const source = httpRangeSource(url);
         const packSearch = await openPikeletFile(source);
+        answerEl.textContent = 'Querying…';
         // No showAbstained: an abstained verdict here should visibly
         // withhold its results the way a real caller who wants that
         // behavior sees it, not surface the nearest-but-wrong passage
@@ -398,7 +401,8 @@ async function runAblationPanel(url, question, badgeEl, answerEl, recordEl) {
 // needlessly re-mount and re-query the 25 MB full pack every time.
 const fullPackAnswerCache = new Map();
 async function runFullPanel(question) {
-    if (!fullPackAnswerCache.has(question)) {
+    const alreadyCached = fullPackAnswerCache.has(question);
+    if (!alreadyCached) {
         fullPackAnswerCache.set(question, (async () => {
             const source = httpRangeSource(`${VEYRA_BASE}/veyra.pikelet`);
             const packSearch = await openPikeletFile(source);
@@ -406,7 +410,7 @@ async function runFullPanel(question) {
         })());
     }
     ablationEls.fullBadge.innerHTML = '';
-    ablationEls.fullAnswer.textContent = 'loading…';
+    ablationEls.fullAnswer.textContent = alreadyCached ? 'Querying…' : 'Mounting veyra.pikelet…';
     ablationEls.fullRecord.innerHTML = '';
     try {
         const out = await fullPackAnswerCache.get(question);
