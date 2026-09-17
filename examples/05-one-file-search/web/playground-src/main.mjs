@@ -288,18 +288,20 @@ const FACT_SCENARIOS = [
         contradictNote: 'Vault A → Vault B',
     },
     {
-        id: 'sup-betzel',
-        label: 'How many projects does Irena Sol supervise?',
-        question: 'How many projects does Irena Sol supervise?',
-        removedText: '"Irena Sol supervises the Betzel project." — the count should drop from 3, but the file correctly declines to guess a new number rather than state a wrong one.',
-        ablatedUrl: `${VEYRA_BASE}/veyra-remove-sup-betzel.pikelet`,
-        contradictUrl: `${VEYRA_BASE}/veyra-contradict-sup-betzel.pikelet`,
-        // A direct question, not the counting one above: counting questions
-        // don't map onto "confidently states the wrong value" the way a
-        // direct fact does, so the contradiction panel asks the direct
-        // version of the same underlying record instead.
-        contradictQuestion: 'Who supervises the Betzel project?',
-        contradictNote: 'Irena Sol → Tomas Vale',
+        id: 'clr-penlow',
+        label: 'What clearance does Penlow use?',
+        // Not the more obvious phrasing ("What clearance does the Penlow
+        // project use?") — on the contradicted pack that one ties for
+        // top-1 against an unrelated "Penlow Location" record, same issue
+        // clr-sarnix had. This phrasing, echoing the fact's own second
+        // sentence, reliably retrieves the actual clearance record on
+        // every pack this scenario uses.
+        question: 'What clearance badge do Penlow project members carry?',
+        removedText: '"The Penlow project uses cobalt clearance."',
+        ablatedUrl: `${VEYRA_BASE}/veyra-remove-clr-penlow.pikelet`,
+        contradictUrl: `${VEYRA_BASE}/veyra-contradict-clr-penlow.pikelet`,
+        contradictQuestion: 'What clearance badge do Penlow project members carry?',
+        contradictNote: 'cobalt clearance → ochre clearance',
     },
 ];
 
