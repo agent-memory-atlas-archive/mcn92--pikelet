@@ -104,7 +104,11 @@ it with pikelet-wasm/complete on any runtime. Abstention is self-calibrated
 from the corpus at build time (skipped with a logged reason when the corpus
 cannot support a trustworthy fit); --calibration <file> supplies a prebuilt
 retrieval-signals asset instead, --skip-calibration ships the artifact
-unscored. compile also takes --source, --out, --name, --max-pages, --include,
+unscored. --calibration-queries <file> supplies real, corpus-author-written
+questions (JSON-lines, one {text, expectId} or {text, expectTitle} object
+per line) used only to validate the self-calibrated fit and as the
+artifact's embedded golden queries — never as training data for the fit
+itself. compile also takes --source, --out, --name, --max-pages, --include,
 --exclude, --force (overwrite the output file), and --encoder-model/
 --encoder-weights/--encoder-vocab/--encoder-pooling/--encoder-query-prefix/
 --encoder-passage-prefix to swap the packaged MiniLM-L6 encoder for another
@@ -429,6 +433,18 @@ async function compileArtifact(flags) {
       // prebuilt retrieval-signals asset instead, --skip-calibration ships
       // the unscored placeholder.
       ...(flags['skip-calibration'] || flags.calibration ? {} : { calibration: 'auto' }),
+      // --calibration-queries: real, corpus-author-written questions used
+      // ONLY as held-out validation and as the artifact's embedded golden
+      // queries (see calibrate.mjs's loadCalibrationQueries and the v5
+      // design note at the top of that file) — never as fit positives.
+      // Resolved to an absolute path here, not left relative: compile's
+      // projectDir is a temp directory deleted at the end of this
+      // function, so a path relative to it would not survive past the
+      // build even though loadCalibrationQueries always resolves relative
+      // to projectDir for the scaffolded (create/rebuild) flow.
+      ...(flags['calibration-queries']
+        ? { calibrationQueries: path.resolve(process.cwd(), flags['calibration-queries']) }
+        : {}),
       inlineEncoder: {
         vocabPath: flags['encoder-vocab']
           ? path.resolve(process.cwd(), flags['encoder-vocab'])

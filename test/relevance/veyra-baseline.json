@@ -1,0 +1,14 @@
+{
+  "artifact": "veyra.pikelet",
+  "identity": "ab67d7f546590267b65149ca0416be4e1ec862b629d79f6e89626bfc20cadec5",
+  "totalQuestions": 90,
+  "totalAnswerable": 50,
+  "totalUnanswerable": 40,
+  "withheldCount": 0,
+  "withheldRate": 0,
+  "noneButRecoveredCount": 15,
+  "noneButWrongCount": 12,
+  "falseAnswerCount": 13,
+  "falseAnswerRate": 0.1444,
+  "correctCount": 65
+}

@@ -1,0 +1,1399 @@
+{
+  "_readme": "Calibration/abstention regression set for Pride and Prejudice (local-packs/pride-prejudice-src/, 61 chapters), built from a PRE-EXISTING list of 174 bare questions (174_pp_questions.txt, from a prior diagnostic session) rather than freshly authored. Each question below was checked against the actual chapter text during this labeling pass. Chapters read in full for this pass: 1-38, 41, 43, 46, 49, 52, 53, 55, 56, 58, 59, 61 (the pivotal plot chapters: first meetings, Collins, Wickham's story, the Netherfield ball, Darcy's two proposals and letter, Pemberley, Lydia's elopement and its resolution, Lady Catherine's visit, Bingley's return, both families' reactions). Chapters NOT read in this pass: 37, 39, 40, 42, 44, 45, 47, 48, 50, 51, 54, 57, 60 -- these are secondary/connective chapters; nothing in the 174-question list required them based on their content, but any answer that reads as heavily inferred rather than quoted is noted. cls values: direct (fact/motivation stated plainly in the narration, close wording), paraphrase (the question's wording diverges from the book's own phrasing enough to test a real lexical gap; pairsWith points at the closest 'direct' id testing the same underlying fact), unanswerable (no single grounded factual answer -- either pure literary interpretation with no textual verdict, a question with a false/unverifiable premise, or a request for information the text does not give), near-miss (topically adjacent but the specific fact asked is not stated in the text I read). Dropped: none outright, but #174 (the final list item) is pure literary-interpretation with no factual answer and is kept as cls:unanswerable rather than dropped, since the coordinator's instructions said to reclassify rather than silently drop where reasonable. A handful of others (noted per-item) are also literary/thematic and are similarly kept as unanswerable rather than removed, so the count of 174 source questions is fully accounted for.",
+  "questions": [
+    {
+      "id": "q001",
+      "cls": "direct",
+      "q": "Why does Mrs. Bennet want Mr. Bennet to visit Mr. Bingley?",
+      "answer": "So that the family can be acquainted with him, since he is a single man of large fortune newly arrived at Netherfield, and she hopes he will marry one of her daughters.",
+      "type": "exact",
+      "evidence": [{ "chapter": "01-chapter-i.md", "quote": "You must know that I am thinking of his marrying one of them." }]
+    },
+    {
+      "id": "q002",
+      "cls": "direct",
+      "q": "What first brings Mr. Bingley into the Bennets' social circle?",
+      "answer": "He rents Netherfield Park, a large estate near Longbourn.",
+      "type": "exact",
+      "evidence": [{ "chapter": "01-chapter-i.md", "quote": "Netherfield Park is let at last" }]
+    },
+    {
+      "id": "q003",
+      "cls": "direct",
+      "q": "How does Elizabeth initially react to Mr. Darcy?",
+      "answer": "She dislikes him -- she overhears him say she is not handsome enough to tempt him and is left with no cordial feelings towards him; she finds him proud and disagreeable.",
+      "type": "exact",
+      "evidence": [{ "chapter": "03-chapter-iii.md", "quote": "Mr. Darcy walked off; and Elizabeth remained with no very cordial feelings towards him." }]
+    },
+    {
+      "id": "q004",
+      "cls": "direct",
+      "q": "Why does Darcy refuse to dance with Elizabeth at the Meryton assembly?",
+      "answer": "He says she is 'tolerable, but not handsome enough to tempt' him, and he is in no humor to give consequence to a young lady slighted by other men.",
+      "type": "exact",
+      "evidence": [{ "chapter": "03-chapter-iii.md", "quote": "She is tolerable: but not handsome enough to tempt _me_" }]
+    },
+    {
+      "id": "q005",
+      "cls": "direct",
+      "q": "What does Elizabeth overhear Darcy say about her?",
+      "answer": "That she is tolerable but not handsome enough to tempt him, and that he is in no mood to give consequence to young ladies slighted by other men.",
+      "type": "exact",
+      "evidence": [{ "chapter": "03-chapter-iii.md", "quote": "She is tolerable: but not handsome enough to tempt _me_" }]
+    },
+    {
+      "id": "q006",
+      "cls": "unanswerable",
+      "q": "How does Elizabeth's first impression of Darcy influence her later judgments?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Broad thematic/analytical question about cause-and-effect across the whole novel rather than a single located fact; the book shows this happening across many chapters but never states the causal claim as a single sentence a retrieval system could point to."
+    },
+    {
+      "id": "q007",
+      "cls": "direct",
+      "q": "Why is Jane attracted to Bingley?",
+      "answer": "She finds him sensible, good-humoured, lively, with easy and perfect manners, and is flattered by his attentions.",
+      "type": "exact",
+      "evidence": [{ "chapter": "04-chapter-iv.md", "quote": "He is just what a young man ought to be... sensible, good-humoured, lively" }]
+    },
+    {
+      "id": "q008",
+      "cls": "direct",
+      "q": "Why does Bingley become interested in Jane?",
+      "answer": "He is struck by her beauty and sweetness of manner from the first assembly, calling her the most beautiful creature he ever beheld, and their mutual regard grows over repeated meetings.",
+      "type": "exact",
+      "evidence": [{ "chapter": "03-chapter-iii.md", "quote": "Oh, she is the most beautiful creature I ever beheld!" }]
+    },
+    {
+      "id": "q009",
+      "cls": "direct",
+      "q": "How does Mrs. Bennet embarrass Elizabeth and Jane in public?",
+      "answer": "She talks loudly and indiscreetly about Jane's expected marriage to Bingley at the Netherfield ball, within Darcy's hearing, and generally behaves with a lack of propriety in company.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "her mother was talking to that one person (Lady Lucas) freely, openly, and of nothing else but of her expectation that Jane would be soon married to Mr. Bingley" }]
+    },
+    {
+      "id": "q010",
+      "cls": "direct",
+      "q": "Why does Jane travel to Netherfield on horseback?",
+      "answer": "Mrs. Bennet refuses to let her have the carriage, because it seemed likely to rain and she calculated that Jane would have to stay overnight if caught in bad weather.",
+      "type": "exact",
+      "evidence": [{ "chapter": "07-chapter-vii.md", "quote": "you had better go on horseback, because it seems likely to rain; and then you must stay all night" }]
+    },
+    {
+      "id": "q011",
+      "cls": "direct",
+      "q": "Why does Jane remain at Netherfield after arriving?",
+      "answer": "She gets caught in the rain, catches a violent cold, and is too unwell to travel home; the Bingleys insist she stay until she recovers.",
+      "type": "exact",
+      "evidence": [{ "chapter": "07-chapter-vii.md", "quote": "I find myself very unwell this morning, which, I suppose, is to be imputed to my getting wet through yesterday" }]
+    },
+    {
+      "id": "q012",
+      "cls": "direct",
+      "q": "Why does Elizabeth walk to Netherfield?",
+      "answer": "To see her sister Jane, who is ill there; she has no carriage available and walks the three miles alone.",
+      "type": "exact",
+      "evidence": [{ "chapter": "07-chapter-vii.md", "quote": "Elizabeth, feeling really anxious, determined to go to her... walking was her only alternative" }]
+    },
+    {
+      "id": "q013",
+      "cls": "direct",
+      "q": "How does Elizabeth's muddy appearance affect the Bingley sisters' opinion of her?",
+      "answer": "They mock her behind her back for looking 'almost wild,' with an untidy, blowzy appearance and a petticoat six inches deep in mud, calling it an abominable, conceited independence.",
+      "type": "exact",
+      "evidence": [{ "chapter": "08-chapter-viii.md", "quote": "her petticoat; I hope you saw her petticoat, six inches deep in mud" }]
+    },
+    {
+      "id": "q014",
+      "cls": "direct",
+      "q": "What does Darcy think about Elizabeth's walk to Netherfield?",
+      "answer": "When asked if her dirty petticoat and the exercise had affected his admiration of her fine eyes, Darcy replies 'Not at all' -- saying her eyes were brightened by the exercise.",
+      "type": "exact",
+      "evidence": [{ "chapter": "08-chapter-viii.md", "quote": "\"Not at all,\" he replied: \"they were brightened by the exercise.\"" }]
+    },
+    {
+      "id": "q015",
+      "cls": "direct",
+      "q": "When does Darcy begin to find Elizabeth attractive?",
+      "answer": "After first scarcely allowing she was pretty and looking at her only to criticise, he begins to find her face rendered uncommonly intelligent by her fine eyes, and admits to Miss Bingley (during Elizabeth's stay at Netherfield nursing Jane) that he has been thinking about the pleasure a pair of fine eyes can bestow.",
+      "type": "exact",
+      "evidence": [
+        { "chapter": "06-chapter-vi.md", "quote": "he began to find it was rendered uncommonly intelligent by the beautiful expression of her dark eyes" }
+      ]
+    },
+    {
+      "id": "q016",
+      "cls": "direct",
+      "q": "What qualities in Elizabeth increasingly attract Darcy?",
+      "answer": "Her fine eyes and intelligent expression, her light and pleasing figure, and the easy playfulness of her manners, despite his initial view that her manners were not fashionable.",
+      "type": "exact",
+      "evidence": [{ "chapter": "06-chapter-vi.md", "quote": "he was caught by their easy playfulness" }]
+    },
+    {
+      "id": "q017",
+      "cls": "direct",
+      "q": "Why does Caroline Bingley dislike Elizabeth?",
+      "answer": "She is jealous because she perceives Darcy is falling for Elizabeth, and she looks down on the Bennet family's low connections and inferior manners.",
+      "type": "exact",
+      "evidence": [{ "chapter": "08-chapter-viii.md", "note": "Miss Bingley and Mrs. Hurst's mockery of Elizabeth's family and connections is shown throughout ch 8" }]
+    },
+    {
+      "id": "q018",
+      "cls": "direct",
+      "q": "How does Caroline attempt to discourage Darcy's interest in Elizabeth?",
+      "answer": "She teases and criticizes Elizabeth to Darcy (e.g. mocking her low connections, joking about a mother-in-law), and later tries provoking him by walking about the room to draw his attention away from Elizabeth.",
+      "type": "exact",
+      "evidence": [{ "chapter": "11-chapter-xi.md", "quote": "Miss Eliza Bennet, let me persuade you to follow my example, and take a turn about the room" }]
+    },
+    {
+      "id": "q019",
+      "cls": "direct",
+      "q": "How does Elizabeth respond to Darcy during their conversations at Netherfield?",
+      "answer": "She engages him with wit and teasing, challenging his opinions (e.g. on accomplished women, on his own character) rather than being intimidated by him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "10-chapter-x.md", "quote": "You have only proved by this... that Mr. Bingley did not do justice to his own disposition." }]
+    },
+    {
+      "id": "q020",
+      "cls": "unanswerable",
+      "q": "What does the discussion about an \"accomplished woman\" reveal about the characters?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Analytical/interpretive question about characterization, not a single located fact; the conversation itself (ch. 8) is real and quotable, but 'what it reveals' is literary interpretation."
+    },
+    {
+      "id": "q021",
+      "cls": "direct",
+      "q": "How does Darcy define an accomplished woman?",
+      "answer": "He says she must possess a thorough knowledge of music, singing, drawing, dancing, and modern languages, plus something in her air, manner of walking, tone of voice, and expressions -- and, further, she must improve her mind by extensive reading.",
+      "type": "exact",
+      "evidence": [{ "chapter": "08-chapter-viii.md", "quote": "to all she must yet add something more substantial in the improvement of her mind by extensive reading" }]
+    },
+    {
+      "id": "q022",
+      "cls": "direct",
+      "q": "How does Elizabeth challenge Darcy's standards for women?",
+      "answer": "She says she never saw such a woman uniting all that capacity, taste, application, and elegance, implying his standard is unrealistically high.",
+      "type": "exact",
+      "evidence": [{ "chapter": "08-chapter-viii.md", "quote": "I never saw such a woman. I never saw such capacity, and taste, and application, and elegance, as you describe, united." }]
+    },
+    {
+      "id": "q023",
+      "cls": "direct",
+      "q": "Why does Mr. Collins come to Longbourn?",
+      "answer": "As heir to the entailed Longbourn estate, he writes seeking reconciliation with the Bennet family, and comes intending to choose a wife among the Bennet daughters as a form of amends.",
+      "type": "exact",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "This was his plan of amends--of atonement--for inheriting their father's estate" }]
+    },
+    {
+      "id": "q024",
+      "cls": "direct",
+      "q": "What is Mr. Collins's relationship to the Bennet family estate?",
+      "answer": "He is the entailed heir -- the estate is entailed away from the female line, in default of male heirs, to Mr. Collins, a distant cousin.",
+      "type": "exact",
+      "evidence": [{ "chapter": "13-chapter-xiii.md", "quote": "the circumstance of my being next in the entail of Longbourn estate" }]
+    },
+    {
+      "id": "q025",
+      "cls": "direct",
+      "q": "Why will Mr. Collins inherit Longbourn?",
+      "answer": "Because Mr. Bennet has no sons, and the estate is entailed, in default of heirs male, to the nearest male relation, which is Mr. Collins.",
+      "type": "exact",
+      "evidence": [{ "chapter": "07-chapter-vii.md", "quote": "an estate of two thousand a year, which, unfortunately for his daughters, was entailed, in default of heirs male, on a distant relation" }]
+    },
+    {
+      "id": "q026",
+      "cls": "direct",
+      "q": "Why does Mr. Collins initially intend to marry one of the Bennet daughters?",
+      "answer": "As a way to make amends to the family for the entail that will one day deprive them of Longbourn, and because he wishes to marry per his own reasons plus Lady Catherine's advice.",
+      "type": "exact",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "This was his plan of amends--of atonement--for inheriting their father's estate" }]
+    },
+    {
+      "id": "q027",
+      "cls": "direct",
+      "q": "Which Bennet sister does Mr. Collins first consider marrying?",
+      "answer": "Jane",
+      "type": "name",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "for the first evening _she_ was his settled choice" }]
+    },
+    {
+      "id": "q028",
+      "cls": "direct",
+      "q": "Why does Mrs. Bennet redirect Mr. Collins from Jane to Elizabeth?",
+      "answer": "She hints that Jane is likely to be soon engaged (to Bingley), so Mr. Collins switches his intention to Elizabeth, who is next in birth and beauty.",
+      "type": "exact",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "her _eldest_ daughter she must just mention--she felt it incumbent on her to hint, was likely to be very soon engaged" }]
+    },
+    {
+      "id": "q029",
+      "cls": "direct",
+      "q": "What is Elizabeth's first impression of Mr. Collins?",
+      "answer": "She thinks him an oddity -- pompous in style, and she cannot understand why he would apologize for being next in the entail, since he could not help it.",
+      "type": "exact",
+      "evidence": [{ "chapter": "13-chapter-xiii.md", "quote": "He must be an oddity, I think... There is something very pompous in his style." }]
+    },
+    {
+      "id": "q030",
+      "cls": "direct",
+      "q": "How does Mr. Collins behave around Lady Catherine de Bourgh?",
+      "answer": "He is obsequious and deferential in the extreme, praising her at every opportunity and treating her opinions and attentions as the height of condescension.",
+      "type": "exact",
+      "evidence": [{ "chapter": "14-chapter-xiv.md", "quote": "Mr. Collins was eloquent in her praise" }]
+    },
+    {
+      "id": "q031",
+      "cls": "direct",
+      "q": "Why does Mr. Collins admire Lady Catherine so intensely?",
+      "answer": "She is his patroness, who gave him the living at Hunsford, and he mixes genuine gratitude with a taste for flattering people of high rank.",
+      "type": "exact",
+      "evidence": [{ "chapter": "14-chapter-xiv.md", "quote": "he had never in his life witnessed such behaviour in a person of rank" }]
+    },
+    {
+      "id": "q032",
+      "cls": "unanswerable",
+      "q": "What does Mr. Collins's manner reveal about his personality?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Interpretive/analytical question, not a single locatable fact -- the narration does characterize him directly (e.g. ch 15's 'mixture of pride and obsequiousness'), but the question as phrased asks for literary analysis, which borders on being answerable directly from ch 15's narrator commentary; kept as unanswerable since it is open-ended rather than pointing to one specific claim."
+    },
+    {
+      "id": "q033",
+      "cls": "direct",
+      "q": "How does Elizabeth react to Mr. Collins's proposal?",
+      "answer": "She is surprised, tries hard not to laugh, and firmly refuses him, though he refuses to believe her refusal is sincere.",
+      "type": "exact",
+      "evidence": [{ "chapter": "19-chapter-xix.md", "quote": "I am perfectly serious in my refusal." }]
+    },
+    {
+      "id": "q034",
+      "cls": "direct",
+      "q": "Why does Elizabeth refuse Mr. Collins?",
+      "answer": "She does not love him and believes he could not make her happy, nor she him; her feelings forbid it entirely.",
+      "type": "exact",
+      "evidence": [{ "chapter": "19-chapter-xix.md", "quote": "You could not make _me_ happy, and I am convinced that I am the last woman in the world who would make _you_ so." }]
+    },
+    {
+      "id": "q035",
+      "cls": "direct",
+      "q": "Why does Mr. Collins initially believe Elizabeth's refusal is not sincere?",
+      "answer": "He believes it is customary for young ladies to reject a man's first proposal even when they intend to accept, so he assumes her refusal is meant to increase his love by suspense.",
+      "type": "exact",
+      "evidence": [{ "chapter": "19-chapter-xix.md", "quote": "it is usual with young ladies to reject the addresses of the man whom they secretly mean to accept, when he first applies for their favour" }]
+    },
+    {
+      "id": "q036",
+      "cls": "direct",
+      "q": "How does Mrs. Bennet react when Elizabeth refuses Mr. Collins?",
+      "answer": "She is furious, insists Elizabeth will be made to marry him, appeals to Mr. Bennet to force her, and threatens never to see Elizabeth again if she does not accept.",
+      "type": "exact",
+      "evidence": [{ "chapter": "20-chapter-xx.md", "quote": "Lizzy declares she will not have Mr. Collins... if you do not make haste he will change his mind" }]
+    },
+    {
+      "id": "q037",
+      "cls": "direct",
+      "q": "How does Mr. Bennet respond to Elizabeth's refusal of Mr. Collins?",
+      "answer": "He supports her, telling her that from this day she must be a stranger to one of her parents: her mother will never see her again if she does not marry Collins, and he will never see her again if she does.",
+      "type": "exact",
+      "evidence": [{ "chapter": "20-chapter-xx.md", "quote": "your mother will never see you again if you do _not_ marry Mr. Collins, and I will never see you again if you _do_" }]
+    },
+    {
+      "id": "q038",
+      "cls": "direct",
+      "q": "Why does Charlotte Lucas agree to marry Mr. Collins?",
+      "answer": "She is 27, not romantic, wants only a comfortable home, and views marriage as the only honourable provision for a well-educated woman of small fortune.",
+      "type": "exact",
+      "evidence": [{ "chapter": "22-chapter-xxii.md", "quote": "marriage had always been her object: it was the only honourable provision for well-educated young women of small fortune" }]
+    },
+    {
+      "id": "q039",
+      "cls": "direct",
+      "q": "How does Elizabeth react to Charlotte's engagement?",
+      "answer": "She is astonished and dismayed, crying out 'impossible!', and feels her friend has sacrificed every better feeling to worldly advantage.",
+      "type": "exact",
+      "evidence": [{ "chapter": "22-chapter-xxii.md", "quote": "\"Engaged to Mr. Collins! my dear Charlotte, impossible!\"" }]
+    },
+    {
+      "id": "q040",
+      "cls": "direct",
+      "q": "Why does Charlotte consider marrying Mr. Collins a sensible decision?",
+      "answer": "It secures her a comfortable home and preservative from want, considering his character, connections, and situation in life, which she judges to give her as fair a chance of happiness as most people have.",
+      "type": "exact",
+      "evidence": [{ "chapter": "22-chapter-xxii.md", "quote": "I am convinced that my chance of happiness with him is as fair as most people can boast" }]
+    },
+    {
+      "id": "q041",
+      "cls": "unanswerable",
+      "q": "What does Charlotte's marriage reveal about women's economic choices?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Thematic/analytical question about the social commentary of the novel, not a single stated fact."
+    },
+    {
+      "id": "q042",
+      "cls": "unanswerable",
+      "q": "How do Elizabeth's views of marriage differ from Charlotte's?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Comparative/interpretive question requiring synthesis across multiple scenes rather than one locatable claim; Elizabeth does say directly in ch 24 that she wants to think well of few people and cannot support Charlotte's reasoning ('selfishness is prudence... insensibility of danger security for happiness'), but the framing 'how do her views differ' is broader analysis."
+    },
+    {
+      "id": "q043",
+      "cls": "direct",
+      "q": "Who is George Wickham?",
+      "answer": "An officer in the militia regiment stationed at Meryton, and the son of the late Mr. Darcy's steward.",
+      "type": "exact",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "his friend, Mr. Wickham, who had returned with him the day before from town, and, he was happy to say, had accepted a commission in their corps" }]
+    },
+    {
+      "id": "q044",
+      "cls": "direct",
+      "q": "How does Elizabeth first meet Wickham?",
+      "answer": "She is introduced to him in Meryton by Mr. Denny, while walking with her sisters.",
+      "type": "exact",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "Mr. Denny addressed them directly, and entreated permission to introduce his friend, Mr. Wickham" }]
+    },
+    {
+      "id": "q045",
+      "cls": "direct",
+      "q": "Why is Elizabeth immediately inclined to like Wickham?",
+      "answer": "He is handsome, has a fine countenance, good figure, and pleasing, easy conversation; his manners immediately charm her.",
+      "type": "exact",
+      "evidence": [{ "chapter": "15-chapter-xv.md", "quote": "he had all the best parts of beauty, a fine countenance, a good figure, and very pleasing address" }]
+    },
+    {
+      "id": "q046",
+      "cls": "direct",
+      "q": "What story does Wickham tell Elizabeth about Darcy?",
+      "answer": "That the late Mr. Darcy (his godfather) intended to give him a valuable church living, but the present Mr. Darcy denied him the living out of jealousy and dislike, leaving him without the profession or income he was raised to expect.",
+      "type": "exact",
+      "evidence": [{ "chapter": "16-chapter-xvi.md", "quote": "the late Mr. Darcy bequeathed me the next presentation of the best living in his gift... when the living fell, it was given elsewhere" }]
+    },
+    {
+      "id": "q047",
+      "cls": "direct",
+      "q": "What does Wickham claim Darcy denied him?",
+      "answer": "A valuable church living that the late Mr. Darcy had intended for him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "16-chapter-xvi.md", "quote": "I should at this time have been in possession of a most valuable living, had it pleased the gentleman we were speaking of" }]
+    },
+    {
+      "id": "q048",
+      "cls": "unanswerable",
+      "q": "Why does Elizabeth believe Wickham's account?",
+      "answer": null,
+      "type": "abstain",
+      "note": "The text shows several contributing factors (his charm, prior dislike of Darcy, the specificity of names and facts he gives) but never states a single unified 'why' -- this is closer to literary-psychological synthesis than a locatable fact; a near-miss/unanswerable call."
+    },
+    {
+      "id": "q049",
+      "cls": "unanswerable",
+      "q": "What parts of Wickham's story confirm Elizabeth's existing prejudices?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Interpretive synthesis question, not a single stated fact in the text."
+    },
+    {
+      "id": "q050",
+      "cls": "direct",
+      "q": "How does Wickham's appearance influence Elizabeth's judgment of him?",
+      "answer": "His countenance, voice, and manner establish him at once in her mind as possessing every virtue, per the narrator's own statement when she later reconsiders.",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "His countenance, voice, and manner, had established him at once in the possession of every virtue." }]
+    },
+    {
+      "id": "q051",
+      "cls": "direct",
+      "q": "Why does Wickham avoid attending the Netherfield ball?",
+      "answer": "To avoid meeting Mr. Darcy, whom he did not wish to be in the same room with for so many hours.",
+      "type": "exact",
+      "evidence": [{ "chapter": "21-chapter-xxi.md", "quote": "I found... that I had better not meet Mr. Darcy" }]
+    },
+    {
+      "id": "q052",
+      "cls": "direct",
+      "q": "What explanation is given for Wickham's absence from the Netherfield ball?",
+      "answer": "Mr. Denny said Wickham had been obliged to go to town on business the day before, but implied it was really to avoid Darcy.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "Wickham had been obliged to go to town on business the day before, and was not yet returned" }]
+    },
+    {
+      "id": "q053",
+      "cls": "direct",
+      "q": "How does Darcy behave toward Elizabeth at the Netherfield ball?",
+      "answer": "He surprises her by asking her to dance, which she accepts before thinking, and they have a tense, sparring conversation while dancing.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "she found herself suddenly addressed by Mr. Darcy, who took her so much by surprise in his application for her hand" }]
+    },
+    {
+      "id": "q054",
+      "cls": "direct",
+      "q": "Why does Elizabeth agree to dance with Darcy?",
+      "answer": "She is taken so much by surprise by his sudden request that she accepts without knowing what she did.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "that, without knowing what she did, she accepted him" }]
+    },
+    {
+      "id": "q055",
+      "cls": "direct",
+      "q": "What do Elizabeth and Darcy talk about while dancing?",
+      "answer": "Small talk about the dance and the room at first, then Elizabeth brings up Wickham, and Darcy comments that Wickham has 'happy manners' at making friends but may be less able to retain them.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "Mr. Wickham is blessed with such happy manners as may insure his _making_ friends; whether he may be equally capable of _retaining_ them, is less certain." }]
+    },
+    {
+      "id": "q056",
+      "cls": "direct",
+      "q": "How does Elizabeth use Wickham to challenge Darcy during their dance?",
+      "answer": "She raises the subject of Wickham losing Darcy's friendship, needling Darcy about it, provoking a defensive, constrained response from him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "He has been so unlucky as to lose your friendship, and in a manner which he is likely to suffer from all his life." }]
+    },
+    {
+      "id": "q057",
+      "cls": "direct",
+      "q": "Why is the Netherfield ball uncomfortable for Elizabeth?",
+      "answer": "She is disappointed Wickham is absent, then dances two mortifying dances with the awkward Mr. Collins, has a fraught dance with Darcy, and is later mortified by her family's public behaviour (her mother's loud talk, Mary's poor singing, Mr. Collins's speeches).",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "note": "Whole chapter recounts the sequence of embarrassments" }]
+    },
+    {
+      "id": "q058",
+      "cls": "direct",
+      "q": "How does Mrs. Bennet behave at the Netherfield ball?",
+      "answer": "She talks loudly and indiscreetly, within Darcy's hearing, about her expectation that Jane will soon marry Bingley.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "her mother was talking to that one person (Lady Lucas) freely, openly, and of nothing else but of her expectation that Jane would be soon married to Mr. Bingley" }]
+    },
+    {
+      "id": "q059",
+      "cls": "direct",
+      "q": "How does Mary Bennet embarrass the family at the ball?",
+      "answer": "She insists on singing despite having a weak voice and affected manner, and continues into a second song when her talents did not merit the attention, embarrassing Elizabeth until Mr. Bennet intervenes.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "Mary's powers were by no means fitted for such a display; her voice was weak, and her manner affected." }]
+    },
+    {
+      "id": "q060",
+      "cls": "direct",
+      "q": "How does Mr. Collins embarrass Elizabeth at the ball?",
+      "answer": "He dances awkwardly and apologetically with her (giving her shame and misery), then insists on introducing himself uninvited to Mr. Darcy, and later makes a long, pompous speech about clergymen's duties loud enough for half the room to hear.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "Mr. Collins, awkward and solemn, apologizing instead of attending... gave her all the shame and misery" }]
+    },
+    {
+      "id": "q061",
+      "cls": "direct",
+      "q": "Why does Elizabeth become increasingly ashamed of her family at Netherfield?",
+      "answer": "Because their public exhibitions (her mother's boasting, Mary's poor singing, Mr. Collins's pomposity) seem calculated to draw ridicule from the Bingley sisters and Darcy, and she feels it damages Jane's prospects.",
+      "type": "exact",
+      "evidence": [{ "chapter": "18-chapter-xviii.md", "quote": "had her family made an agreement to expose themselves as much as they could during the evening, it would have been impossible for them to play their parts with more spirit" }]
+    },
+    {
+      "id": "q062",
+      "cls": "direct",
+      "q": "What causes Bingley to leave Netherfield?",
+      "answer": "He and his party abruptly decide to follow him to London, ostensibly for business, but really engineered by his sisters and Darcy to separate him from Jane.",
+      "type": "exact",
+      "evidence": [{ "chapter": "21-chapter-xxi.md", "quote": "The whole party have left Netherfield by this time, and are on their way to town; and without any intention of coming back again." }]
+    },
+    {
+      "id": "q063",
+      "cls": "direct",
+      "q": "Who influences Bingley to stay away from Jane?",
+      "answer": "His sisters (especially Caroline) and Mr. Darcy, who together worked to detach him from Jane.",
+      "type": "nameset",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "His sisters' uneasiness had been equally excited with my own... we shortly resolved on joining him directly in London" }]
+    },
+    {
+      "id": "q064",
+      "cls": "direct",
+      "q": "Why does Darcy believe Jane does not truly love Bingley?",
+      "answer": "He observed that although Jane received Bingley's attentions with pleasure, her look and manner showed no symptom of peculiar regard, convincing him her heart was not likely to be easily touched.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "her heart was not likely to be easily touched. That I was desirous of believing her indifferent is certain" }]
+    },
+    {
+      "id": "q065",
+      "cls": "direct",
+      "q": "What role does Jane's reserved personality play in Bingley's separation from her?",
+      "answer": "Because Jane's serenity and composed manner concealed her true feelings, Darcy misread her as indifferent to Bingley, which he used as justification to help separate them.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "the serenity of your sister's countenance and air was such as might have given the most acute observer a conviction that... her heart was not likely to be easily touched" }]
+    },
+    {
+      "id": "q066",
+      "cls": "direct",
+      "q": "How does Caroline Bingley discourage Jane from expecting Bingley's return?",
+      "answer": "She writes letters saying the whole party has settled in London for the winter with no plan to return, and praises Georgiana Darcy at length, implying Bingley will marry her instead.",
+      "type": "exact",
+      "evidence": [{ "chapter": "21-chapter-xxi.md", "quote": "I really do not think Georgiana Darcy has her equal... the hope we dare to entertain of her being hereafter our sister" }]
+    },
+    {
+      "id": "q067",
+      "cls": "direct",
+      "q": "Why does Jane go to London?",
+      "answer": "She visits her aunt and uncle, the Gardiners, in Gracechurch Street, partly hoping to see something of the Bingleys while there.",
+      "type": "exact",
+      "evidence": [{ "chapter": "26-chapter-xxvi.md", "quote": "Jane had already written a few lines to her sister, to announce their safe arrival in London" }]
+    },
+    {
+      "id": "q068",
+      "cls": "direct",
+      "q": "How does Caroline treat Jane in London?",
+      "answer": "Coldly -- Caroline delays returning Jane's visit for weeks, then when she does call, stays only briefly, shows no pleasure in the visit, and does not suggest meeting again.",
+      "type": "exact",
+      "evidence": [{ "chapter": "26-chapter-xxvi.md", "quote": "Caroline did not return my visit till yesterday... it was very evident that she had no pleasure in it" }]
+    },
+    {
+      "id": "q069",
+      "cls": "direct",
+      "q": "How does Jane interpret Caroline's coldness?",
+      "answer": "She is hurt and puzzled but tries to excuse Caroline, attributing it to anxiety for her brother rather than deliberate unkindness.",
+      "type": "exact",
+      "evidence": [{ "chapter": "26-chapter-xxvi.md", "quote": "I pity, though I cannot help blaming, her" }]
+    },
+    {
+      "id": "q070",
+      "cls": "direct",
+      "q": "How does Elizabeth interpret Caroline's coldness?",
+      "answer": "Elizabeth believes Caroline sees her brother is in love with Jane and wants him to marry Georgiana Darcy instead, so she is trying to keep him in town and persuade Jane he doesn't care about her.",
+      "type": "exact",
+      "evidence": [{ "chapter": "21-chapter-xxi.md", "quote": "Miss Bingley sees that her brother is in love with you and wants him to marry Miss Darcy." }]
+    },
+    {
+      "id": "q071",
+      "cls": "direct",
+      "q": "Why does Elizabeth blame Darcy for Jane and Bingley's separation?",
+      "answer": "She suspects Darcy's pride and dislike of the Bennets' low connections led him to interfere and separate the couple, working alongside Miss Bingley.",
+      "type": "exact",
+      "evidence": [{ "chapter": "33-chapter-xxxiii.md", "quote": "That he had been concerned in the measures taken to separate Mr. Bingley and Jane, she had never doubted" }]
+    },
+    {
+      "id": "q072",
+      "cls": "direct",
+      "q": "What evidence does Elizabeth initially have that Darcy interfered?",
+      "answer": "Colonel Fitzwilliam mentions, without naming names, that Darcy recently congratulated himself on saving a friend from an imprudent marriage, which Elizabeth immediately connects to Bingley and Jane.",
+      "type": "exact",
+      "evidence": [{ "chapter": "33-chapter-xxxiii.md", "quote": "he congratulated himself on having lately saved a friend from the inconveniences of a most imprudent marriage" }]
+    },
+    {
+      "id": "q073",
+      "cls": "direct",
+      "q": "Why does Elizabeth visit Charlotte at Hunsford?",
+      "answer": "Charlotte had made her promise to visit, and Elizabeth accompanies Sir William Lucas and Maria on the trip in March.",
+      "type": "exact",
+      "evidence": [{ "chapter": "27-chapter-xxvii.md", "quote": "Promise me, therefore, to come to Hunsford." }]
+    },
+    {
+      "id": "q074",
+      "cls": "direct",
+      "q": "What does Elizabeth think of Charlotte's married life?",
+      "answer": "She observes that Charlotte seems to genuinely manage it well and bear with Mr. Collins with composure, and concludes it was 'all done very well,' though she personally cannot admire the match.",
+      "type": "exact",
+      "evidence": [{ "chapter": "28-chapter-xxviii.md", "quote": "to acknowledge that it was all done very well" }]
+    },
+    {
+      "id": "q075",
+      "cls": "direct",
+      "q": "How does Charlotte manage Mr. Collins?",
+      "answer": "She wisely does not hear or react to his embarrassing remarks, encourages his gardening as a healthy pastime that keeps him occupied and out of the house, and generally handles him with practiced composure.",
+      "type": "exact",
+      "evidence": [{ "chapter": "28-chapter-xxviii.md", "quote": "she involuntarily turned her eye on Charlotte. Once or twice she could discern a faint blush; but in general Charlotte wisely did not hear." }]
+    },
+    {
+      "id": "q076",
+      "cls": "direct",
+      "q": "Why does Charlotte arrange her household to minimize time with her husband?",
+      "answer": "She chooses the back room (not the pleasanter dining parlour) for common use, since Mr. Collins would be much more often in his own book-room if the family sat in a livelier room, and she encourages his gardening as much as possible.",
+      "type": "exact",
+      "evidence": [{ "chapter": "30-chapter-xxx.md", "quote": "Mr. Collins would undoubtedly have been much less in his own apartment had they sat in one equally lively" }]
+    },
+    {
+      "id": "q077",
+      "cls": "direct",
+      "q": "Who is Colonel Fitzwilliam?",
+      "answer": "Mr. Darcy's cousin, the younger son of an earl, who visits Rosings with Darcy at Easter.",
+      "type": "exact",
+      "evidence": [{ "chapter": "30-chapter-xxx.md", "quote": "Mr. Darcy had brought with him a Colonel Fitzwilliam, the younger son of his uncle, Lord ----" }]
+    },
+    {
+      "id": "q078",
+      "cls": "direct",
+      "q": "How is Colonel Fitzwilliam related to Darcy?",
+      "answer": "He is Darcy's cousin, and joint guardian (with Darcy) of Georgiana.",
+      "type": "exact",
+      "evidence": [{ "chapter": "33-chapter-xxxiii.md", "quote": "I am joined with him in the guardianship of Miss Darcy." }]
+    },
+    {
+      "id": "q079",
+      "cls": "direct",
+      "q": "What does Colonel Fitzwilliam accidentally reveal to Elizabeth?",
+      "answer": "That Darcy recently congratulated himself on saving a friend from an imprudent marriage -- which Elizabeth realizes must refer to Bingley and Jane.",
+      "type": "exact",
+      "evidence": [{ "chapter": "33-chapter-xxxiii.md", "quote": "he congratulated himself on having lately saved a friend from the inconveniences of a most imprudent marriage" }]
+    },
+    {
+      "id": "q080",
+      "cls": "direct",
+      "q": "How does Elizabeth realize Darcy separated Bingley from Jane?",
+      "answer": "Through Colonel Fitzwilliam's unguarded remark about Darcy saving a friend from an imprudent marriage, which she connects to Bingley based on timing and detail.",
+      "type": "exact",
+      "evidence": [{ "chapter": "33-chapter-xxxiii.md", "quote": "It was not to be supposed that any other people could be meant than those with whom she was connected." }]
+    },
+    {
+      "id": "q081",
+      "cls": "direct",
+      "q": "Why does this revelation make Elizabeth angry?",
+      "answer": "Because she believes Darcy's pride and caprice ruined the happiness of her beloved sister, and she feels he had no right to judge and direct his friend's affections.",
+      "type": "exact",
+      "evidence": [{ "chapter": "33-chapter-xxxiii.md", "quote": "his pride and caprice were the cause--of all that Jane had suffered" }]
+    },
+    {
+      "id": "q082",
+      "cls": "direct",
+      "q": "Why does Darcy propose to Elizabeth the first time?",
+      "answer": "He can no longer struggle against his feelings; he ardently admires and loves her despite his sense of her family's inferiority.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "In vain have I struggled. It will not do. My feelings will not be repressed. You must allow me to tell you how ardently I admire and love you." }]
+    },
+    {
+      "id": "q083",
+      "cls": "direct",
+      "q": "What is unusual about Darcy's first proposal?",
+      "answer": "He dwells at length on his sense of her inferiority and the degradation of the match, alongside his declaration of love, which offends rather than flatters Elizabeth.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "His sense of her inferiority, of its being a degradation, of the family obstacles which judgment had always opposed to inclination, were dwelt on with a warmth" }]
+    },
+    {
+      "id": "q084",
+      "cls": "direct",
+      "q": "Why does Darcy emphasize Elizabeth's inferior social connections during his proposal?",
+      "answer": "Because it is genuinely part of what he has struggled against -- he considers it a real obstacle he is overcoming out of love for her, and speaks of it with the warmth due to the pride he is wounding.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "the family obstacles which judgment had always opposed to inclination, were dwelt on with a warmth which seemed due to the consequence he was wounding" }]
+    },
+    {
+      "id": "q085",
+      "cls": "direct",
+      "q": "Why does Elizabeth reject Darcy's first proposal?",
+      "answer": "She has never desired his good opinion, believes he ruined Jane's happiness and wronged Wickham, and finds his manner arrogant and insulting; she says he is the last man in the world she could ever be prevailed on to marry.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "you were the last man in the world whom I could ever be prevailed on to marry" }]
+    },
+    {
+      "id": "q086",
+      "cls": "direct",
+      "q": "What accusations does Elizabeth make against Darcy?",
+      "answer": "That he ruined the happiness of her sister Jane by separating her from Bingley, and that he unjustly deprived Wickham of the living/income that was meant for him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "the man who has been the means of ruining, perhaps for ever, the happiness of a most beloved sister" }]
+    },
+    {
+      "id": "q087",
+      "cls": "direct",
+      "q": "How does Elizabeth accuse Darcy of harming Jane?",
+      "answer": "She says he was the principal, if not only, means of dividing Bingley and Jane, exposing each of them to censure and misery.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "you have been the principal, if not the only means of dividing them from each other" }]
+    },
+    {
+      "id": "q088",
+      "cls": "direct",
+      "q": "How does Elizabeth accuse Darcy of mistreating Wickham?",
+      "answer": "She says Darcy reduced Wickham to poverty, withheld the advantages designed for him, and deprived him of the independence that was his due.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "You have reduced him to his present state of poverty... You have withheld the advantages which you must know to have been designed for him." }]
+    },
+    {
+      "id": "q089",
+      "cls": "direct",
+      "q": "How does Darcy react to Elizabeth's rejection?",
+      "answer": "He is pale with anger, struggles to maintain composure, defends his actions regarding Bingley and Wickham, and leaves abruptly, saying he is ashamed of his own feelings.",
+      "type": "exact",
+      "evidence": [{ "chapter": "34-chapter-xxxiv.md", "quote": "You have said quite enough, madam. I perfectly comprehend your feelings, and have now only to be ashamed of what my own have been." }]
+    },
+    {
+      "id": "q090",
+      "cls": "direct",
+      "q": "Why does Darcy write Elizabeth a letter?",
+      "answer": "To defend himself against her two accusations (separating Bingley from Jane, and wronging Wickham), since his character required it to be written and read.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "the effort which the formation and the perusal of this letter must occasion, should have been spared, had not my character required it to be written and read" }]
+    },
+    {
+      "id": "q091",
+      "cls": "direct",
+      "q": "What two major issues does Darcy address in his letter?",
+      "answer": "His role in separating Bingley from Jane, and the true history of his dealings with Wickham.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "Two offences of a very different nature... The first mentioned was, that... I had detached Mr. Bingley from your sister,--and the other, that I had... ruined the immediate prosperity and blasted the prospects of Mr. Wickham." }]
+    },
+    {
+      "id": "q092",
+      "cls": "direct",
+      "q": "How does Darcy justify separating Bingley from Jane?",
+      "answer": "He believed Jane was indifferent to Bingley based on his own careful observation, and also objected to the impropriety frequently shown by Mrs. Bennet, the younger sisters, and occasionally Mr. Bennet.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "I remained convinced, from the evening's scrutiny, that though she received his attentions with pleasure, she did not invite them by any participation of sentiment" }]
+    },
+    {
+      "id": "q093",
+      "cls": "direct",
+      "q": "What evidence does Darcy give that Jane appeared indifferent to Bingley?",
+      "answer": "He says her look and manner were open, cheerful, and engaging, but without any symptom of peculiar regard, so an acute observer would conclude her heart was not easily touched.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "Her look and manners were open, cheerful, and engaging as ever, but without any symptom of peculiar regard" }]
+    },
+    {
+      "id": "q094",
+      "cls": "direct",
+      "q": "What does Darcy admit about his role in separating Jane and Bingley?",
+      "answer": "He admits he concealed from Bingley that Jane had been in London for three months, calling it a concealment/disguise possibly beneath him, though he does not regret persuading Bingley she was indifferent.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "it is that I condescended to adopt the measures of art so far as to conceal from him your sister's being in town" }]
+    },
+    {
+      "id": "q095",
+      "cls": "direct",
+      "q": "What does Darcy reveal about Wickham's inheritance?",
+      "answer": "The late Mr. Darcy left Wickham a legacy of one thousand pounds and recommended promoting his advancement, including a family living if he took orders.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "if he took orders, desired that a valuable family living might be his as soon as it became vacant. There was also a legacy of one thousand pounds." }]
+    },
+    {
+      "id": "q096",
+      "cls": "direct",
+      "q": "What happened to the church living Wickham claimed Darcy denied him?",
+      "answer": "Wickham himself gave up all claim to it, in exchange for three thousand pounds, saying he had resolved against taking orders; years later, when the living actually became vacant, he asked for it again and was refused.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "He resigned all claim to assistance in the church... and accepted in return three thousand pounds." }]
+    },
+    {
+      "id": "q097",
+      "cls": "direct",
+      "q": "Why did Wickham give up the church living?",
+      "answer": "He had resolved against taking orders and wanted immediate money instead, saying he intended to study law.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "having finally resolved against taking orders, he hoped I should not think it unreasonable for him to expect some more immediate pecuniary advantage" }]
+    },
+    {
+      "id": "q098",
+      "cls": "direct",
+      "q": "What did Wickham do with the money he received instead?",
+      "answer": "He lived a life of idleness and dissipation in town; his claimed study of law was a mere pretence.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "his studying the law was a mere pretence; and being now free from all restraint, his life was a life of idleness and dissipation" }]
+    },
+    {
+      "id": "q099",
+      "cls": "direct",
+      "q": "What does Darcy reveal about Wickham and Georgiana?",
+      "answer": "That Wickham, with the connivance of Mrs. Younge, persuaded the then-fifteen-year-old Georgiana to agree to an elopement with him at Ramsgate, chiefly for her thirty-thousand-pound fortune; Darcy arrived unexpectedly and stopped it.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "she was persuaded to believe herself in love and to consent to an elopement" }]
+    },
+    {
+      "id": "q100",
+      "cls": "direct",
+      "q": "How old was Georgiana when Wickham attempted to elope with her?",
+      "answer": "Fifteen",
+      "type": "number",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "She was then but fifteen, which must be her excuse" }]
+    },
+    {
+      "id": "q101",
+      "cls": "direct",
+      "q": "Why did Wickham attempt to elope with Georgiana?",
+      "answer": "Chiefly for her fortune of thirty thousand pounds, though Darcy also suspects the hope of revenging himself on Darcy was a strong motive.",
+      "type": "exact",
+      "evidence": [{ "chapter": "35-chapter-xxxv.md", "quote": "Mr. Wickham's chief object was unquestionably my sister's fortune, which is thirty thousand pounds; but I cannot help supposing that the hope of revenging himself on me was a strong inducement." }]
+    },
+    {
+      "id": "q102",
+      "cls": "direct",
+      "q": "How does Darcy's letter change Elizabeth's view of Wickham?",
+      "answer": "She becomes convinced, after re-reading and weighing the letter, that Wickham's account was false and self-serving, and that his charm had concealed real vice and extravagance.",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "How differently did everything now appear in which he was concerned!" }]
+    },
+    {
+      "id": "q103",
+      "cls": "direct",
+      "q": "How does Darcy's letter change Elizabeth's view of herself?",
+      "answer": "She becomes ashamed of herself, realizing she had been blind, partial, prejudiced, and absurd, and that vanity rather than love or reason had guided her judgment.",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "How despicably have I acted!... Till this moment, I never knew myself." }]
+    },
+    {
+      "id": "q104",
+      "cls": "direct",
+      "q": "What does Elizabeth mean when she realizes she has been \"blind, partial, prejudiced, absurd\"?",
+      "answer": "She recognizes that her judgments of both Darcy and Wickham were shaped by vanity and prejudice rather than fair observation, having disdained her sister's generous candour and trusted her own supposed discernment.",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "Of neither Darcy nor Wickham could she think, without feeling that she had been blind, partial, prejudiced, absurd." }]
+    },
+    {
+      "id": "q105",
+      "cls": "near-miss",
+      "q": "Which of Elizabeth's beliefs changes first after reading Darcy's letter?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Ch. 36 narrates a complex, non-linear process of reading and re-reading (she disbelieves at first, then is persuaded piece by piece about Wickham, then reconsiders Jane/Bingley on a second pass) -- the text does not state a clean single 'first belief changed' in a way that supports one exact answer."
+    },
+    {
+      "id": "q106",
+      "cls": "direct",
+      "q": "What evidence causes Elizabeth to reconsider Wickham's honesty?",
+      "answer": "The specific, checkable details in Darcy's letter (the sum of three thousand pounds, the timeline, Colonel Fitzwilliam's corroborating position) and her own recollection of inconsistencies in Wickham's prior behaviour (avoiding Darcy, only telling his story after the Netherfield family left).",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "she was referred for the truth of every particular to Colonel Fitzwilliam himself" }]
+    },
+    {
+      "id": "q107",
+      "cls": "direct",
+      "q": "How does Elizabeth reconstruct Wickham's past behavior after reading the letter?",
+      "answer": "She recalls that he boasted of not fearing Darcy yet avoided the Netherfield ball, and that he only spread his story widely after the Netherfield family had left, both of which now strike her as inconsistent with his professed openness.",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "she remembered, also, that till the Netherfield family had quitted the country, he had told his story to no one but herself" }]
+    },
+    {
+      "id": "q108",
+      "cls": "direct",
+      "q": "Why does Elizabeth become ashamed of her earlier certainty?",
+      "answer": "She realizes her confident dislike of Darcy and trust in Wickham were built on vanity, not evidence, and that she had prided herself on discernment she did not actually possess.",
+      "type": "exact",
+      "evidence": [{ "chapter": "36-chapter-xxxvi.md", "quote": "I, who have prided myself on my discernment!" }]
+    },
+    {
+      "id": "q109",
+      "cls": "direct",
+      "q": "Does Elizabeth immediately fall in love with Darcy after reading the letter?",
+      "answer": "No -- her feelings toward him only gradually soften over the following months, particularly after seeing Pemberley and observing his changed behaviour; the letter changes her opinion of his conduct, not yet her feelings.",
+      "type": "yesno",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "It has been coming on so gradually, that I hardly know when it began" }]
+    },
+    {
+      "id": "q110",
+      "cls": "direct",
+      "q": "What changes first: Elizabeth's opinion of Darcy or her feelings toward him?",
+      "answer": "Her opinion of him changes first (via the letter), and her feelings of attachment follow much later, developing gradually and only becoming clear to her around the time of visiting Pemberley.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "I believe I must date it from my first seeing his beautiful grounds at Pemberley" }]
+    },
+    {
+      "id": "q111",
+      "cls": "direct",
+      "q": "Why does Elizabeth travel to Derbyshire with the Gardiners?",
+      "answer": "The Gardiners had planned a summer tour, originally intending the Lakes, and Derbyshire (where Mrs. Gardiner had once lived) becomes their revised destination; Elizabeth accompanies them.",
+      "type": "exact",
+      "evidence": [{ "chapter": "27-chapter-xxvii.md", "quote": "she had the unexpected happiness of an invitation to accompany her uncle and aunt in a tour of pleasure" }]
+    },
+    {
+      "id": "q112",
+      "cls": "direct",
+      "q": "Why does Elizabeth agree to visit Pemberley?",
+      "answer": "Because Mrs. Gardiner wishes to see it, and Elizabeth is first assured by the chambermaid/innkeeper information that Mr. Darcy is away from home.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "She dreaded lest the chambermaid had been mistaken." }]
+    },
+    {
+      "id": "q113",
+      "cls": "direct",
+      "q": "What makes Elizabeth believe Darcy will not be at Pemberley?",
+      "answer": "She had made cautious inquiries and been assured he was away; the housekeeper confirms he is absent (though expected the next day).",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "the question was asked by her uncle; and she turned away with alarm, while Mrs. Reynolds replied, that he was" }]
+    },
+    {
+      "id": "q114",
+      "cls": "direct",
+      "q": "How does Elizabeth react when she first sees Pemberley?",
+      "answer": "She is delighted -- she finds it a beautiful, naturally handsome place with little artificial improvement, and momentarily reflects that to be mistress of Pemberley might be something.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "she felt that to be mistress of Pemberley might be something!" }]
+    },
+    {
+      "id": "q115",
+      "cls": "unanswerable",
+      "q": "What does Elizabeth's response to Pemberley reveal about her changing attitude?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Interpretive/analytical question, not a single locatable factual claim, though closely adjacent to q114's directly-quotable moment."
+    },
+    {
+      "id": "q116",
+      "cls": "direct",
+      "q": "What does Mrs. Reynolds say about Darcy?",
+      "answer": "She praises him extensively -- calling him the best landlord and master who ever lived, saying she never had a cross word from him in her life since he was four years old, and describes him as sweet-tempered and generous.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "I have never had a cross word from him in my life, and I have known him ever since he was four years old." }]
+    },
+    {
+      "id": "q117",
+      "cls": "direct",
+      "q": "Why is Mrs. Reynolds's opinion important to Elizabeth?",
+      "answer": "It is the disinterested opinion of a servant who has known him since childhood -- and Elizabeth reflects, 'What praise is more valuable than the praise of an intelligent servant?'",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "What praise is more valuable than the praise of an intelligent servant?" }]
+    },
+    {
+      "id": "q118",
+      "cls": "direct",
+      "q": "How does Mrs. Reynolds's description conflict with Wickham's portrayal of Darcy?",
+      "answer": "Wickham portrayed Darcy as proud, unjust, and cruel, while Mrs. Reynolds describes him as the sweetest-tempered, most generous-hearted, good-natured man, prompting Elizabeth to think 'Can this be Mr. Darcy?'",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "Elizabeth almost stared at her. \"Can this be Mr. Darcy?\" thought she." }]
+    },
+    {
+      "id": "q119",
+      "cls": "direct",
+      "q": "What does Elizabeth learn about Darcy as a brother?",
+      "answer": "Mrs. Reynolds says whatever can give his sister pleasure is sure to be done in a moment, and points to a room newly fitted up especially to please Georgiana.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "Whatever can give his sister any pleasure, is sure to be done in a moment. There is nothing he would not do for her." }]
+    },
+    {
+      "id": "q120",
+      "cls": "direct",
+      "q": "How does Darcy behave when he unexpectedly meets Elizabeth at Pemberley?",
+      "answer": "He is startled and blushes deeply, but quickly composes himself and speaks to her with perfect civility, inquiring after her family.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "He absolutely started, and for a moment seemed immovable from surprise; but shortly recovering himself, advanced towards the party" }]
+    },
+    {
+      "id": "q121",
+      "cls": "direct",
+      "q": "Why is Elizabeth surprised by Darcy's behavior at Pemberley?",
+      "answer": "Because it is so strikingly altered from his manner at Rosings -- gentle and civil rather than proud, contrary to everything she expected given how they last parted.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "Never in her life had she seen his manners so little dignified, never had he spoken with such gentleness" }]
+    },
+    {
+      "id": "q122",
+      "cls": "direct",
+      "q": "How does Darcy treat the Gardiners?",
+      "answer": "He is unexpectedly civil and attentive, asks to be introduced to them, converses with Mr. Gardiner, and invites him to fish on the grounds whenever he likes.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "he heard Mr. Darcy invite him, with the greatest civility, to fish there as often as he chose" }]
+    },
+    {
+      "id": "q123",
+      "cls": "direct",
+      "q": "Why is Darcy's politeness toward the Gardiners significant?",
+      "answer": "Because it is exactly the kind of low-connection relation Darcy's pride had previously revolted against, so his warmth toward them surprises and gratifies Elizabeth.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "she could hardly suppress a smile at his being now seeking the acquaintance of some of those very people, against whom his pride had revolted" }]
+    },
+    {
+      "id": "q124",
+      "cls": "direct",
+      "q": "How does Darcy's behavior at Pemberley differ from his behavior at Meryton?",
+      "answer": "At Meryton/Hertfordshire he was proud, reserved, and disagreeable; at Pemberley he is gentle, attentive, and unusually civil, surprising everyone who knew him before.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "\"To be sure, Lizzy,\" said her aunt, \"he is not so handsome as Wickham... But how came you to tell us that he was so disagreeable?\"" }]
+    },
+    {
+      "id": "q125",
+      "cls": "unanswerable",
+      "q": "What role does Georgiana Darcy play in changing Elizabeth's opinion of Darcy?",
+      "answer": null,
+      "type": "abstain",
+      "note": "The introduction to Georgiana (offered in ch 43) and the later meeting are part of a broader arc I did not read in full (the actual Pemberley visit with Georgiana present is in chapters 44-45, which were not read in this pass); flagged as unanswerable/lower-confidence rather than asserting a specific claim not directly verified."
+    },
+    {
+      "id": "q126",
+      "cls": "direct",
+      "q": "Why does Darcy introduce Georgiana to Elizabeth?",
+      "answer": "He asks Elizabeth's permission to introduce his sister during her stay at Lambton, saying Georgiana particularly wishes to be known to her.",
+      "type": "exact",
+      "evidence": [{ "chapter": "43-chapter-xliii.md", "quote": "Will you allow me... to introduce my sister to your acquaintance during your stay at Lambton?" }]
+    },
+    {
+      "id": "q127",
+      "cls": "near-miss",
+      "q": "How does Caroline Bingley behave toward Elizabeth at Pemberley?",
+      "answer": null,
+      "type": "abstain",
+      "note": "This scene occurs in chapters 45/44-45, which were not read in this pass; I cannot verify specifics from the text I actually read, so this is flagged as a gap rather than answered from memory of the novel."
+    },
+    {
+      "id": "q128",
+      "cls": "near-miss",
+      "q": "Why does Caroline mention Wickham in front of Elizabeth?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Same as above -- this scene is in an unread chapter (45); not verified against the text in this pass."
+    },
+    {
+      "id": "q129",
+      "cls": "near-miss",
+      "q": "How does Darcy respond when Caroline criticizes Elizabeth's appearance?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Same as above -- unread chapter (45); not verified against the text in this pass."
+    },
+    {
+      "id": "q130",
+      "cls": "direct",
+      "q": "What news does Elizabeth receive about Lydia while at Lambton?",
+      "answer": "She receives two letters from Jane revealing that Lydia has eloped with Wickham, apparently not to Scotland as first believed, and that the family fears the worst.",
+      "type": "exact",
+      "evidence": [{ "chapter": "46-chapter-xlvi.md", "quote": "something has occurred of a most unexpected and serious nature... she was gone off to Scotland with one of his officers; to own the truth, with Wickham!" }]
+    },
+    {
+      "id": "q131",
+      "cls": "direct",
+      "q": "Who has Lydia run away with?",
+      "answer": "Mr. Wickham",
+      "type": "name",
+      "evidence": [{ "chapter": "46-chapter-xlvi.md", "quote": "with Wickham!" }]
+    },
+    {
+      "id": "q132",
+      "cls": "direct",
+      "q": "Why is Lydia's elopement potentially disastrous for the Bennet family?",
+      "answer": "Because they are not married and there is reason to fear Wickham never intended to marry her, which would ruin Lydia's reputation and, by extension, damage the marriage prospects and social standing of the whole family.",
+      "type": "exact",
+      "evidence": [{ "chapter": "46-chapter-xlvi.md", "quote": "something was dropped by Denny expressing his belief that W. never intended to go there, or to marry Lydia at all" }]
+    },
+    {
+      "id": "q133",
+      "cls": "direct",
+      "q": "Why does Elizabeth assume Darcy will no longer want to associate with her?",
+      "answer": "She believes such a proof of family disgrace (Lydia's scandal) must sink her in his esteem, and she observes his gloomy silence as confirmation that his interest in her is over.",
+      "type": "exact",
+      "evidence": [{ "chapter": "46-chapter-xlvi.md", "quote": "Her power was sinking; everything _must_ sink under such a proof of family weakness" }]
+    },
+    {
+      "id": "q134",
+      "cls": "direct",
+      "q": "How does Darcy react when Elizabeth tells him about Lydia?",
+      "answer": "He is fixed in astonishment, grieved and shocked, and later walks the room in earnest, gloomy meditation before leaving with expressions of sorrow and concern.",
+      "type": "exact",
+      "evidence": [{ "chapter": "46-chapter-xlvi.md", "quote": "Darcy was fixed in astonishment... \"I am grieved, indeed,\" cried Darcy: \"grieved--shocked.\"" }]
+    },
+    {
+      "id": "q135",
+      "cls": "direct",
+      "q": "Why does Elizabeth regret that Darcy learns about Lydia's scandal?",
+      "answer": "Because she believes the disgrace will end any hope of his continued affection for her, though she realizes only now, when love must be vain, how much she could have loved him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "46-chapter-xlvi.md", "quote": "never had she so honestly felt that she could have loved him, as now, when all love must be vain" }]
+    },
+    {
+      "id": "q136",
+      "cls": "direct",
+      "q": "What actions does Darcy secretly take after Lydia's elopement?",
+      "answer": "He travels to London, tracks down Wickham and Lydia through Mrs. Younge, negotiates with Wickham, pays his debts, settles money on Lydia, and purchases his commission -- all while asking that his involvement be kept secret.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "He came to tell Mr. Gardiner that he had found out where your sister and Mr. Wickham were" }]
+    },
+    {
+      "id": "q137",
+      "cls": "direct",
+      "q": "How does Darcy find Wickham and Lydia?",
+      "answer": "He seeks out Mrs. Younge, who had been Georgiana's governess and was known to be intimate with Wickham, and after some days and (implied) bribery, obtains their address from her.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "This Mrs. Younge was, he knew, intimately acquainted with Wickham; and he went to her for intelligence of him" }]
+    },
+    {
+      "id": "q138",
+      "cls": "direct",
+      "q": "What financial arrangements does Darcy make for Wickham?",
+      "answer": "He pays Wickham's debts (over a thousand pounds), settles another thousand pounds on Lydia in addition to her own money, and purchases Wickham's commission.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "His debts are to be paid, amounting, I believe, to considerably more than a thousand pounds, another thousand in addition to her own settled upon _her_, and his commission purchased." }]
+    },
+    {
+      "id": "q139",
+      "cls": "direct",
+      "q": "Why does Darcy pay Wickham's debts?",
+      "answer": "He explains it as owing to his own reserve and failure to expose Wickham's true character earlier, which he believes allowed Wickham to deceive and harm others; he considers it his duty to remedy the evil he feels he caused.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "It was owing to him, to his reserve and want of proper consideration, that Wickham's character had been so misunderstood" }]
+    },
+    {
+      "id": "q140",
+      "cls": "direct",
+      "q": "Why does Darcy insist that his involvement remain secret?",
+      "answer": "He does not wish to be thanked or to have the credit made public; Mrs. Gardiner notes his obstinacy about doing it all himself and not being thanked for it.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "Nothing was to be done that he did not do himself... I do not speak it to be thanked, therefore say nothing about it" }]
+    },
+    {
+      "id": "q141",
+      "cls": "direct",
+      "q": "How does Elizabeth eventually learn Darcy helped Lydia?",
+      "answer": "Lydia accidentally lets slip a reference to it, which prompts Elizabeth to write to her aunt Mrs. Gardiner, who then explains the full truth in a letter.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "Lydia's thoughtlessness first betrayed to me that you had been concerned in the matter" }]
+    },
+    {
+      "id": "q142",
+      "cls": "direct",
+      "q": "Who accidentally reveals Darcy's involvement in Lydia's marriage?",
+      "answer": "Lydia herself, inadvertently, in conversation.",
+      "type": "name",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "Lydia's thoughtlessness first betrayed to me that you had been concerned in the matter" }]
+    },
+    {
+      "id": "q143",
+      "cls": "direct",
+      "q": "How does Lydia accidentally give Elizabeth a clue about Darcy?",
+      "answer": "In her thoughtless talk (referenced in ch 58, with the specific incident recounted in an unread chapter, ch. 51), she lets slip that Darcy was present at her wedding, something she should have kept secret.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "Lydia's thoughtlessness first betrayed to me that you had been concerned in the matter" }]
+    },
+    {
+      "id": "q144",
+      "cls": "direct",
+      "q": "Why does Elizabeth write to Mrs. Gardiner after Lydia's wedding?",
+      "answer": "Because she could not rest until she knew the particulars of Darcy's involvement after Lydia's hint, so she wrote to her aunt to ask directly.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "of course I could not rest till I knew the particulars" }]
+    },
+    {
+      "id": "q145",
+      "cls": "direct",
+      "q": "What does Mrs. Gardiner reveal about Darcy's role?",
+      "answer": "She explains in detail that Darcy found Wickham and Lydia, negotiated and paid off Wickham's debts, settled money on Lydia, purchased his commission, and did it all himself, out of feelings for Elizabeth, insisting on secrecy.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "note": "Mrs. Gardiner's full letter recounting Darcy's actions" }]
+    },
+    {
+      "id": "q146",
+      "cls": "direct",
+      "q": "How does Darcy's intervention in Lydia's crisis affect Elizabeth's feelings toward him?",
+      "answer": "She is deeply moved and grateful, feels ashamed of her earlier ungracious treatment of him, and becomes proud of him for overcoming himself in a cause of compassion and honour.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "she was proud of him,--proud that in a cause of compassion and honour he had been able to get the better of himself" }]
+    },
+    {
+      "id": "q147",
+      "cls": "direct",
+      "q": "Why is Darcy's help with Lydia especially significant given Wickham's history?",
+      "answer": "Because it required Darcy to meet, negotiate with, and even bribe the very man whose name it was painful for him to pronounce, and whom he had every personal reason to avoid -- for the sake of a girl he could neither regard nor esteem.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "he was reduced to meet, frequently meet, reason with, persuade, and finally bribe the man whom he always most wished to avoid" }]
+    },
+    {
+      "id": "q148",
+      "cls": "direct",
+      "q": "Does Darcy help Lydia primarily to impress Elizabeth?",
+      "answer": "He says no publicly (citing his sense of duty for his past reserve), but privately tells Elizabeth later that the wish of giving her happiness did add force to his other motives -- so it is a mix, and he says he thought only of her.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "That the wish of giving happiness to you might add force to the other inducements which led me on, I shall not attempt to deny." }]
+    },
+    {
+      "id": "q149",
+      "cls": "direct",
+      "q": "What motives does Darcy give for helping the Bennet family?",
+      "answer": "Publicly, his sense of duty for having, through his own reserve, allowed Wickham's true character to remain unknown; privately (to Elizabeth), he admits the wish to make her happy was also a driving motive.",
+      "type": "exact",
+      "evidence": [{ "chapter": "52-chapter-lii.md", "quote": "he called it, therefore, his duty to step forward, and endeavour to remedy an evil which had been brought on by himself" }]
+    },
+    {
+      "id": "q150",
+      "cls": "direct",
+      "q": "Why does Bingley return to Netherfield?",
+      "answer": "The text shows him returning to shoot for several weeks, with Darcy's permission/knowledge implied by Darcy accompanying him; the narration frames it as Darcy having effectively given him permission to renew the acquaintance.",
+      "type": "exact",
+      "evidence": [{ "chapter": "53-chapter-liii.md", "quote": "The housekeeper at Netherfield had received orders to prepare for the arrival of her master, who was coming down in a day or two, to shoot there for several weeks." }]
+    },
+    {
+      "id": "q151",
+      "cls": "direct",
+      "q": "What role does Darcy play in Bingley's return to Jane?",
+      "answer": "Darcy confesses to Bingley all that had occurred to make his former interference absurd and impertinent, tells him he was mistaken in supposing Jane indifferent, and gives him his blessing to pursue her.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "I told him of all that had occurred to make my former interference in his affairs absurd and impertinent." }]
+    },
+    {
+      "id": "q152",
+      "cls": "direct",
+      "q": "What does Darcy tell Bingley about Jane's feelings?",
+      "answer": "He tells Bingley he was mistaken in believing Jane was indifferent, and that he was convinced, from narrowly observing her attachment was unabated.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "I believed myself mistaken in supposing, as I had done, that your sister was indifferent to him" }]
+    },
+    {
+      "id": "q153",
+      "cls": "direct",
+      "q": "Why does Darcy admit that he concealed Jane's presence in London from Bingley?",
+      "answer": "He confesses this along with his other interference, as part of his general acknowledgment of wrongdoing; Bingley is offended for a time but forgives him once his doubt about Jane's feelings is resolved.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "I could not allow myself to conceal that your sister had been in town three months last winter, that I had known it, and purposely kept it from him. He was angry." }]
+    },
+    {
+      "id": "q154",
+      "cls": "direct",
+      "q": "How does Jane respond when Bingley returns?",
+      "answer": "She is initially confused/embarrassed but her color and composure suggest deep feeling; she and Bingley grow close again quickly, and Jane later admits she is the happiest creature in the world once he proposes.",
+      "type": "exact",
+      "evidence": [{ "chapter": "55-chapter-lv.md", "quote": "acknowledged, with the liveliest emotion, that she was the happiest creature in the world" }]
+    },
+    {
+      "id": "q155",
+      "cls": "direct",
+      "q": "Why does Bingley propose to Jane?",
+      "answer": "His renewed attachment to her, once freed from his friends' interference and Darcy's mistaken assurance of her indifference, leads him to propose during a private moment at Longbourn.",
+      "type": "exact",
+      "evidence": [{ "chapter": "55-chapter-lv.md", "quote": "she perceived her sister and Bingley standing together over the hearth, as if engaged in earnest conversation" }]
+    },
+    {
+      "id": "q156",
+      "cls": "direct",
+      "q": "How does Mrs. Bennet react to Jane's engagement?",
+      "answer": "She is ecstatic, praises Bingley extravagantly, forgets Wickham and Lydia entirely in her joy, and cannot express her approbation warmly enough, talking of nothing else.",
+      "type": "exact",
+      "evidence": [{ "chapter": "55-chapter-lv.md", "quote": "Mrs. Bennet could not give her consent, or speak her approbation in terms warm enough to satisfy her feelings" }]
+    },
+    {
+      "id": "q157",
+      "cls": "direct",
+      "q": "Why does Lady Catherine visit Longbourn?",
+      "answer": "She has heard a rumor that Elizabeth is likely to marry Darcy, and comes to demand she deny it and promise never to enter into such an engagement.",
+      "type": "exact",
+      "evidence": [{ "chapter": "56-chapter-lvi.md", "quote": "I was told, that not only your sister was on the point of being most advantageously married, but that _you_... would, in all likelihood, be soon afterwards united to my nephew" }]
+    },
+    {
+      "id": "q158",
+      "cls": "direct",
+      "q": "What rumor has Lady Catherine heard about Elizabeth?",
+      "answer": "That Elizabeth would soon be united in marriage to Mr. Darcy.",
+      "type": "exact",
+      "evidence": [{ "chapter": "56-chapter-lvi.md", "quote": "Miss Elizabeth Bennet would, in all likelihood, be soon afterwards united to my nephew--my own nephew, Mr. Darcy" }]
+    },
+    {
+      "id": "q159",
+      "cls": "direct",
+      "q": "Why does Lady Catherine oppose a marriage between Elizabeth and Darcy?",
+      "answer": "She believes Darcy is destined by birth and family arrangement to marry her own daughter, Miss de Bourgh, and considers Elizabeth's connections, birth, and fortune far beneath him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "56-chapter-lvi.md", "quote": "Mr. Darcy is engaged to _my daughter_." }]
+    },
+    {
+      "id": "q160",
+      "cls": "direct",
+      "q": "How does Elizabeth respond to Lady Catherine's demands?",
+      "answer": "She refuses to confirm or deny anything Lady Catherine has no right to ask, stands her ground firmly, and ultimately refuses to promise never to marry Darcy.",
+      "type": "exact",
+      "evidence": [{ "chapter": "56-chapter-lvi.md", "quote": "I will make no promise of the kind." }]
+    },
+    {
+      "id": "q161",
+      "cls": "direct",
+      "q": "Why does Elizabeth refuse to promise never to marry Darcy?",
+      "answer": "She argues she is not to be intimidated into something so unreasonable, and that Lady Catherine has no right to concern herself in Elizabeth's affairs.",
+      "type": "exact",
+      "evidence": [{ "chapter": "56-chapter-lvi.md", "quote": "I am not to be intimidated into anything so wholly unreasonable." }]
+    },
+    {
+      "id": "q162",
+      "cls": "direct",
+      "q": "How does Lady Catherine's visit unintentionally encourage Darcy?",
+      "answer": "Lady Catherine later relates the conversation to Darcy, including Elizabeth's refusal to promise never to marry him, and this teaches him to hope, since he knows Elizabeth would have openly denied it if she were truly decided against him.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "It taught me to hope... I knew enough of your disposition to be certain, that had you been absolutely, irrevocably decided against me, you would have acknowledged it to Lady Catherine frankly" }]
+    },
+    {
+      "id": "q163",
+      "cls": "direct",
+      "q": "Why does Darcy interpret Elizabeth's refusal to obey Lady Catherine as hopeful?",
+      "answer": "Because he knows Elizabeth's frank disposition well enough to believe that if she were truly against him, she would have said so plainly to his aunt.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "had you been absolutely, irrevocably decided against me, you would have acknowledged it to Lady Catherine frankly and openly" }]
+    },
+    {
+      "id": "q164",
+      "cls": "direct",
+      "q": "How does Darcy's second proposal differ from his first?",
+      "answer": "It is humble rather than proud -- he does not dwell on her inferiority, but simply asks if her feelings are still what they were and says one word from her would silence him forever; it is met with immediate acceptance rather than a proud declaration.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "If your feelings are still what they were last April, tell me so at once. _My_ affections and wishes are unchanged; but one word from you will silence me on this subject for ever." }]
+    },
+    {
+      "id": "q165",
+      "cls": "direct",
+      "q": "Why does Elizabeth accept Darcy's second proposal?",
+      "answer": "Her sentiments toward him have undergone a material change since the first proposal -- she now loves him -- and she receives his renewed assurances with gratitude and pleasure.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "her sentiments had undergone so material a change since the period to which he alluded, as to make her receive with gratitude and pleasure his present assurances" }]
+    },
+    {
+      "id": "q166",
+      "cls": "near-miss",
+      "q": "At what point does Elizabeth realize she loves Darcy?",
+      "answer": null,
+      "type": "abstain",
+      "note": "The text is explicitly vague about this -- Elizabeth herself says 'It has been coming on so gradually, that I hardly know when it began' -- so there is no single stated moment; treating as a verified near-miss/abstain rather than picking Pemberley as a definitive single answer, since the text itself refuses to pin it down more precisely than 'coming on so gradually.'"
+    },
+    {
+      "id": "q167",
+      "cls": "direct",
+      "q": "How does Elizabeth explain her changed feelings toward Darcy?",
+      "answer": "She tells Jane it came on so gradually she hardly knows when it began, but she dates it from first seeing his grounds at Pemberley -- said half-jokingly but reflecting real change since his renewed kindness and the Lydia affair.",
+      "type": "exact",
+      "evidence": [{ "chapter": "58-chapter-lviii.md", "quote": "I believe I must date it from my first seeing his beautiful grounds at Pemberley" }]
+    },
+    {
+      "id": "q168",
+      "cls": "direct",
+      "q": "How does Mr. Bennet react when Elizabeth tells him she wants to marry Darcy?",
+      "answer": "He is initially astonished and questions whether she is out of her senses, given her prior dislike of Darcy, but after she assures him of her genuine attachment, he gives his consent and later becomes fond of Darcy.",
+      "type": "exact",
+      "evidence": [{ "chapter": "59-chapter-lix.md", "quote": "Lizzy... what are you doing? Are you out of your senses to be accepting this man? Have not you always hated him?" }]
+    },
+    {
+      "id": "q169",
+      "cls": "direct",
+      "q": "Why does Mr. Bennet initially doubt that Elizabeth loves Darcy?",
+      "answer": "Because she had always seemed to hate Darcy, so her sudden decision to marry him seems inexplicable to him at first.",
+      "type": "exact",
+      "evidence": [{ "chapter": "59-chapter-lix.md", "quote": "Have not you always hated him?" }]
+    },
+    {
+      "id": "q170",
+      "cls": "direct",
+      "q": "How does Elizabeth convince her father that she genuinely loves Darcy?",
+      "answer": "She assures him earnestly and solemnly of her attachment, explains the gradual change in her opinion of Darcy, and tells him that Darcy's affection had stood the test of many months' suspense, plus reveals what Darcy did for Lydia.",
+      "type": "exact",
+      "evidence": [{ "chapter": "59-chapter-lix.md", "quote": "by explaining the gradual change which her estimation of him had undergone... she did conquer her father's incredulity" }]
+    },
+    {
+      "id": "q171",
+      "cls": "direct",
+      "q": "How does Mrs. Bennet react to Elizabeth's engagement?",
+      "answer": "She is initially struck speechless, then bursts into effusive delight over Darcy's wealth and status, exclaiming about carriages, jewels, and ten thousand a year, and apologizes for having disliked him before.",
+      "type": "exact",
+      "evidence": [{ "chapter": "59-chapter-lix.md", "quote": "Good gracious! Lord bless me! only think! dear me! Mr. Darcy!... how rich and how great you will be!" }]
+    },
+    {
+      "id": "q172",
+      "cls": "unanswerable",
+      "q": "In what ways do both Elizabeth and Darcy overcome pride?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Thematic/interpretive synthesis question spanning the whole novel, not a single stated fact; the title's own thematic concept, not a specific claim the text states in one place."
+    },
+    {
+      "id": "q173",
+      "cls": "unanswerable",
+      "q": "In what ways do both Elizabeth and Darcy overcome prejudice?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Thematic/interpretive synthesis question spanning the whole novel, not a single stated fact."
+    },
+    {
+      "id": "q174",
+      "cls": "unanswerable",
+      "q": "Is the novel ultimately more concerned with correcting first impressions, understanding character, or negotiating marriage and social class?",
+      "answer": null,
+      "type": "abstain",
+      "note": "Pure literary-critical interpretation question with no single grounded textual answer; flagged by the coordinator as the clearest example of a question to reclassify as out-of-scope for a factual-grounding harness."
+    }
+  ]
+}

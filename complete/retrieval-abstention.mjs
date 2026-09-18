@@ -86,6 +86,22 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
         if (w.length - 1 >= STEM_MIN_LEN && w.endsWith('e')) return w.slice(0, -1);
         return w;
     }
+    // Kept byte-identical to pikelet/src/calibrate.mjs's stripPossessive:
+    // the tokenizer regex keeps the apostrophe, so a possessive ("darcy's")
+    // is one token that never matches a plain mention ("darcy") without
+    // this, in either direction.
+    function stripPossessive(w) {
+        if (w.endsWith("'s")) return w.slice(0, -2);
+        if (w.endsWith("s'")) return w.slice(0, -1);
+        if (w.endsWith("'")) return w.slice(0, -1);
+        return w;
+    }
+    // Kept byte-identical to pikelet/src/calibrate.mjs's isNumeral: a
+    // numeral is exempted from the coverageMinLen floor because it is
+    // often the only token distinguishing two otherwise-identical
+    // passages ("Chamber 4" vs "Chamber 5"), unlike an ordinary short
+    // word the floor exists to drop.
+    const isNumeral = (w) => /^\d+$/.test(w);
     // A word present only in a passage's heading, not its body, still
     // grounds the query, at reduced credit — kept byte-identical to
     // pikelet/src/calibrate.mjs's HEADING_COVERAGE_WEIGHT. Full credit
@@ -94,18 +110,27 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
     // credit is the opposite failure (a real rank-1 hit whose match is in
     // the heading scoring no coverage at all).
     const HEADING_COVERAGE_WEIGHT = 0.5;
+    // Returns { value, grounding } rather than writing grounding detail to
+    // a shared variable: score() is async and (when useMaxSim is set)
+    // awaits maxSimFrac after calling this, so a module- or closure-level
+    // "last grounding" write would race between two concurrent queries
+    // against the same open pack — the second call's write could land,
+    // and get read back, before the first call's own return. Threading the
+    // value through the return keeps it local to this call no matter what
+    // awaits happen around it.
     function coverageFrac(text, passages) {
         const content = (String(text).toLowerCase().match(/[a-z0-9']+/g) || [])
-            .filter((w) => w.length >= coverageMinLen && !coverageStopwords.has(w));
-        if (!content.length) return 0;
+            .map(stripPossessive)
+            .filter((w) => (w.length >= coverageMinLen || isNumeral(w)) && !coverageStopwords.has(w));
+        if (!content.length) return { value: 0, grounding: null };
         const weights = content.map((w) => (isCommon && isCommon(w) ? commonWordWeight : 1));
         const weightSum = weights.reduce((a, c) => a + c, 0);
-        let best = 0;
+        let best = 0; let bestGrounding = null; let passageIndex = 0;
         for (const { heading, body } of passages || []) {
-            const bodyWords = String(body || '').toLowerCase().match(/[a-z0-9']+/g) || [];
+            const bodyWords = (String(body || '').toLowerCase().match(/[a-z0-9']+/g) || []).map(stripPossessive);
             const bodySet = new Set(bodyWords);
             const bodyStems = new Set(bodyWords.map(stem));
-            const headingSet = new Set(String(heading || '').toLowerCase().match(/[a-z0-9']+/g) || []);
+            const headingSet = new Set((String(heading || '').toLowerCase().match(/[a-z0-9']+/g) || []).map(stripPossessive));
             const presentIn = (set, stems, w) => set.has(w) || set.has(`${w}s`) || set.has(`${w}es`)
                 || (w.endsWith('s') && set.has(w.slice(0, -1)))
                 || (stems && stems.has(stem(w)));
@@ -115,9 +140,14 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
                 return 0;
             };
             const grounded = content.reduce((sum, w, i) => sum + creditFor(w) * weights[i], 0);
-            best = Math.max(best, grounded / weightSum);
+            const frac = grounded / weightSum;
+            if (frac > best) {
+                best = frac;
+                bestGrounding = { passageIndex, coverage: +frac.toFixed(3), covered: content.filter((w) => creditFor(w) > 0), uncovered: content.filter((w) => creditFor(w) === 0) };
+            }
+            passageIndex++;
         }
-        return best;
+        return { value: best, grounding: bestGrounding };
     }
     // Single-word vector cache: the same content word recurs across a
     // query's own text and the passages scored against it — kept
@@ -237,13 +267,19 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
             asset.features.forEach((f, j) => {
                 z += ((signals[f] - asset.standardize.mean[f]) / asset.standardize.std[f]) * asset.weights[j];
             });
+            // Local to this call (not module/closure state — see
+            // coverageFrac's comment) so concurrent queries against the
+            // same open pack can never see each other's grounding detail.
+            let grounding = null;
             if (coverageCfg) {
                 // passageTexts is hydrated by the caller for the fixed
                 // top-COVERAGE_TOP_PASSAGES window (see passagesNeeded
                 // below), independent of the caller's k, matching
                 // calibrate.mjs's top.slice(0, COVERAGE_TOP_PASSAGES).
                 const passages = Array.isArray(passageTexts) ? passageTexts : [passageTexts];
-                signals.coverage1 = coverageFrac(queryText, passages);
+                const coverage = coverageFrac(queryText, passages);
+                signals.coverage1 = coverage.value;
+                grounding = coverage.grounding;
                 // grounding1 = max(coverage1, maxSim1) — one additive term,
                 // not two, so a genuine paraphrase's semantic similarity
                 // can rescue it from coverage1's lexical-overlap penalty
@@ -260,7 +296,7 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
             const p = 1 / (1 + Math.exp(-z));
             const verdict = p < asset.thresholds.hard ? 'abstain'
                 : p < asset.thresholds.weak ? 'weak' : 'answer';
-            return { p, verdict, signals };
+            return { p, verdict, signals, grounding };
         },
     };
 }

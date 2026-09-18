@@ -330,11 +330,21 @@ const tokenize = (text) => (text.toLowerCase().match(/[a-z0-9']+/g) || []);
 // stopwords: "how does X work" should be grounded by X's words appearing in
 // the passage, not by "how"/"does"/"work". The list ships in the asset so
 // the reader's mirror cannot drift.
+// Quantifiers and modal/hedging words added here are unambiguous
+// scaffolding ("how MUCH", "how MANY", "EACH year", "WOULD/COULD X") —
+// deliberately not every word a review of false-positive coverage might
+// flag: "make", "like", "other", and "only" stay OUT, since they are also
+// ordinary content words in technical prose ("make an HTTP request",
+// "looks like", "other endpoints", "only admins can..."), and stopping
+// them here would zero out coverage for a query that is genuinely asking
+// about that word.
 const COVERAGE_STOPWORDS = new Set([...STOPWORDS,
   'what', 'how', 'who', 'why', 'where', 'when', 'do', 'does', 'did', 'me',
   'tell', 'about', 'explain', 'explained', 'facts', 'information',
   'overview', 'history', 'definition', 'important', 'work', 'works',
-  'known', 'anything', 'said']);
+  'known', 'anything', 'said',
+  'much', 'many', 'each', 'would', 'could', 'some', 'such', 'very',
+  'more', 'after', 'before']);
 
 // Coverage weights words by informativeness: a word the corpus uses
 // everywhere ("templates", "support" in a docs corpus) grounds any query
@@ -373,6 +383,21 @@ function stem(w) {
   if (w.length - 1 >= STEM_MIN_LEN && w.endsWith('e')) return w.slice(0, -1);
   return w;
 }
+// tokenize() keeps the apostrophe ([a-z0-9']+), so a possessive is one
+// token ("darcy's") that a plain-name mention in the passage ("darcy")
+// never matches under presentIn's plural/stem rules — "What is X's Y?" is
+// among the most common question shapes there is, and this was silently
+// losing X from coverage every time. Strips a trailing 's or bare
+// trailing ' (own's', dogs') from BOTH the query's content words and a
+// passage's body/heading words, so the match works in either direction
+// (a possessive in the query against a plain mention in the passage, or
+// the reverse).
+function stripPossessive(w) {
+  if (w.endsWith("'s")) return w.slice(0, -2);
+  if (w.endsWith("s'")) return w.slice(0, -1);
+  if (w.endsWith("'")) return w.slice(0, -1);
+  return w;
+}
 // A word present only in a passage's heading, not its body, still grounds
 // the query — a heading names its section's exact topic — but at reduced
 // credit: a heading is a handful of words repeated verbatim by every
@@ -382,17 +407,30 @@ function stem(w) {
 // real rank-1 hit whose match is in the heading scoring no coverage at
 // all — see splitHeadingBody above).
 const HEADING_COVERAGE_WEIGHT = 0.5;
+// COVERAGE_MIN_WORD_LEN exists to drop short function words ("is", "to",
+// "on") that carry no topical content on their own. A short NUMERAL is
+// the opposite case: "Chamber 4" vs "Chamber 5" differ only in a
+// one-character token, and it is the single most identity-bearing word
+// in the query — dropping it left coverage scoring "chamber"/"cooling"/
+// "use" as a perfect match against ANY chamber's cooling record, with no
+// way to notice the passage names the wrong chamber. Numerals are
+// unambiguous (unlike a bare single letter, which could be an article or
+// an identifier depending on case the lowercased tokenizer has already
+// discarded — not fixed here), so they are exempted from the length
+// floor entirely rather than lowering the floor for every short token.
+const isNumeral = (w) => /^\d+$/.test(w);
 function coverageFrac(text, passages, isCommon) {
-  const content = tokenize(text).filter((w) => w.length >= COVERAGE_MIN_WORD_LEN && !COVERAGE_STOPWORDS.has(w));
+  const content = tokenize(text).map(stripPossessive)
+    .filter((w) => (w.length >= COVERAGE_MIN_WORD_LEN || isNumeral(w)) && !COVERAGE_STOPWORDS.has(w));
   if (!content.length) return 0;
   const weights = content.map((w) => (isCommon && isCommon(w) ? COVERAGE_COMMON_WORD_WEIGHT : 1));
   const weightSum = weights.reduce((a, c) => a + c, 0);
   let best = 0;
   for (const { heading, body } of passages) {
-    const bodyWords = tokenize(body || '');
+    const bodyWords = tokenize(body || '').map(stripPossessive);
     const bodySet = new Set(bodyWords);
     const bodyStems = new Set(bodyWords.map(stem));
-    const headingSet = new Set(tokenize(heading || ''));
+    const headingSet = new Set(tokenize(heading || '').map(stripPossessive));
     const presentIn = (set, stems, w) => set.has(w) || set.has(`${w}s`) || set.has(`${w}es`)
       || (w.endsWith('s') && set.has(w.slice(0, -1)))
       || (stems && stems.has(stem(w)));

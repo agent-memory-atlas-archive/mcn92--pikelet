@@ -81,8 +81,25 @@ export function buildQueryInterpSegment(kind, encoderBytes, calibrationBytes) {
 // and skips a small function-word stopword list — readers need no
 // coordination with the list, because an unindexed query token simply finds
 // no postings.
+//
+// Interrogative words (how/does/what/who/why/where/when/which/do/did) are
+// deliberately in this list, not just the base one: without them, a
+// natural-language question's own scaffolding becomes real, indexable BM25
+// content — a passage containing literal dialogue like "How does Georgiana
+// get on, Darcy?" then wins a high lexical score against the query "How
+// does Elizabeth initially react to Mr. Darcy?" purely from "how does" and
+// "darcy" co-occurring, with zero topical relevance. Confirmed live: this
+// pushed a genuinely correct chunk (ranked #2 by the vector search alone)
+// completely out of the fused top-10, replaced by RRF-boosted noise. Not
+// borrowed wholesale from calibrate.mjs's COVERAGE_STOPWORDS, which also
+// excludes domain words ("tell", "explain", "overview", "history",
+// "definition") that are legitimate lexical CONTENT on many real corpora
+// (a docs site literally titled "History") — this list only adds the
+// unambiguous interrogative set, since the lexical index (unlike coverage)
+// also indexes passage text, not just the query.
 const LEXICAL_LAYOUT = 'bm25-v1';
-const LEXICAL_STOPWORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'into', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'it', 'its', 'this', 'that', 'these', 'those', 'as', 'their', 'they', 'them', 'his', 'her', 'has', 'have', 'had', 'not', 'can', 'will', 'if', 'we', 'you', 'your', 'i']);
+const LEXICAL_STOPWORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'into', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'it', 'its', 'this', 'that', 'these', 'those', 'as', 'their', 'they', 'them', 'his', 'her', 'has', 'have', 'had', 'not', 'can', 'will', 'if', 'we', 'you', 'your', 'i',
+  'how', 'does', 'did', 'do', 'what', 'who', 'why', 'where', 'when', 'which']);
 const lexTokenize = (text) => (String(text).toLowerCase().match(/[a-z0-9']+/g) || [])
   .filter((w) => w.length >= 2 && w.length <= 32 && !LEXICAL_STOPWORDS.has(w));
 

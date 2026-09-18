@@ -656,7 +656,7 @@ export async function openPikeletFile(input, options = {}) {
                         .map((hit) => hydrate(hit.id)))).map((record) => splitHeadingBody(record?.text))
                     : [];
                 const scored = await scorer.score(context.text, hits, topTexts);
-                return { match_quality: VERDICTS[scored.verdict] || scored.verdict, confidence: scored.p };
+                return { match_quality: VERDICTS[scored.verdict] || scored.verdict, confidence: scored.p, grounding: scored.grounding || null };
             };
         };
         if (qiKind === 1) {
@@ -1111,6 +1111,23 @@ export async function openPikeletFile(input, options = {}) {
                             }))
                             .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
                             .map((entry) => entry.hit);
+                        // Phrase pinning: a verbatim occurrence of the query (>= 3
+                        // content words) in one of the top lexical hits is the
+                        // strongest evidence of support there is; rank it first.
+                        const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+                        const phrase = norm(trimmed);
+                        if (phrase.split(' ').length >= 3) {
+                            for (const h of lexicalHits.slice(0, 3)) {
+                                const rec = await hydrate(h.id);
+                                if (norm(rec?.text).includes(phrase)) {
+                                    fusedFull = [searched.find((x) => x.id === h.id), ...fusedFull.filter((x) => x.id !== h.id)].filter(Boolean);
+                                    break;
+                                }
+                            }
+                        }
+                        // Rank transparency: a consumer can see a verbatim hit sitting
+                        // at fused rank 3 behind two semantic near-misses.
+                        for (const [i, hit] of fusedFull.entries()) { hit.fusedRank = i + 1; hit.lexicalRank = lexRank.has(hit.id) ? lexRank.get(hit.id) + 1 : null; hit.vectorRank = searched.findIndex((x) => x.id === hit.id) + 1; }
                     }
                     fused = retrieval === 'augmented' ? null : fusedFull?.slice(0, k) ?? null;
                 }
@@ -1139,9 +1156,14 @@ export async function openPikeletFile(input, options = {}) {
                 // `distance` field cannot overwrite them (reserved names).
                 const results = await Promise.all(returned.map(async (hit) => {
                     const record = await hydrate(hit.id);
-                    return { ...record, id: hit.id, distance: hit.distance };
+                    return { ...record, id: hit.id, distance: hit.distance, ...(hit.fusedRank ? { fusedRank: hit.fusedRank, lexicalRank: hit.lexicalRank, vectorRank: hit.vectorRank } : {}) };
                 }));
-                return { matchQuality: quality.match_quality, confidence: quality.confidence, results };
+                // Grounding transparency: which record's text grounded the verdict
+                // and which query words it covered, so a consumer can tell a
+                // topical match ("much money darcy make year") from an answer.
+                const passageOrder = fusedFull?.length ? fusedFull : (searched ?? hits);
+                const grounding = quality.grounding ? { ...quality.grounding, recordId: passageOrder[quality.grounding.passageIndex]?.id ?? null } : null;
+                return { matchQuality: quality.match_quality, confidence: quality.confidence, results, ...(grounding ? { grounding } : {}) };
             },
 
             /** Hydrate one corpus record by id (verified per record on format 2). */
