@@ -1,10 +1,11 @@
 {
   "name": "pikelet",
-  "version": "0.8.0",
+  "version": "0.8.1",
+  "mcpName": "io.github.mcn92/pikelet",
   "description": "Compile docs into a complete .pikelet search artifact, or scaffold a Pikelet-backed search app.",
   "type": "module",
   "bin": {
-    "pikelet": "./bin/pikelet.mjs"
+    "pikelet": "bin/pikelet.mjs"
   },
   "exports": {
     "./docusaurus": "./docusaurus/index.mjs",

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mcn92/pikelet",
+  "description": "Search self-contained .pikelet knowledge artifacts over MCP — no vector DB, no embedding API.",
+  "version": "0.8.1",
+  "title": "Pikelet",
+  "websiteUrl": "https://pikelet-wiki-playground.pages.dev",
+  "repository": {
+    "url": "https://github.com/mcn92/pikelet",
+    "source": "github",
+    "id": "1215701144",
+    "subfolder": "pikelet"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "pikelet",
+      "version": "0.8.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "valueHint": "pack",
+          "description": "Local path or HTTP(S) URL of a .pikelet knowledge artifact, optionally #sha256-pinned",
+          "isRequired": true,
+          "format": "string",
+          "placeholder": "https://example.com/docs.pikelet"
+        }
+      ]
+    }
+  ]
+}
