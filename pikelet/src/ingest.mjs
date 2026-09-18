@@ -49,14 +49,46 @@ function matchesSource(rel, source) {
   return includes.some((glob) => globMatch(rel, glob)) && !excludes.some((glob) => globMatch(rel, glob));
 }
 
-function globMatch(file, glob) {
+// A real glob->RegExp compiler, not a handful of special-cased prefixes:
+// '**' matches any number of path segments (including zero), '*' matches
+// within one segment, '?' matches one character, and '{a,b,c}' is
+// alternation. Case-insensitive, matched full-string against the
+// forward-slashed relative path.
+const GLOB_CACHE = new Map();
+function compileGlob(glob) {
+  let cached = GLOB_CACHE.get(glob);
+  if (cached) return cached;
   const normalized = glob.replace(/\\/g, '/');
-  if (normalized.includes('{md,mdx,html,txt}')) return /\.(md|mdx|html|txt)$/i.test(file);
-  if (normalized.startsWith('**/*.')) return file.toLowerCase().endsWith(normalized.slice(4).toLowerCase());
-  if (normalized.startsWith('*.')) return !file.includes('/') && file.toLowerCase().endsWith(normalized.slice(1).toLowerCase());
-  if (normalized.startsWith('**/') && normalized.endsWith('/**')) return file.includes(normalized.slice(3, -3));
-  if (normalized.startsWith('**/')) return file.endsWith(normalized.slice(3)) || file.includes(normalized.slice(3).replace('/**', ''));
-  return file === normalized || file.startsWith(`${normalized}/`);
+  let out = '';
+  for (let i = 0; i < normalized.length; i++) {
+    const c = normalized[i];
+    if (c === '*') {
+      if (normalized[i + 1] === '*') {
+        // '**/' consumes the following slash too, so it can also match zero
+        // segments (e.g. '**/*.md' must match 'a.md', not just 'x/a.md').
+        if (normalized[i + 2] === '/') { out += '(?:.*/)?'; i += 2; } else { out += '.*'; i += 1; }
+      } else {
+        out += '[^/]*';
+      }
+    } else if (c === '?') {
+      out += '[^/]';
+    } else if (c === '{') {
+      const close = normalized.indexOf('}', i);
+      const alts = (close === -1 ? normalized.slice(i + 1) : normalized.slice(i + 1, close))
+        .split(',').map((alt) => alt.replace(/[.+^${}()|[\]\\]/g, '\\$&'));
+      out += `(?:${alts.join('|')})`;
+      i = close === -1 ? normalized.length : close;
+    } else {
+      out += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  cached = new RegExp(`^${out}$`, 'i');
+  GLOB_CACHE.set(glob, cached);
+  return cached;
+}
+
+function globMatch(file, glob) {
+  return compileGlob(glob).test(file);
 }
 
 // Aggregate pages that duplicate a whole site's content in one document —
@@ -264,6 +296,7 @@ async function readLimitedText(response, maxBytes) {
 function extractByExtension(text, file) {
   if (/\.html?$/i.test(file)) return extractHtml(text);
   if (/\.mdx?$/i.test(file)) return extractMarkdown(text);
+  text = text.replace(/^﻿/, '');
   const title = (text.match(/^#\s+(.+)$/m) || [])[1];
   return { title, text: stripMarkdown(text) };
 }
@@ -380,15 +413,27 @@ function sectionize(rawSections, title, textOf) {
   return out;
 }
 
+// Extracts a single `key: value` line from a YAML frontmatter block. The
+// value may be double-quoted, single-quoted (each with its own backslash
+// escapes, and free to contain the other quote character literally — a
+// plain [^"'\n]+ character class cannot tell "it's" from the string's own
+// closing quote), or bare/unquoted.
+function frontmatterValue(frontmatter, key) {
+  const re = new RegExp(`^${key}:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|'((?:[^'\\\\]|\\\\.)*)'|(.+?))\\s*$`, 'm');
+  const m = frontmatter.match(re);
+  if (!m) return null;
+  return m[1] ?? m[2] ?? m[3] ?? null;
+}
+
 function extractMarkdown(text) {
-  let body = String(text || '').replace(/\r/g, '');
+  let body = String(text || '').replace(/^﻿/, '').replace(/\r/g, '');
   let slug = null;
   let title = null;
   const frontmatter = body.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
   if (frontmatter) {
     body = body.slice(frontmatter[0].length);
-    slug = (frontmatter[1].match(/^slug:\s*["']?([^"'\n]+?)["']?\s*$/m) || [])[1] || null;
-    title = (frontmatter[1].match(/^title:\s*["']?([^"'\n]+?)["']?\s*$/m) || [])[1] || null;
+    slug = frontmatterValue(frontmatter[1], 'slug');
+    title = frontmatterValue(frontmatter[1], 'title');
   }
   body = body
     .replace(/^import\s[^\n]*$/gm, ' ')
@@ -411,9 +456,14 @@ function extractHtml(html) {
     || (html.match(/<body[^>]*>([\s\S]*?)<\/body>/i) || [])[1]
     || html;
   body = body.replace(/<(script|style|nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+  // Block closers become a paragraph break (\n\n) so minified HTML — no
+  // whitespace between tags — still gets paragraph-aware chunking
+  // downstream (chunkDocs splits on \n{2,}); <br> is a soft line break
+  // within a paragraph, so it stays a single \n. normalizeText collapses
+  // any resulting run of 3+ newlines back down to exactly one blank line.
   const flattenHtml = (fragment) => normalizeText(decodeEntities(String(fragment)
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|li|div|tr|pre)>/gi, '\n')
+    .replace(/<\/(p|li|div|tr|pre|h[1-6])>/gi, '\n\n')
     .replace(/<[^>]+>/g, ' ')));
   // Heading tags delimit sections; an id attribute on the heading (or, as
   // fallback, on an anchor/element wrapping it) is the section anchor —
@@ -501,14 +551,26 @@ function stripMarkdown(text) {
   return String(out).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// Named entities beyond the load-bearing five (nbsp/amp/lt/gt/quot) that
+// crawled docs and Sphinx output emit routinely — smart punctuation and a
+// handful of common symbols. &amp; must decode last (its own replacement,
+// '&', would otherwise get re-matched by every rule after it).
+const NAMED_ENTITIES = {
+  nbsp: ' ', lt: '<', gt: '>', quot: '"', apos: "'",
+  mdash: '—', ndash: '–', hellip: '…',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+  copy: '©', reg: '®', trade: '™',
+  eacute: 'é', egrave: 'è', agrave: 'à', uuml: 'ü',
+  ouml: 'ö', auml: 'ä', ntilde: 'ñ', ccedil: 'ç',
+};
+const NAMED_ENTITY_RE = new RegExp(`&(${Object.keys(NAMED_ENTITIES).join('|')});`, 'g');
+
 function decodeEntities(text) {
   return String(text || '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(NAMED_ENTITY_RE, (_, name) => NAMED_ENTITIES[name])
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&amp;/g, '&');
 }
 
 function normalizeText(text) {
