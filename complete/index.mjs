@@ -618,8 +618,8 @@ export async function openPikeletFile(input, options = {}) {
         let scoreQuality;
         let encoderInfo;
         let encoderVerified = null;
-        const retrievalScorer = (embedWords = null) => {
-            const scorer = createAbstentionScorer(calibrationJson.asset, base64Bytes(calibrationJson.vocabBloomBase64), embedWords);
+        const retrievalScorer = () => {
+            const scorer = createAbstentionScorer(calibrationJson.asset, base64Bytes(calibrationJson.vocabBloomBase64));
             const VERDICTS = { answer: 'strong', weak: 'weak', abstain: 'none' };
             return async (hits, context, fusedHits) => {
                 if (!scorer) return { match_quality: 'unscored' };
@@ -772,12 +772,7 @@ export async function openPikeletFile(input, options = {}) {
                 const { vector } = await embedder.embed(`${declaration.prefixPolicy?.query || ''}${text}`);
                 return { vector: toFloat32(vector, dim, 'inline transformer encoder'), text };
             };
-            // grounding1's maxSim1 half (asset.coverage.useMaxSim) needs
-            // per-word encoder vectors, not the per-query embedding above
-            // — same embedder, different pooling (embedWords), so it only
-            // exists for kind-3 (the only profile with a reader-owned
-            // encoder to call per word).
-            scoreQuality = retrievalScorer(async (text) => (await ensureEmbedder()).embedder.embedWords(text));
+            scoreQuality = retrievalScorer();
         } else {
             throw new Error(`unsupported query-interpretation kind ${qiKind}`);
         }

@@ -17,38 +17,28 @@
 // computing NaN. Word rules (min length, stopwords) ship in the asset so
 // builder and reader cannot drift.
 //
-// asset.coverage.useMaxSim + a semantic word-cosine grounding term
-// (maxSim1, folded in via Math.max with coverage1) has been tried twice
-// and reverted twice — see pikelet/src/calibrate.mjs's GROUNDING_FEAT
-// design note. Attempt 1: raw cosine similarity between encoder word
-// vectors has no meaningful zero (unrelated words still cluster
-// somewhat), so max()-ing it in inflated grounding1's floor and pushed
-// the fitted threshold up sharply, causing widespread false abstention in
-// production. Attempt 2: rescaling maxSim1 against a corpus-specific
-// baseline (and damping it further) fixed the floor-inflation and even
-// recovered the held-out AUC number, but made real-query behavior WORSE
-// — more false abstention on answerable questions, more false-confidence
-// verdicts on unsupported ones — than plain coverage1 alone. The builder
-// no longer sets useMaxSim, so this reader's useMaxSim/maxSimFrac code
-// below is unreachable in practice; it stays only as a documented
-// degradation path if an asset ever sets that flag again, and must not
-// be re-enabled without a fundamentally different mechanism, not another
-// rescale/damping constant — two attempts at tuning this one have now
-// both failed on real queries despite looking fine on paper.
+// A semantic word-cosine grounding term (maxSim1, folded into grounding1
+// via Math.max with coverage1, gated by asset.coverage.useMaxSim) was
+// tried twice and reverted twice — see pikelet/src/calibrate.mjs's
+// GROUNDING_FEAT design note for the two failure modes (an unrescaled
+// version inflated the fitted threshold and caused widespread false
+// abstention; a rescaled/damped version fixed that but still made
+// real-query behavior worse than plain coverage1 alone). The mechanism
+// itself was also measured to cost 200-400 individual per-word encoder
+// calls per query once whatever built the calibration asset turned the
+// flag on — a 30-80ms search became 1.5-4.6 seconds, with nothing in the
+// response indicating why. Removed entirely (not just disabled) rather
+// than left as a dormant code path: dead code an external asset can
+// silently reactivate isn't actually dead, and both attempts already
+// failed for a structural reason (see the design note), not a tuning
+// one — there is no scenario where re-adding this via a config flag was
+// going to end differently a third time.
 
-export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
+export function createAbstentionScorer(asset, bloomBytes) {
     if (!asset || !Array.isArray(asset.weights) || !asset.thresholds) return null;
     const coverageCfg = asset.coverage && typeof asset.coverage.weight === 'number'
         && Number.isFinite(asset.coverage.mean) && Number.isFinite(asset.coverage.std)
         ? asset.coverage : null;
-    // maxSim1 only folds into grounding1 (via Math.max, not a separate
-    // additive term — see the file-level comment) when the reader has
-    // per-word encoder access (kind-3 only — see complete/index.mjs) AND
-    // the asset was built with it. A reader with neither just scores
-    // coverage1 alone as grounding1, which is exactly what grounding1
-    // degraded to at build time too when maxSim1 wasn't available (see
-    // calibrate.mjs's signalsFor) — same weight/mean/std either way.
-    const useMaxSim = !!(embedWords && coverageCfg?.useMaxSim);
     const coverageStopwords = coverageCfg ? new Set(coverageCfg.stopwords || []) : null;
     const coverageMinLen = coverageCfg ? (coverageCfg.minWordLen || 3) : 3;
     // Words the corpus uses everywhere ground any query that mentions them,
@@ -111,13 +101,12 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
     // the heading scoring no coverage at all).
     const HEADING_COVERAGE_WEIGHT = 0.5;
     // Returns { value, grounding } rather than writing grounding detail to
-    // a shared variable: score() is async and (when useMaxSim is set)
-    // awaits maxSimFrac after calling this, so a module- or closure-level
+    // a shared variable: score() is async, so a module- or closure-level
     // "last grounding" write would race between two concurrent queries
-    // against the same open pack — the second call's write could land,
-    // and get read back, before the first call's own return. Threading the
-    // value through the return keeps it local to this call no matter what
-    // awaits happen around it.
+    // against the same open pack if anything ever awaited between this
+    // call and reading it back — the second call's write could land, and
+    // get read back, before the first call's own return. Threading the
+    // value through the return keeps it local to this call regardless.
     function coverageFrac(text, passages) {
         const content = (String(text).toLowerCase().match(/[a-z0-9']+/g) || [])
             .map(stripPossessive)
@@ -148,70 +137,6 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
             passageIndex++;
         }
         return { value: best, grounding: bestGrounding };
-    }
-    // Single-word vector cache: the same content word recurs across a
-    // query's own text and the passages scored against it — kept
-    // byte-identical in spirit to pikelet/src/calibrate.mjs's wordVecCache
-    // (a fresh scorer per query in this reader, so the cache's lifetime is
-    // one query's worth of words, not the whole session).
-    const wordVecCache = new Map();
-    const embedWordVec = useMaxSim ? async (w) => {
-        if (!wordVecCache.has(w)) {
-            const vecs = await embedWords(w);
-            wordVecCache.set(w, vecs.get(w) || null);
-        }
-        return wordVecCache.get(w);
-    } : null;
-    // Semantic sibling of coverageFrac: same content-word extraction, same
-    // heading/body split and HEADING_COVERAGE_WEIGHT asymmetry, but "is
-    // this word present" becomes "what's the best cosine similarity to any
-    // word in the passage" — kept byte-identical to
-    // pikelet/src/calibrate.mjs's maxSimFrac, rescale included: a raw
-    // cosine similarity has no meaningful zero, so every similarity is
-    // rescaled against maxSimBaseline (this corpus's own "how similar do
-    // two unrelated words look by chance" ceiling, shipped in the asset),
-    // then MAXSIM_GAMMA further suppresses marginal, barely-above-baseline
-    // credit (a power curve, not just linear) — see
-    // pikelet/src/calibrate.mjs's MAXSIM_GAMMA header comment for why a
-    // linear rescale alone was still enough noise to tip a corpus's
-    // held-out AUC across the calibration quality gate.
-    const MAXSIM_GAMMA = 3;
-    const maxSimBaseline = coverageCfg?.maxSimBaseline ?? 0;
-    const rescaleMaxSim = (sim) => (maxSimBaseline >= 1 ? 0 : Math.max(0, (sim - maxSimBaseline) / (1 - maxSimBaseline)) ** MAXSIM_GAMMA);
-    async function maxSimFrac(text, passages) {
-        const content = (String(text).toLowerCase().match(/[a-z0-9']+/g) || [])
-            .filter((w) => w.length >= coverageMinLen && !coverageStopwords.has(w));
-        if (!content.length) return 0;
-        const weights = content.map((w) => (isCommon && isCommon(w) ? commonWordWeight : 1));
-        const weightSum = weights.reduce((a, c) => a + c, 0);
-        const queryVecs = await Promise.all(content.map((w) => embedWordVec(w)));
-        const cosine = (a, b) => {
-            if (!a || !b) return 0;
-            let dot = 0;
-            for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-            return dot;
-        };
-        let best = 0;
-        for (const { heading, body } of passages || []) {
-            const bodyWords = [...new Set(String(body || '').toLowerCase().match(/[a-z0-9']+/g) || [])]
-                .filter((w) => w.length >= coverageMinLen);
-            const headingWords = [...new Set(String(heading || '').toLowerCase().match(/[a-z0-9']+/g) || [])]
-                .filter((w) => w.length >= coverageMinLen);
-            if (!bodyWords.length && !headingWords.length) continue;
-            const bodyVecs = await Promise.all(bodyWords.map((w) => embedWordVec(w)));
-            const headingVecs = await Promise.all(headingWords.map((w) => embedWordVec(w)));
-            let simSum = 0;
-            for (let i = 0; i < content.length; i++) {
-                let simBest = 0;
-                for (const bv of bodyVecs) simBest = Math.max(simBest, cosine(queryVecs[i], bv));
-                let simHeading = 0;
-                for (const hv of headingVecs) simHeading = Math.max(simHeading, cosine(queryVecs[i], hv));
-                simBest = Math.max(simBest, simHeading * HEADING_COVERAGE_WEIGHT);
-                simSum += rescaleMaxSim(simBest) * weights[i];
-            }
-            best = Math.max(best, simSum / weightSum);
-        }
-        return best;
     }
     const bloom = new Uint8Array(bloomBytes);
     const bits = asset.vocabBloom.bits;
@@ -280,14 +205,11 @@ export function createAbstentionScorer(asset, bloomBytes, embedWords = null) {
                 const coverage = coverageFrac(queryText, passages);
                 signals.coverage1 = coverage.value;
                 grounding = coverage.grounding;
-                // grounding1 = max(coverage1, maxSim1) — one additive term,
-                // not two, so a genuine paraphrase's semantic similarity
-                // can rescue it from coverage1's lexical-overlap penalty
-                // directly. See this file's header comment and
-                // calibrate.mjs's GROUNDING_FEAT design note.
-                if (useMaxSim) signals.maxSim1 = await maxSimFrac(queryText, passages);
-                const grounding1 = useMaxSim ? Math.max(signals.coverage1, signals.maxSim1) : signals.coverage1;
-                z += ((grounding1 - coverageCfg.mean) / (coverageCfg.std || 1)) * coverageCfg.weight;
+                // grounding1 is coverage1 alone — see this file's header
+                // comment and calibrate.mjs's GROUNDING_FEAT design note
+                // for why a semantic (maxSim1) blend was tried twice and
+                // removed both times.
+                z += ((signals.coverage1 - coverageCfg.mean) / (coverageCfg.std || 1)) * coverageCfg.weight;
             }
             // A malformed asset (unknown feature name, non-numeric term) must
             // degrade to unscored, never to a NaN that compares false against

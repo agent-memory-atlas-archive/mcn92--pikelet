@@ -1619,9 +1619,13 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       coverage: { topPassages: COVERAGE_TOP_PASSAGES, commonWords: commonWords.commonWords, commonDfCap: commonWords.dfCap },
       // Standalone separation power of coverage1 and maxSim1 (see
       // GROUNDING_FEAT's design note) — comparison only. maxSim1 does NOT
-      // feed the fit (grounding1 is plain coverage1) and asset.coverage
-      // below does not set useMaxSim, so the reader must not blend it in
-      // either — the fit was calibrated against coverage1 alone.
+      // feed the fit (grounding1 is plain coverage1), and the reader's
+      // matching useMaxSim/maxSimFrac code path has been removed entirely
+      // (not just left unset here) — it cost 200-400 individual per-word
+      // encoder calls per query, turning a 30-80ms search into 1.5-4.6s
+      // whenever some calibration asset (however it came to exist) set
+      // coverage.useMaxSim: true. This field name is kept for the
+      // telemetry's own history; it is not read by anything anymore.
       maxSimVsCoverage,
       maxSimInFit: false,
     };
