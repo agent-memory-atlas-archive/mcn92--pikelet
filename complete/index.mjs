@@ -78,6 +78,18 @@ const SKETCH_HEADER_BYTES = 256;
 // query, and the reciprocal-rank-fusion constant (the standard untuned 60).
 const LEXICAL_CANDIDATES = 24;
 const RRF_K = 60;
+// scoreQuality's coverage term hydrates the fused top passagesNeeded
+// records (asset.coverage.topK, 5 by default — see calibrate.mjs's
+// COVERAGE_TOP_PASSAGES) once retrieval returns. The scorer that knows
+// the real number is created inside retrievalScorer()'s own closure, not
+// reachable from here, so this is a fixed approximation used to decide
+// how many of fusedFull's records to include in the batched hydration
+// below, alongside phrase-pinning's own candidates — hydrating a couple
+// more than coverage strictly needs just costs a little extra bandwidth
+// on a cache entry that goes unread; hydrating fewer only narrows how
+// much of coverage's later hydration hits warm cache. Either way is
+// harmless: it's a batch-sizing choice, not a correctness one.
+const COVERAGE_BATCH_COUNT = 5;
 // Only BM25 hits within this fraction of the top lexical score join fusion.
 // Common query terms give every matching document a near-tied score (idf
 // collapses them flat); a wide cutoff let that tied mass ride into fusion on
@@ -1106,15 +1118,42 @@ export async function openPikeletFile(input, options = {}) {
                             }))
                             .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
                             .map((entry) => entry.hit);
+                        // One batched hydration for everything this block and
+                        // scoreQuality's coverage term (below) will need, in
+                        // place of two separate staged fetches (phrase-pin's
+                        // own, then a later cold start for coverage): over a
+                        // remote range-read source each hydrate() a caller
+                        // hasn't already paid for is its own network round
+                        // trip, and sequential/staged awaits pay that cost
+                        // once per stage instead of once per query. The
+                        // union of phrase-pin's candidates (top lexical
+                        // hits) and coverage's (fusedFull's top few — phrase
+                        // pinning only ever reorders that window, never
+                        // changes its membership) is known right here, so
+                        // both stages can share one round trip. A record
+                        // that fails to hydrate here does not fail the
+                        // query: the id is just missing from the map, and
+                        // each site below falls through exactly as it would
+                        // on a cold cache miss (recs[i] undefined; coverage
+                        // sees fewer usable passages) — hydrate() raising
+                        // for a bad id is still a real failure, but only
+                        // once a site actually needs that specific record,
+                        // not speculatively for every candidate touched here.
+                        const phraseCandidates = lexicalHits.slice(0, 3);
+                        const coverageCandidates = fusedFull.slice(0, COVERAGE_BATCH_COUNT);
+                        const batchIds = [...new Set([...phraseCandidates, ...coverageCandidates].map((h) => h.id))];
+                        const batch = new Map();
+                        await Promise.all(batchIds.map(async (id) => {
+                            try { batch.set(id, await hydrate(id)); } catch { /* see comment above */ }
+                        }));
                         // Phrase pinning: a verbatim occurrence of the query (>= 3
                         // content words) in one of the top lexical hits is the
                         // strongest evidence of support there is; rank it first.
                         const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
                         const phrase = norm(trimmed);
                         if (phrase.split(' ').length >= 3) {
-                            for (const h of lexicalHits.slice(0, 3)) {
-                                const rec = await hydrate(h.id);
-                                if (norm(rec?.text).includes(phrase)) {
+                            for (const h of phraseCandidates) {
+                                if (norm(batch.get(h.id)?.text).includes(phrase)) {
                                     fusedFull = [searched.find((x) => x.id === h.id), ...fusedFull.filter((x) => x.id !== h.id)].filter(Boolean);
                                     break;
                                 }
