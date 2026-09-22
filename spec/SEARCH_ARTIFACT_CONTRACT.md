@@ -416,7 +416,7 @@ profile; hosts that need integrity must hash the snapshot externally.
 **Status: deprecated (2026-08-28).** The sketch profile (9.3) supersedes this
 profile for every measured regime: depth-1 execution beat graph traversal
 ~5x end-to-end over real networks at roughly a third of the artifact size
-(ROADMAP Track A, SIFT1M). Readers remain supported so existing
+(measured on SIFT1M over the production R2 bucket, 2026-08). Readers remain supported so existing
 `.pikelet-range` artifacts stay openable; producers should not emit new
 ones, and no further format revisions are planned.
 

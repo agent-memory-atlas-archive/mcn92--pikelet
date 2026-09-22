@@ -21,6 +21,158 @@ first.
   `PIKELET_SEARCH_EMBED_WORKERS`, `PIKELET_SEARCH_STUB_EMBEDDINGS`, and
   `PIKELET_SEARCH_PYTHON`. Pre-1.0; scripts/CI referencing the old
   names need updating.
+- **`pikelet-wasm` declares `engines.node >=18`** (was `>=16`).
+  `complete/sources.mjs` uses the global `fetch`, which Node 16 does not
+  have; CI tests 18, 20 and 22. The `pikelet` CLI is unchanged at
+  `>=20`.
+
+### Changed
+
+- **Abstention calibration is fit against a different negative pool.**
+  Hard negatives are now ablation pairs (a verified positive's own text,
+  scored with its source excluded), entity swaps (a proper noun replaced
+  by a corpus entity that never co-occurs with it), and held-out-document
+  questions (title questions scored with that document excluded). A fit
+  whose `d0` weight comes out non-negative ships `unscored` instead. The
+  calibration summary (`fitAuc`, `cvAuc`, `cvAucHard`, per-class counts)
+  is persisted in the evaluation segment and reported by `verify_pack`;
+  golden queries are sampled from retrieval-verified positives. Packs
+  rebuilt with this calibrator get a different fit and therefore a
+  different identity; existing packs are unaffected.
+- **`query()` returns `grounding`** — `{ recordId, coverage, covered,
+  uncovered }`: which of the query's content words the best passage
+  restates and which no passage contains — and each result carries
+  `vectorRank`, `lexicalRank` and `fusedRank`. A verbatim match of three
+  or more consecutive query words is pinned to rank 1 ahead of semantic
+  near-misses. Phrase pinning and the coverage term now hydrate their
+  candidates in one batch.
+- **MCP `search` ships results under a `"none"` verdict by default**,
+  with a note, instead of withholding them (`showAbstained: false`
+  restores withholding); packs without a fitted calibrator get an
+  `unscoredWarning`. Each section carries `grounding`. The tool
+  description and `server/discover` instructions describe `matchQuality`
+  as how directly the text restates the question, not whether the answer
+  is present, and tell the caller to treat a queried-for term in
+  `grounding.uncovered` as unestablished and to search again for the
+  second hop of a chained question.
+- **The reader no longer reads `coverage.useMaxSim`**; the word-level
+  semantic grounding path is removed rather than left dormant (a pack
+  with the flag set was measured at 1.5–4.6 s per query).
+- `scripts/calibration-harness.mjs` reports false-abstention and
+  false-answer rates on labeled question sets; the sets live under
+  `test/relevance/`.
+- Public browser playground for the Wikipedia pack, with an ablation
+  tab.
+
+### Fixed
+
+- **`compact()`'s rebuild path no longer leaves the index half-cleared**
+  when a reinsertion fails: the old graph is released only after the
+  rebuilt one is complete, so a failed rebuild returns with the index
+  unchanged. Previously the next `search`/`insert` read out of bounds.
+- Coverage word rules: possessives (`darcy's`) match plain mentions,
+  eleven quantifier/hedge words are stopwords, and numerals are exempt
+  from the minimum word length (`Chamber 4` vs `Chamber 5`).
+- Ingest: `**/dir/**` globs no longer substring-match sibling names,
+  minified HTML with unquoted attributes chunks correctly, a leading BOM
+  no longer breaks frontmatter, numeric entities decode, and
+  `stripMarkdown` no longer deletes hyphens, underscores and minus
+  signs; merging a section with a child heading keeps its provenance;
+  ingestion conformance runs on Windows.
+- Browser verification without a WebCrypto backend fails with a clear
+  error instead of an obscure one.
+
+## pikelet 0.8.1 — 2026-09-18
+
+- `pikelet` records `mcpName: "io.github.mcn92/pikelet"` and ships
+  `server.json`, the manifest for the official MCP registry entry
+  (`pikelet mcp <pack>`; one required positional argument, any
+  `.pikelet` file). No code change.
+
+## pikelet-wasm 0.8.0 / pikelet 0.8.0 — 2026-09-14
+
+### Breaking / compatibility
+
+- **Manifest profile strings are renamed** `pancake-complete-v1/v2` →
+  `pikelet-complete-v1/v2`. New builds write the `pikelet-` string;
+  readers accept either for the same format version, so every pack
+  published before this release keeps opening with its identity
+  unchanged. Because the profile string is part of the manifest that
+  the identity hashes, **a 0.8.0 compile of the same inputs produces a
+  different identity than 0.7.0 did**. This reverses the 0.7.0 note that
+  the wire format would keep its pancake-era names.
+- **Published API names are renamed** to their Pikelet forms:
+  `PancakeError`/`PANCAKE_ERROR_CODES` → `PikeletError`/
+  `PIKELET_ERROR_CODES`, `PancakeIndex` → `PikeletIndex`,
+  `PancakeRangeArtifact`/`PancakeSketchArtifact` → `PikeletRangeArtifact`/
+  `PikeletSketchArtifact`, `PancakeApi`/`NodePancakeApi` → `PikeletApi`/
+  `NodePikeletApi`, `openPancakeFile`/`assemblePancakeFile` →
+  `openPikeletFile`/`assemblePikeletFile`. The compatibility aliases are
+  dropped. The C ABI's `pancake_*` symbols are `pikelet_*`; the native
+  addon source is `native/pikelet_napi.cpp`. The `.pancake-range` and
+  `.pancake-sketch` extension conventions are `.pikelet-range` and
+  `.pikelet-sketch` (readers dispatch on magic bytes, not extension).
+- **`export()` refuses while deleted vectors are resident.** The snapshot
+  format has no deleted flag, so a snapshot taken with ghosts present
+  resurrected them on import. C++ `serialize()` throws, the WASM
+  `pikelet_export` returns null, the native binding throws; call
+  `compact()` first. The JS wrapper already enforced this; the native
+  path did not.
+- **`@xenova/transformers` is an optional dependency of `pikelet`.** It
+  is needed only by the scaffold (`create`) path; `npm install -g pikelet
+  --omit=optional` skips its ~140 MB for `compile`/`mcp`-only use.
+- `pikelet` depends on `pikelet-wasm ^0.8.0`.
+
+### Added
+
+- **Swappable inline encoder.** `compile --encoder-model
+  --encoder-weights --encoder-vocab --encoder-pooling mean|cls
+  --encoder-query-prefix --encoder-passage-prefix` records a different
+  BERT-shaped model (same hidden size, layers, heads and vocab size as
+  MiniLM-L6, e.g. Snowflake `arctic-embed-xs`) as artifact data; CLS
+  pooling is honored end to end, and `export_encoder_blob.py` checks the
+  architecture before exporting.
+- **The inline-transformer kernel's window is 512 tokens** (was 128).
+  Chunks longer than 128 tokens are no longer silently truncated at
+  embed time; long chunks cost proportionally more to embed. Existing
+  artifacts declaring `maxTokens: 128` open and verify unchanged.
+- **`query({ showAbstained: true })`** returns the retrieval under a
+  `"none"` verdict alongside the unchanged `matchQuality`/`confidence`.
+- `examples/06-mcp-knowledge-pack`: compile a corpus, mount it over MCP,
+  answer with citations. Engine-reference examples move to
+  `examples/legacy/`.
+- `bench/beir/` retrieval-quality ladder (dense, hybrid RRF, lexical-only,
+  Arctic-XS configs) and `bench/range-proof/` (dumb static server, MCP
+  and headless-LLM proofs of the static-hosting claim).
+- A committed MCP config makes the Veyra demo packs queryable
+  interactively; the packs themselves are GitHub release assets fetched
+  by `web/veyra-corpus/fetch-veyra.mjs` rather than tracked files.
+- Encoder-conformance fixtures live under `test/fixtures/` instead of
+  inside an example.
+
+### Fixed
+
+- **The abstention verdict no longer depends on the caller's `k`.** The
+  scorer windows its inputs to the fixed top-10 the calibrator was fit
+  on; at `k=3`, `margin`, `mean10` and coverage were computed over
+  fewer candidates than at fit time and flipped verdicts between
+  `strong` and `weak` for identical retrieval.
+- **Coverage is scored against the fused (vector + BM25) ranking**
+  in both the calibrator and the reader, with the lexical cutoff shared
+  between them. Calibration was fit on vector-only signals while the
+  reader served hybrid results; on a 2,841-record Wikipedia sample every
+  measured false abstention had the correct record at hybrid rank 1–6.
+- `httpRangeSource` treats a `200` whose ETag differs from the pinned
+  one as `ARTIFACT_CHANGED` instead of a Range-unsupported host; the
+  sketch row-digest floor is 16 bytes (readers still accept 8–32);
+  `deserialize()` validates every header field before assigning it; the
+  L2 insert/search path rejects non-finite vectors (Cosine already did).
+- `chunkDocs` no longer emits title-only stub records from leading
+  undersized sections or attributes a merged chunk to the wrong section.
+- Calibration probes: phrasing diversity across question frames, a
+  saturation rail on the hard threshold, and a minimum weak band.
+- `spec/COMPLETE_PROFILE.md` Draft 2 resolves the corpus-compression,
+  `sampleQueries` placement and browser-packaging questions.
 
 ## pikelet-wasm 0.7.0 / pikelet 0.7.0 — 2026-09-02
 
@@ -408,7 +560,8 @@ first.
 - **The v1 spec no longer lists hybrid search as a non-goal**:
   docs/CREATE_PANCAKE_SEARCH_SPEC.md's non-goals entry for "Hybrid BM25 +
   vector scoring" is struck through with a pointer to the shipped lexical
-  segment (spec §3.8) and the `query({ retrieval })` modes.
+  segment (spec §3.8) and the `query({ retrieval })` modes. (That planning
+  document was moved out of the repository on 2026-09-05.)
 - **Section-aware ingestion and chunking.** Markdown/MDX documents are
   parsed into their heading structure before chunking — heading lines are
   recognized only outside code fences, explicit `{#custom-id}` heading ids

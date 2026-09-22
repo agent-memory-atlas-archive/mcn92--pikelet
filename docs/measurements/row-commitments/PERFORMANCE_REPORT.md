@@ -1,5 +1,11 @@
 # Complete-artifact performance characterization — 2026-08-26
 
+> Superseded in part: the wiki recall@10 figures below (82.4 % at C=600)
+> predate the 0.6.0 sketch-geometry changes. CHANGELOG 0.6.0 records
+> 95.2 % at C=200 (97.0 % at C=600) on the same corpus, with requests per
+> query down from ~458 to ~127. The byte/request accounting and the
+> per-stage cost structure are unchanged by that work.
+
 What the `.pikelet` reader actually costs, measured with `poc/harness.mjs`
 on the two real artifacts (both format 2 with v2 sketches), local-file and
 over HTTP range requests, against the in-memory HNSW engine on the same

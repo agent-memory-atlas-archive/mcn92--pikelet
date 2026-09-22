@@ -95,7 +95,7 @@ fields:
   "profile": "pikelet-complete-v2",                    // "pikelet-complete-v1" for format-1 files
   "corpus": {
     "records": 208,
-    "provenance": null,                                 // reserved per contract 4.3
+    "provenance": { "source": "folder", "name": "docs", "license": "CC-BY-4.0" },  // contract 4.3; license set by compile --license, omitted otherwise; null in pre-0.7.0 files
     // format 2 only (layout v2, section 3.5); absent on format 1:
     "layout": "records-v2",
     "pageRecords": 256,

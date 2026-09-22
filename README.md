@@ -8,7 +8,7 @@ A model can interrogate a 456,153-record knowledge base whose backend is a stati
 
 A `.pikelet` can carry the source text, semantic index, keyword index, query encoder, integrity commitments, retrieval calibration, and evaluation fixtures needed to interrogate that corpus. Put the file on disk, S3, R2, a CDN, or any static HTTP host. A reader can mount it locally or over HTTP Range and search it without a vector database, embedding API, or retrieval server.
 
-Requires Node 20+.
+The `pikelet` CLI requires Node 20+; the `pikelet-wasm` library runs on Node 18+ (CI tests 18, 20, 22), browsers, and Cloudflare Workers.
 
 ```bash
 npx pikelet compile --source ./docs --out docs.pikelet

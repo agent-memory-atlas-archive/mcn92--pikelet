@@ -3,10 +3,13 @@
 **Scope:** The full Pikelet vector-search system as built today — the C++ HNSW
 backends, the WASM C ABI, the JavaScript wrapper, the native benchmarking addon,
 serialization, and the Cloudflare Worker reference deployments.
-**Last updated:** 2026-07-19
+**Last updated:** 2026-09-22 (symbol names, export inventory, compaction
+ordering; the ground-up read dates from 2026-07-19)
 **Status:** Reflects the current source tree (`src/`, `pikelet-core.js`,
 `native/`, `examples/legacy/reference-worker*`). This document was written from a ground-up
-re-read of the code.
+re-read of the code. It covers the engine and its wrappers only; the
+`.pikelet` artifact formats, the inline encoder, and abstention
+calibration are specified in `spec/` and `complete/`.
 
 > Verification note: every mechanism below was read out of the source. Where a
 > behavior is subtle (default divergence between layers, deletion state on
@@ -72,12 +75,12 @@ the caller's responsibility.
 │  JS Wrapper Layer           │                      │              │
 │   pikelet.js / pikelet.node.mjs / pikelet.web.mjs / pikelet.workerd.mjs │
 │            └──────────── pikelet-core.js ──────────┘              │
-│            PancakeIndex: marshalling, ID translation,             │
+│            PikeletIndex: marshalling, ID translation,             │
 │            export envelope, buffer management                     │
 ├──────────────────────────────┬────────────────────────────────────┤
 │  C ABI (WASM exports)         │                                    │
 │   src/engine.cpp — handle table, IndexWrapper dispatch            │
-│   _pancake_init / _add / _query / _query_filtered / _export / ... │
+│   _pikelet_init / _add / _query / _query_filtered / _export / ... │
 ├──────────────────────────────┬────────────────────────────────────┤
 │  Backend Layer (C++ templates-free, runtime dimension)            │
 │   ┌──────────────────┐   ┌────────────────────────────────────┐   │
@@ -100,13 +103,13 @@ layout `spec/SKETCH_PROFILE.md`, and every entrypoint bundles it
 frozen `PancakeRangeArtifact` / `PancakeSketchArtifact` classes). This document covers
 the engine below that line; the artifact layer is specified in `spec/`.
 
-The native addon (`native/pancake_napi.cpp`) replaces the *C ABI* layer with an
+The native addon (`native/pikelet_napi.cpp`) replaces the *C ABI* layer with an
 N-API binding but reuses the identical backend layer — it `#include`s
 `float_hnsw.hpp` and `uint8_float_hnsw.hpp` directly.
 
 The same `IndexWrapper` abstraction (`src/engine.cpp:38`) is used by both the
 WASM C ABI and the native addon (the native addon defines an equivalent wrapper
-pair in `pancake_napi.cpp`). Backend choice is made once, at construction, from
+pair in `pikelet_napi.cpp`). Backend choice is made once, at construction, from
 the `quantized` flag, and dispatched through virtual calls thereafter — there is
 no per-call branching on a backend type.
 
@@ -186,11 +189,15 @@ node's slot, or overrun the buffer on the last node). The uint8 backend's
   remaps every neighbor id, and backfills under-connected nodes through
   neighbors-of-neighbors. At 50% or more deletions, it rebuilds the HNSW graph
   from the live vectors in old-ID order; repairing a mostly hollow skeleton did
-  not recover recall reliably at scale. The uint8 rebuild compacts its quantized
-  rows first and releases the old topology before reinsertion so the WASM
-  allocator can reuse those blocks without increasing the retained heap.
-  Deletion state is reset and the `old_id → new_id` map is returned through an
-  `out_map` out-parameter. (`float_hnsw.hpp:390`,
+  not recover recall reliably at scale. The rebuild inserts survivors into a
+  fresh index while the old graph stays intact, and only after every
+  reinsertion succeeds does it release the old topology and move the fresh
+  index into place; a reinsertion failure returns with the index unchanged
+  and `out_map` cleared. (Holding both graphs for the duration of the loop
+  costs peak memory; the earlier ordering, which freed the old graph first,
+  left the index half-cleared on that failure path.) Deletion state is reset
+  and the `old_id → new_id` map is returned through an `out_map`
+  out-parameter. (`float_hnsw.hpp:390`,
   `uint8_float_hnsw.hpp:503`.)
 
 The C ABI exposes both a void `compact()` and a `compact_remap()` that surfaces
@@ -316,7 +323,7 @@ only throughput differs.
 
 ## 6. The C ABI and Handle Table
 
-`src/engine.cpp` (361 lines) is the boundary between WASM and the C++ backends.
+`src/engine.cpp` (577 lines) is the boundary between WASM and the C++ backends.
 
 ### 6.1 Handle table
 
@@ -340,7 +347,7 @@ under WASM's single-threaded execution model. (`engine.cpp:140–165`.)
 `bulk_insert`, `search`, `search_filtered`, `mark_delete`, `compact` (both void
 and `out_map` forms), `count`, `ghost_count`, `ghost_ratio`, `memory_bytes`,
 `serialize`, `deserialize`, `dimension`. Query beam width is an explicit
-argument to `search` and `search_filtered`. `pancake_init` picks
+argument to `search` and `search_filtered`. `pikelet_init` picks
 the concrete wrapper from the `quantized` flag and the metric (`metric == 1` →
 cosine, else L2):
 
@@ -355,12 +362,12 @@ else           g_handles[h].index = new FloatHNSWWrapper(dim, cfg);
 > `efSearch=100`, `maxElements=100000`, and `seed=108`. The JavaScript wrapper
 > passes them explicitly. The C ABI
 > only falls back to its internal defaults when a direct caller passes
-> non-positive values to `pancake_init`; normal JS callers use the canonical
+> non-positive values to `pikelet_init`; normal JS callers use the canonical
 > library defaults.
 
 ### 6.3 Result marshalling
 
-`pancake_query` / `pancake_query_filtered` take caller-allocated `uint64_t* ids`
+`pikelet_query` / `pikelet_query_filtered` take caller-allocated `uint64_t* ids`
 and `float* dists` buffers, run the search, and copy results in — widening the
 backend's internal `uint32_t` ids to `uint64_t` on the way out (the BigInt-wide
 ABI is why `WASM_BIGINT=1` is set at build time). They return the result count.
@@ -368,12 +375,12 @@ ABI is why `WASM_BIGINT=1` is set at build time). They return the result count.
 
 ### 6.4 Export buffer ownership
 
-`pancake_export` serializes into the per-handle static `g_export_bufs[h]` and
+`pikelet_export` serializes into the per-handle static `g_export_bufs[h]` and
 returns a pointer + size; the pointer is valid only until the next export on that
-handle or `pancake_dispose`. The caller must copy promptly. `pancake_import`
+handle or `pikelet_dispose`. The caller must copy promptly. `pikelet_import`
 returns `0` / `-1`; on failure the existing index is left intact. The wrapper's
 `deserialize` builds a fresh backend into a `unique_ptr` and only swaps it in on
-success, and `pancake_import` wraps the call in a `try/catch` so a hostile
+success, and `pikelet_import` wraps the call in a `try/catch` so a hostile
 snapshot that still slips an oversized allocation through the bounds checks
 (below) returns `-1` instead of aborting the WASM instance. (`engine.cpp:294`,
 `:301`.)
@@ -381,8 +388,8 @@ snapshot that still slips an oversized allocation through the bounds checks
 ### 6.5 Utilities and lifecycle
 
 Beyond the index API, the ABI exports `emsc_malloc`/`emsc_free` (heap for
-marshalling), `pancake_profile_print`/`pancake_profile_reset` (no-ops unless built with
-`PIKELET_UINT8_HNSW_BUILD_PROFILE`), and `pancake_shutdown_all` (frees all
+marshalling), `pikelet_profile_print`/`pikelet_profile_reset` (no-ops unless built with
+`PIKELET_UINT8_HNSW_BUILD_PROFILE`), and `pikelet_shutdown_all` (frees all
 handles). The WASM ABI no longer exposes the earlier experimental `emb_*`
 embedding-model or matrix-helper paths; the public surface is the index API plus
 allocation, profiling, and lifecycle helpers.
@@ -407,18 +414,18 @@ module promises per SIMD/scalar variant. Concurrent `create()` calls therefore
 share fetch/read/compile work but each call invokes the Emscripten factory with
 a fresh `WebAssembly.Instance`. Heaps, handle tables, growth, failure, and
 disposal remain isolated per index. `Pikelet.create()` then allocates per-index
-scratch buffers, calls `_pancake_init`, and returns the wrapper.
+scratch buffers, calls `_pikelet_init`, and returns the wrapper.
 
-### 7.2 PancakeIndex API
+### 7.2 PikeletIndex API
 
 | Method | Marshalling |
 |--------|-------------|
-| `add(vec)` | validates element type (plain-array elements must be numbers, not coerced) + dim + finiteness, `HEAPF32.set` into the query buffer, `_pancake_add`, assigns an external id |
-| `addBatch(vecs)` | one `emsc_malloc` for the whole batch, `_pancake_bulk_insert`, records a contiguous id range |
-| `search(q,k,options?)` | resolves the per-call/default `efSearch`, clamps `k` to `count` (prevents 32-bit size wrap), `_ensureSearchCapacity(boundedK)`, marshals query, `_pancake_query`, translates ids + (for L2) `sqrt` the squared distance |
-| `searchFiltered(q,k,allowedIds,options?)` | resolves `efSearch`, builds an internal-id bitset from the allowed external-id `Set`, `_pancake_query_filtered` |
+| `add(vec)` | validates element type (plain-array elements must be numbers, not coerced) + dim + finiteness, `HEAPF32.set` into the query buffer, `_pikelet_add`, assigns an external id |
+| `addBatch(vecs)` | one `emsc_malloc` for the whole batch, `_pikelet_bulk_insert`, records a contiguous id range |
+| `search(q,k,options?)` | resolves the per-call/default `efSearch`, clamps `k` to `count` (prevents 32-bit size wrap), `_ensureSearchCapacity(boundedK)`, marshals query, `_pikelet_query`, translates ids + (for L2) `sqrt` the squared distance |
+| `searchFiltered(q,k,allowedIds,options?)` | resolves `efSearch`, builds an internal-id bitset from the allowed external-id `Set`, `_pikelet_query_filtered` |
 | `setEfSearch(ef)` | validates and changes the JS-owned default for future queries; it does not mutate WASM engine state |
-| `delete(id)` | external→internal, `_pancake_delete`, record in `_deletedExt`; returns whether a live ID changed state |
+| `delete(id)` | external→internal, `_pikelet_delete`, record in `_deletedExt`; returns whether a live ID changed state |
 | `has(id)` / `isDeleted(id)` | inspect the stable external-ID maps without entering WASM |
 | `compact()` | rebuild id maps from survivors (§8) |
 | `export()` | guard `ghostCount===0`, prepend v3 envelope (§9.3) |
@@ -466,13 +473,13 @@ External ids are assigned at insert and never change. On `compact()`
 (`pikelet-core.js:285`):
 
 1. Allocate a `countBefore × u32` map buffer and call
-   `_pancake_compact_remap(handle, mapPtr, countBefore)`.
+   `_pikelet_compact_remap(handle, mapPtr, countBefore)`.
 2. Read back the engine's `old → new` internal-id map (`0xFFFFFFFF` marks a
    removed node).
 3. Rebuild `_extToInt` / `_intToExt` from that map and clear `_deletedExt`.
-   (An empty index short-circuits to plain `_pancake_compact`.)
+   (An empty index short-circuits to plain `_pikelet_compact`.)
 4. Cross-check: the rebuilt mapping count must equal the engine's post-compact
-   `_pancake_count`; a mismatch throws `INTERNAL_INVARIANT` and clears all
+   `_pikelet_count`; a mismatch throws `INTERNAL_INVARIANT` and clears all
    mappings rather than serving misattributed ids.
 
 The correctness hinge is that cross-check: the wrapper consumes the engine's
@@ -516,7 +523,7 @@ footprint.
 
 ### 9.3 JS export envelope (v3)
 
-`PancakeIndex.export()` wraps the backend blob with a 32-byte header **plus an
+`PikeletIndex.export()` wraps the backend blob with a 32-byte header **plus an
 embedded id-mapping table** so external ids survive an export/import cycle. This
 is new in v3 — earlier envelopes (v1/v2, 20-byte header, still accepted on
 import) carried no mapping. (`pikelet-core.js:10`, `:334`.)
@@ -532,7 +539,7 @@ Offset  Size           Field
 24      4              Mapping entry count
 28      4              WASM blob byte length
 32      8 × count      Mapping table: [intId u32, extId u32] per entry
-...     blobLen        Backend blob (PNCK-less, raw pancake_export bytes)
+...     blobLen        Backend blob (PNCK-less, raw pikelet_export bytes)
 ```
 
 `import()` validates magic, version (1/2/3 accepted, ≥4 rejected), and that the
@@ -570,7 +577,7 @@ hardened to fail closed rather than corrupt memory or abort the instance:
   every distance to it; `insert()` never produces one, so a snapshot may not
   carry one either. (`uint8_float_hnsw.hpp:215` for the insert-side guard the
   importer mirrors.)
-- **Exceptions are contained** at the `pancake_import` boundary (§6.4): any
+- **Exceptions are contained** at the `pikelet_import` boundary (§6.4): any
   remaining oversized allocation returns `-1` rather than unwinding out of the
   WASM module.
 
@@ -617,7 +624,7 @@ artifacts in lockstep with the current `src/`.
 
 ### 10.2 Native (`native/binding.gyp`)
 
-node-gyp compiles `pancake_napi.cpp` (which includes the same backend headers
+node-gyp compiles `pikelet_napi.cpp` (which includes the same backend headers
 from `../src`) with `-O3 -std=c++17 -ffast-math -ftree-vectorize -march=native
 -mavx2 -msse2 -fno-rtti` and `-DPIKELET_ENABLE_AVX512_SIMD
 -DPIKELET_ENABLE_AVX2_SIMD -DPIKELET_ENABLE_SSE2_SIMD`. AVX-512 instructions
@@ -665,7 +672,7 @@ and is the model to copy.
 
 ### 11.1 Request lifecycle
 
-Each isolate holds the active public `PancakeIndex` and a memoized restore
+Each isolate holds the active public `PikeletIndex` and a memoized restore
 promise. The index stays warm across requests within an isolate. On any
 non-trivial route, if `index` is null
 and a bucket is bound, the Worker lazily **restores from R2** before serving
@@ -702,7 +709,7 @@ snapshot import (`MAX_SNAPSHOT_BYTES`); and opt-in CORS via `ALLOWED_ORIGIN`
 ### 11.3 R2 persistence
 
 Snapshots are written under **timestamped, append-only keys**
-(`pancake-index-<13-digit-ms>-<6-digit-seq>.pnck`); restore lists the prefix and
+(`pikelet-index-<13-digit-ms>-<6-digit-seq>.pnck`); restore lists the prefix and
 picks the lexicographically greatest key across all R2 list pages (zero-padding
 makes string order match time order), with a fallback to a legacy fixed key.
 `/init`, `/import`, `/add`, and `/add_batch` persist snapshots when the index has
@@ -783,7 +790,7 @@ Removed options (`compressed`, `varianceSample`) throw if passed.
 ### 12.2 C ABI fallback defaults (direct-ABI callers only)
 
 `M=12`, `ef_construction=75`, `ef_search=100`, `max_elements=100000`, and
-`seed=108`, applied only when a non-positive value reaches `pancake_init`.
+`seed=108`, applied only when a non-positive value reaches `pikelet_init`.
 Normal JS callers already pass these explicitly.
 
 ### 12.3 Worker limits and env
@@ -809,8 +816,8 @@ Normal JS callers already pass these explicitly.
 
 ## 13. Invariants
 
-- **I1 — Handle validity.** A handle is valid from `pancake_init` until
-  `pancake_dispose`; range and null checks guard every ABI call. Max 64 live.
+- **I1 — Handle validity.** A handle is valid from `pikelet_init` until
+  `pikelet_dispose`; range and null checks guard every ABI call. Max 64 live.
 - **I2 — Single-threaded.** All access to a WASM instance must be from one
   thread; enforced by the WASM model, not the code. Each Worker isolate /
   worker_thread needs its own instance.
@@ -828,7 +835,7 @@ Normal JS callers already pass these explicitly.
   `ghostCount===0`.
 - **I8 — Envelope validation on import.** dim/metric/quantized mismatches (and,
   for v3, mapping-count / nextExtId inconsistencies) throw before the WASM import.
-- **I9 — Export pointer lifetime.** The `pancake_export` pointer is valid only
+- **I9 — Export pointer lifetime.** The `pikelet_export` pointer is valid only
   until the next export on that handle or dispose; copy immediately.
 
 ---
@@ -857,17 +864,21 @@ Normal JS callers already pass these explicitly.
 
 ## Appendix A: WASM Export Inventory
 
-22 functions exported by `scripts/build-engine.mjs` (`-s EXPORTED_FUNCTIONS`):
+23 functions exported by `scripts/build-engine.mjs` (`-s EXPORTED_FUNCTIONS`):
 
-**Index API:** `_pancake_init`, `_pancake_add`, `_pancake_bulk_insert`,
-`_pancake_query`, `_pancake_query_filtered`, `_pancake_delete`,
-`_pancake_compact`, `_pancake_compact_remap`, `_pancake_count`,
-`_pancake_memory`, `_pancake_ghost_count`, `_pancake_ghost_ratio`,
-`_pancake_export`, `_pancake_import`, `_pancake_dispose`,
-`_pancake_dimension`, `_pancake_shutdown_all`, `_shutdown_all`.
+**Index API:** `_pikelet_init`, `_pikelet_add`, `_pikelet_bulk_insert`,
+`_pikelet_query`, `_pikelet_query_filtered`, `_pikelet_delete`,
+`_pikelet_compact`, `_pikelet_compact_remap`, `_pikelet_count`,
+`_pikelet_memory`, `_pikelet_ghost_count`, `_pikelet_ghost_ratio`,
+`_pikelet_export`, `_pikelet_import`, `_pikelet_dispose`,
+`_pikelet_dimension`, `_pikelet_shutdown_all`, `_shutdown_all`.
 
-**Utilities:** `_emsc_malloc`, `_emsc_free`, `_pancake_profile_print`,
-`_pancake_profile_reset`.
+**Stateless kernels:** `_pikelet_sketch_scan` — brute-force top-C scan over
+affine-u8 sketch rows (used by the `.pikelet` reader's resident scan; no
+handle involved).
+
+**Utilities:** `_emsc_malloc`, `_emsc_free`, `_pikelet_profile_print`,
+`_pikelet_profile_reset`.
 
 **Runtime methods:** `ccall`, `cwrap`, `HEAPF32`, `HEAPU8`, `HEAPU32`, `HEAP32`.
 
@@ -875,17 +886,18 @@ Selected signatures:
 
 | Export | Signature → returns |
 |--------|---------------------|
-| `_pancake_init` | `(dim, max_elem, quantized, metric, M, ef_c, ef_s)` → handle / `0xFFFFFFFF` |
-| `_pancake_add` | `(handle, vec_ptr)` → id / `0xFFFFFFFF` |
-| `_pancake_bulk_insert` | `(handle, vecs_ptr, n)` → inserted count |
-| `_pancake_query` | `(handle, q_ptr, k, ef_search, ids_ptr, dists_ptr)` → count |
-| `_pancake_query_filtered` | `(handle, q_ptr, k, ef_search, ids_ptr, dists_ptr, bitset_ptr, bitset_len)` → count |
-| `_pancake_compact_remap` | `(handle, out_buf, out_capacity)` → pre-compaction count |
-| `_pancake_export` | `(handle, out_size_ptr)` → data_ptr / null |
-| `_pancake_import` | `(handle, data_ptr, size)` → `0` / `-1` |
+| `_pikelet_init` | `(dim, max_elem, quantized, metric, M, ef_c, ef_s, seed)` → handle / `0xFFFFFFFF` (non-positive `M`/`ef_*`/`seed` select the defaults) |
+| `_pikelet_add` | `(handle, vec_ptr)` → id / `0xFFFFFFFF` |
+| `_pikelet_bulk_insert` | `(handle, vecs_ptr, n)` → inserted count |
+| `_pikelet_query` | `(handle, q_ptr, k, ef_search, ids_ptr, dists_ptr)` → count |
+| `_pikelet_query_filtered` | `(handle, q_ptr, k, ef_search, ids_ptr, dists_ptr, bitset_ptr, bitset_len)` → count |
+| `_pikelet_compact_remap` | `(handle, out_buf, out_capacity)` → pre-compaction count |
+| `_pikelet_export` | `(handle, out_size_ptr)` → data_ptr / null |
+| `_pikelet_import` | `(handle, data_ptr, size)` → `0` / `-1` |
+| `_pikelet_sketch_scan` | `(sketches_ptr, scales_ptr, offsets_ptr, count, dims, query_ptr, metric, top_c, out_ids_ptr, out_dists_ptr)` → count written |
 
 The native N-API addon exposes an equivalent (smaller) surface; its
-`pancake_query` returns `{ ids: Uint32Array, distances: Float32Array, count }`
+`pikelet_query` returns `{ ids: Uint32Array, distances: Float32Array, count }`
 rather than writing into caller buffers.
 
 ---

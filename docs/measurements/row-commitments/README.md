@@ -4,9 +4,9 @@ Everything the docs-search POC needs beyond what the example already ships:
 an instrumented query harness, a cost model, and a report template. The
 build/host/reader pieces are the parent example (`compile.mjs`, `serve.mjs`,
 `pancake-file-reader.mjs`); building from your own docs is
-`pikelet` (`--runtime artifact --mode student`, or the
-Docusaurus plugin's `completeProfile` mode — see `docs-site/` in the repo
-root for a working config).
+`npx pikelet compile --source <dir> --out <name>.pikelet` (or the
+Docusaurus plugin in its default `complete` mode — see `docs-site/` in the
+repo root for a working config).
 
 ```bash
 # smoke it on the shipped example artifact (goldens come from the file itself)
