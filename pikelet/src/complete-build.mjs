@@ -76,14 +76,14 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         calibrationSummary = calibrated.summary;
         const {
           verifiedPositiveQueries, foreignNegativeQueries, syntheticGibberishQueries,
-          ablationNegativeQueries, entitySwapNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard,
+          ablationNegativeQueries, entitySwapNegativeQueries, heldOutNegativeQueries, weakQueries, fitAuc, cvAuc, cvAucHard,
           humanCalibrationQueries, realQueryAuc, realQueryAbstentionRate, maxSimVsCoverage, maxSimInFit,
         } = calibrated.summary;
         const validation = humanCalibrationQueries
           ? `${humanCalibrationQueries} human queries: AUC ${realQueryAuc ?? 'n/a'}, abstention rate ${((realQueryAbstentionRate ?? 0) * 100).toFixed(0)}%`
           : 'no human queries (runtime.calibrationQueries) — validated by cvAucHard only';
         log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${ablationNegativeQueries} ablation + `
-          + `${entitySwapNegativeQueries} entity-swap hard negatives / ${foreignNegativeQueries} off-domain / `
+          + `${entitySwapNegativeQueries} entity-swap + ${heldOutNegativeQueries} held-out-doc hard negatives / ${foreignNegativeQueries} off-domain / `
           + `${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
           + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
         // maxSim1 is comparison-only (see calibrate.mjs's GROUNDING_FEAT

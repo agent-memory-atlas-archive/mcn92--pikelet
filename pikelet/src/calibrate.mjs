@@ -119,6 +119,12 @@ const GROUNDING_FEAT = COVERAGE_FEAT;
 const FEATS = [...BASE_FEATS, GROUNDING_FEAT];
 const COVERAGE_MIN_WORD_LEN = 3;
 const COVERAGE_TOP_PASSAGES = 5;
+// Held-out-document hard negatives (see the block above the negatives
+// gate): how many title-template questions to ask about the sampled
+// documents, and what fraction of the corpus's chunks those documents
+// should add up to.
+const HELDOUT_QUERIES = 36;
+const HELDOUT_CHUNK_RATE = 0.12;
 const BLOOM_SEEDS = [0, 0x9e3779b9];
 const MAX_POSITIVES = 96;
 const GIBBERISH_QUERIES = 24;
@@ -268,6 +274,30 @@ function sample(items, n, seed) {
     picked.push(items[i]);
   }
   return picked;
+}
+
+// Pick whole documents (grouped by title) to ask held-out-document negative
+// questions about: greedy over a shuffled title order until ~HELDOUT_CHUNK_RATE
+// of chunks are covered, at least two titles so the negatives are not all one
+// topic, never more than 12, and always leaving at least two titles untouched.
+// Corpora under three titles get none.
+function chooseHeldOutTitles(chunks, titles, seed) {
+  if (titles.length < 3) return { titles: new Set(), chunks: 0 };
+  const byTitle = new Map();
+  for (const c of chunks) {
+    const t = (c.title || '').trim();
+    if (t) byTitle.set(t, (byTitle.get(t) || 0) + 1);
+  }
+  const targetChunks = Math.max(1, Math.round(chunks.length * HELDOUT_CHUNK_RATE));
+  const heldOut = new Set();
+  let count = 0;
+  for (const title of sample(titles, titles.length, seed)) {
+    if (titles.length - heldOut.size <= 2 || heldOut.size >= 12) break;
+    heldOut.add(title);
+    count += byTitle.get(title) || 0;
+    if (count >= targetChunks && heldOut.size >= 2) break;
+  }
+  return { titles: heldOut, chunks: count };
 }
 
 function titleQuestions(titles, n, seed) {
@@ -1241,11 +1271,44 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       }
     }
 
+    // Held-out-document negatives: title-template questions about a sampled
+    // set of documents, each scored with every chunk of its document
+    // excluded (searchExcluding), kept only when the best remaining hit is
+    // farther than the positive median d0. This is the class ablation
+    // replaced, reinstated because ablation's drop rule discards any
+    // negative whose coverage stays high — and on entity-dense corpora that
+    // is exactly the "entity named, fact absent" negative the calibrator
+    // otherwise never sees. Measured on the 94-record Veyra registry: 75 of
+    // 94 ablations dropped as "still grounded", the fitted d0 weight came
+    // out positive, and unsupported questions naming a real entity scored
+    // strong (harness false answers 8 -> 19 against the v3 calibrator that
+    // still had this class). These rows have no positive twin — the
+    // objection that retired them — but the model never sees query text,
+    // only retrieval signals, and the effect on real questions decides it.
+    const heldOut = chooseHeldOutTitles(chunks, titles, SEED ^ 0x8e1d00);
+    let heldOutDroppedCovered = 0;
+    if (heldOut.titles.size) {
+      const chunksOfTitle = new Map();
+      chunks.forEach((c, pos) => {
+        const t = (c.title || '').trim();
+        if (!chunksOfTitle.has(t)) chunksOfTitle.set(t, new Set());
+        chunksOfTitle.get(t).add(pos);
+      });
+      for (const { text, sourceTitle } of titleQuestions([...heldOut.titles], HELDOUT_QUERIES, SEED ^ 0xab5e27)) {
+        const exclude = chunksOfTitle.get(sourceTitle) ?? new Set();
+        if (retainedSet.size - exclude.size < 1) continue;
+        const hits = await searchExcluding(text, exclude);
+        const sig = await signalsFor(text, hits, exclude);
+        if (sig.d0 <= positiveMedianD0) heldOutDroppedCovered++;
+        else rows.push({ text, label: 0, negClass: 'hard', negativeKind: 'held-out-doc', sourceTitle, ...sig });
+      }
+    }
+
     const negatives = rows.filter((r) => r.label === 0 && !r.evalOnly);
     if (negatives.length < MIN_NEGATIVES) return skip(`only ${negatives.length} negatives survived the overlap drop (need ${MIN_NEGATIVES})`);
     const hardNegatives = negatives.filter((r) => r.negClass === 'hard');
     if (hardNegatives.length < MIN_HARD_NEGATIVES) {
-      return skip(`only ${hardNegatives.length} hard negatives survived verification (ablation + entity-swap, need ${MIN_HARD_NEGATIVES}); without them the fit cannot separate answerable from in-domain-unanswerable`);
+      return skip(`only ${hardNegatives.length} hard negatives survived verification (ablation + entity-swap + held-out-doc, need ${MIN_HARD_NEGATIVES}); without them the fit cannot separate answerable from in-domain-unanswerable`);
     }
 
     // Weak band: retained-title questions whose source lands at rank 5..K on
@@ -1391,6 +1454,17 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
     }
     if (cvAucHard < MIN_HARD_AUC) {
       return skip(`cross-validated hard-negative AUC ${cvAucHard.toFixed(3)} < ${MIN_HARD_AUC}: the fit cannot separate answerable from in-domain-unanswerable queries`);
+    }
+    // A d0 weight above zero says a worse best-distance is more answerable —
+    // impossible for a real answerability signal. Measured symptom of a
+    // negative pool whose retrieval barely differs from its positives': the
+    // fit then scores on coverage alone and answers anything that names a
+    // corpus entity. AUC gates do not catch it (the coverage-only fit still
+    // separates the synthetic rows), so check the sign directly.
+    const d0Weight = w[FEATS.indexOf('d0')];
+    if (!(d0Weight <= 0)) {
+      return skip(`fitted d0 weight ${d0Weight.toFixed(3)} is not negative: distance carries no signal in this fit `
+        + '(the negatives are indistinguishable from positives by retrieval), so the verdict would reduce to a coverage threshold');
     }
 
     // Threshold placement (point 4): hard is set from the negative side —
@@ -1590,6 +1664,9 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
       entitySwapNegativeQueries: negatives.filter((r) => r.negativeKind === 'entity-swap').length,
       entitySwapDroppedAsStillAnswerable: entitySwapDropped,
       corpusEntitiesDetected: entityIndex.entities.length,
+      heldOutNegativeQueries: negatives.filter((r) => r.negativeKind === 'held-out-doc').length,
+      heldOutDroppedAsCoveredElsewhere: heldOutDroppedCovered,
+      heldOutTitles: heldOut.titles.size,
       weakQueries: weakP.length,
       weakDroppedAsIndistinguishableFromNegatives: allWeakP.length - weakP.length,
       // fitAuc/cvAuc are positives-vs-ablation-negatives only (stage 2 fits
