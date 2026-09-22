@@ -160,3 +160,7 @@ bench/beir/arctic-xs/
 # by the *.pikelet rule in examples/05-one-file-search/.gitignore; restated
 # here explicitly so it's visible at the root without having to know that.
 /examples/05-one-file-search/web/public/veyra*.pikelet
+
+# Compiled packs at the repo root (e.g. a scratch `pikelet compile` output).
+# Committed fixtures live under test/fixtures/ and are unaffected.
+/*.pikelet

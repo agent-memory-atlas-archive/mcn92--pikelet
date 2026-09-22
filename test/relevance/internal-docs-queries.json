@@ -1,0 +1,539 @@
+{
+ "_readme": "Abstention probe set for local-packs/internal-docs/corpus (DEMOS.md, MODEL_NOTICE.md, PIKELET_CLI_SPEC.md, ROADMAP.md). cls=paraphrase avoids the source's heading/distinctive wording on purpose (measures false abstention on reworded questions); cls=direct echoes source wording (control); unsupported/nearmiss have no answer in the four files. Evidence quotes are verbatim source text (whitespace-normalized).",
+ "questions": [
+  {
+   "id": "p01",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "Do I have to compile the WebAssembly engine myself after cloning the repo?",
+   "answer": "No, prebuilt WASM ships in dist/",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "the checkout ships prebuilt WASM in `dist/`"
+    }
+   ]
+  },
+  {
+   "id": "p02",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "How many self-checks does the engine demo run and what do they cover?",
+   "answer": "8 checks: determinism, deletion, compaction, export/import, self-recall, recall, stability",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "runs 8 validation checks (determinism, deletion, compaction, export/import, self-recall, recall, stability)"
+    }
+   ]
+  },
+  {
+   "id": "p03",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "How many back-and-forth network trips does a query need with the resident-sketch layout compared to walking the graph?",
+   "answer": "drops from ~11 rounds to exactly 1",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "sequential fetch depth drops from ~11 rounds to exactly 1"
+    }
+   ]
+  },
+  {
+   "id": "p04",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "How do I keep stock levels current while the search index itself stays static?",
+   "answer": "catalog hydration: Pikelet is the retrieval layer while a separate catalog owns live product data",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Shows Pikelet as the retrieval layer while a separate catalog owns live product data"
+    }
+   ]
+  },
+  {
+   "id": "p05",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "I got a 401 when running the catalog demo, what should I look at first?",
+   "answer": "a stale .dev.vars file in examples/reference-worker/",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "check for a `.dev.vars` file in `examples/reference-worker/`"
+    }
+   ]
+  },
+  {
+   "id": "p06",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "Does the edge docs-search Worker phone home to any external service while answering a search?",
+   "answer": "No outbound requests at query time",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "and calibrated abstention. No outbound requests at query time."
+    }
+   ]
+  },
+  {
+   "id": "p07",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "What Python libraries do I need installed to run the wiki pack example?",
+   "answer": "torch and transformers",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Requires Python with `torch` and `transformers`."
+    }
+   ]
+  },
+  {
+   "id": "p08",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "How can I try the generated search endpoint locally when I don't have a Cloudflare account?",
+   "answer": "pass --var LOCAL_STUB_AI:1 to npm run dev",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "`--var LOCAL_STUB_AI:1` to `npm run dev` to exercise the endpoint mechanics without a Cloudflare account"
+    }
+   ]
+  },
+  {
+   "id": "p10",
+   "cls": "paraphrase",
+   "file": "DEMOS.md",
+   "q": "Ports are still occupied after the test suite finishes, how do I free them?",
+   "answer": "pkill -f \"wrangler dev\" and pkill -f workerd",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "clear them with `pkill -f \"wrangler dev\"` and `pkill -f workerd`"
+    }
+   ]
+  },
+  {
+   "id": "p11",
+   "cls": "paraphrase",
+   "file": "MODEL_NOTICE.md",
+   "q": "Which larger model was the small bundled encoder taught to copy?",
+   "answer": "sentence-transformers/all-MiniLM-L6-v2",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "pipeline to imitate query embeddings produced by"
+    }
+   ]
+  },
+  {
+   "id": "p12",
+   "cls": "paraphrase",
+   "file": "MODEL_NOTICE.md",
+   "q": "What are the licensing terms of the model the student was distilled from?",
+   "answer": "Apache License 2.0",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "The teacher model is published under the Apache License 2.0."
+    }
+   ]
+  },
+  {
+   "id": "p13",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "How quickly should a first-time user get from the scaffold command to a working live search page?",
+   "answer": "under 5 minutes, no Python, no GPU",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "over their own content in under 5 minutes**, with no Python and no GPU"
+    }
+   ]
+  },
+  {
+   "id": "p14",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "What file types can the scaffolder read in as content?",
+   "answer": "markdown, MDX, HTML, plain text",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Support markdown, MDX, HTML, and plain text sources."
+    }
+   ]
+  },
+  {
+   "id": "p15",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "Does the site crawler obey robots rules, and how many pages will it grab if I don't set a limit?",
+   "answer": "yes; default cap 500 pages",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Respect `robots.txt`. Concurrency 4, per-request timeout 15s, cap at `--max-pages` (default 500)."
+    }
+   ]
+  },
+  {
+   "id": "p16",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "Roughly how long should each text piece be and how much should neighbouring pieces share?",
+   "answer": "~200-320 tokens per chunk with ~15% overlap",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "~200–320 tokens per chunk** with **~15% overlap** between adjacent chunks"
+    }
+   ]
+  },
+  {
+   "id": "p17",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "Where on a Linux machine do the downloaded model weights end up?",
+   "answer": "$XDG_CACHE_HOME or ~/.cache, subdir pikelet/models",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "to the platform cache dir (`$XDG_CACHE_HOME` or `~/.cache` on Linux/macOS"
+    }
+   ]
+  },
+  {
+   "id": "p18",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "What happens when the generated assets are bigger than what the Worker platform allows?",
+   "answer": "the build fails with guidance",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "fail with guidance if it exceeds the deploy target's script-size limit"
+    }
+   ]
+  },
+  {
+   "id": "p19",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "How does the deployed worker protect itself from being paired with the wrong embedding model?",
+   "answer": "startup check against manifest.json; refuses with 500 MANIFEST_MISMATCH",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "refuses to serve (clear 500 with `code: \"MANIFEST_MISMATCH\"`) on any disagreement"
+    }
+   ]
+  },
+  {
+   "id": "p20",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "What response do callers get when the embedding service behind the worker is unavailable?",
+   "answer": "503 JSON error with code EMBED_UNAVAILABLE",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "clear 503 JSON error (`{ error, code: \"EMBED_UNAVAILABLE\" }`), never an unhandled exception"
+    }
+   ]
+  },
+  {
+   "id": "p21",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "Realistically, how many text pieces can I fit into a free-tier deployment?",
+   "answer": "~2K chunks free, ~8K paid",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "a practical ceiling around **~2K chunks on the free plan, ~8K on paid**"
+    }
+   ]
+  },
+  {
+   "id": "p22",
+   "cls": "paraphrase",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "Why shouldn't I just grab the newest CLI release when I re-index an existing project?",
+   "answer": "different chunking would silently rebuild a different index under an older vendored worker",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "with different chunking would silently rebuild a different index under an older vendored worker"
+    }
+   ]
+  },
+  {
+   "id": "p23",
+   "cls": "paraphrase",
+   "file": "ROADMAP.md",
+   "q": "What is the project ultimately trying to become, beyond a search library?",
+   "answer": "an artifact compiler and reader",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Turn Pikelet from a vector-search library into an artifact compiler and reader."
+    }
+   ]
+  },
+  {
+   "id": "p24",
+   "cls": "paraphrase",
+   "file": "ROADMAP.md",
+   "q": "Which data layout came out on top in the experiments on reading indexes over the network?",
+   "answer": "resident sketch + fetch-to-rerank",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "the winning geometry is **resident sketch + fetch-to-rerank**"
+    }
+   ]
+  },
+  {
+   "id": "p26",
+   "cls": "paraphrase",
+   "file": "ROADMAP.md",
+   "q": "Why doesn't the Pages static host return partial content for the artifact on its own?",
+   "answer": "Cloudflare Pages ignores Range in its static pipeline; a Pages Function restores 206 slicing",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Cloudflare Pages ignores Range in its static pipeline"
+    }
+   ]
+  },
+  {
+   "id": "d01",
+   "cls": "direct",
+   "file": "DEMOS.md",
+   "q": "Which command opens the committed docs artifact from disk and searches it with lazy range reads?",
+   "answer": "npm run demo:artifact",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Opens the committed docs artifact from disk and searches it with lazy range reads"
+    }
+   ]
+  },
+  {
+   "id": "d02",
+   "cls": "direct",
+   "file": "DEMOS.md",
+   "q": "What is the smallest browser test that creates, snapshots, restores, and searches an index?",
+   "answer": "Hello pack: npm run test:browser in Chromium via Vite + Playwright",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "creates, snapshots, restores, and searches an index in Chromium via Vite + Playwright"
+    }
+   ]
+  },
+  {
+   "id": "d03",
+   "cls": "direct",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "What exit code signals a deploy failure?",
+   "answer": "3",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "`3` deploy failure (project still scaffolded; print manual deploy instructions)"
+    }
+   ]
+  },
+  {
+   "id": "d04",
+   "cls": "direct",
+   "file": "PIKELET_CLI_SPEC.md",
+   "q": "What are the default include and exclude globs in folder mode?",
+   "answer": "includes **/*.{md,mdx,html,txt}; excludes node_modules, .git, dist, build",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Default includes: `**/*.{md,mdx,html,txt}`. Default excludes: `node_modules`, `.git`, `dist`, `build`."
+    }
+   ]
+  },
+  {
+   "id": "d05",
+   "cls": "direct",
+   "file": "ROADMAP.md",
+   "q": "What is the settled comparison point recall@10 for SIFT1M u8?",
+   "answer": "95.58% recall@10",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "Settled comparison point: SIFT1M u8, `efSearch=80`, `expansionBatch=8`, `gap=65536`, parallelism 6, 95.58% recall@10"
+    }
+   ]
+  },
+  {
+   "id": "d06",
+   "cls": "direct",
+   "file": "MODEL_NOTICE.md",
+   "q": "Is the student model domain-specific to the Pancake documentation corpus?",
+   "answer": "Yes",
+   "type": "fact",
+   "evidence": [
+    {
+     "quote": "The student is domain-specific to the Pancake documentation corpus."
+    }
+   ]
+  },
+  {
+   "id": "u01",
+   "cls": "unsupported",
+   "q": "How much does each Workers AI embedding call cost in dollars?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u02",
+   "cls": "unsupported",
+   "q": "What is the maximum value of k that the search endpoint accepts?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u03",
+   "cls": "unsupported",
+   "q": "Which pikelet.config.json key enables sitemap crawling?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u04",
+   "cls": "unsupported",
+   "q": "What overlapPercent value is recommended for code-heavy repositories?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u05",
+   "cls": "unsupported",
+   "q": "What is the estimated duration of milestone M6?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u06",
+   "cls": "unsupported",
+   "q": "Which Python version does train_student.py require?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u07",
+   "cls": "unsupported",
+   "q": "What is the SHA-256 hash of docs-student.bin?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u08",
+   "cls": "unsupported",
+   "q": "Where is the pikelet community Discord invite link?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u09",
+   "cls": "unsupported",
+   "q": "How do I attach a custom domain to the deployed search Worker?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u10",
+   "cls": "unsupported",
+   "q": "How large is the bge-base-en-v1.5 ONNX download?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u11",
+   "cls": "unsupported",
+   "q": "What retry policy does the crawler apply to 5xx responses?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "u12",
+   "cls": "unsupported",
+   "q": "When is the R2-backed v1.1 tier scheduled to ship?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "n01",
+   "cls": "nearmiss",
+   "q": "How many parameters does docs-student.bin have?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "n02",
+   "cls": "nearmiss",
+   "q": "What is the tokenizer vocabulary size of bge-small-en-v1.5?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "n03",
+   "cls": "nearmiss",
+   "q": "At what time of day does the reindex.yml workflow run on its schedule?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "n04",
+   "cls": "nearmiss",
+   "q": "What is the per-query latency of pikelet-artifact-demo.pages.dev?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "n05",
+   "cls": "nearmiss",
+   "q": "Which version of hnswlib-node fails to install in restricted environments?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  },
+  {
+   "id": "n06",
+   "cls": "nearmiss",
+   "q": "What recall@10 does the 4-bit sketch reach on nytimes-angular?",
+   "answer": null,
+   "type": "abstain",
+   "evidence": []
+  }
+ ]
+}
