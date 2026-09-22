@@ -59,17 +59,25 @@ function toolDefinitions(packs) {
       name: 'search',
       description: 'Search the mounted .pikelet knowledge packs. Returns the most relevant '
         + 'chunks with full provenance (pack, immutable pack identity, title, heading path, '
-        + 'source) plus a calibrated matchQuality per pack: "strong" means the pack answers '
-        + 'this with confidence, "weak" means treat results with caution, "none" means the '
-        + 'calibrator scored no confident answer, "unscored" means the pack has no fitted '
-        + 'calibrator at all — no confidence signal whatsoever, not even a low one; treat its '
-        + 'results as unverified regardless of how relevant they look (see unscoredWarning in '
-        + 'the response). The calibrator can be wrong, especially on paraphrases that share few '
-        + 'word forms with the source text, so results ship even under a "none" verdict by '
-        + 'default — weigh matchQuality and confidence yourself rather than treating "none" as '
-        + 'certain proof the pack has no answer, but also do not cite a "none" result with the '
-        + 'same confidence as "strong". Pass showAbstained: false for the stricter behavior '
-        + '(zero results on "none"; has no effect on "unscored", which never withholds).',
+        + 'source), a matchQuality per pack, and grounding: which of the query\'s content words '
+        + 'the best passage restates (covered) and which no passage contains (uncovered). '
+        + 'matchQuality measures how directly the retrieved text restates the question, not '
+        + 'whether the answer is there. "strong": a passage restates it — cite that passage. '
+        + '"weak": partial restatement — read before relying on it. "none": no passage restates '
+        + 'it; results still ship by default because a passage can answer a question without '
+        + 'sharing its wording (a sentence saying "no build step needed" answers "do I have to '
+        + 'compile it myself?") — read them and compose the answer if it is there, and say the '
+        + 'support is indirect. "unscored": the pack has no fitted calibrator — no signal at all, '
+        + 'not even a low one; treat every result as unverified (see unscoredWarning). Two '
+        + 'cautions follow from what matchQuality measures. A "strong" result can be on the right '
+        + 'subject and still not contain the specific value asked for (right entity, wrong '
+        + 'attribute): if the thing you were asked for appears in grounding.uncovered, the '
+        + 'passage does not establish it whatever matchQuality says — never state a value the '
+        + 'returned text does not contain. And a question that chains two facts (which floor is '
+        + 'X\'s project on: project→chamber, then chamber→floor) returns only the first hop; take '
+        + 'the entity the passage names and search again for the rest rather than answering from '
+        + 'one hop. Pass showAbstained: false to withhold results under "none" (no effect on '
+        + '"unscored", which never withholds).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -186,6 +194,14 @@ async function callSearch(packs, args) {
       packIdentity: mounted.identity,
       matchQuality: out.matchQuality,
       ...(out.confidence !== undefined ? { confidence: out.confidence } : {}),
+      ...(out.grounding ? {
+        grounding: {
+          recordId: out.grounding.recordId,
+          coverage: out.grounding.coverage,
+          covered: out.grounding.covered,
+          uncovered: out.grounding.uncovered,
+        },
+      } : {}),
       results: out.results.map((r) => provenanced(name, mounted.identity, r)),
     });
   }
@@ -208,14 +224,13 @@ async function callSearch(packs, args) {
     packsSearched: names,
     ...(answered.length === 0 && noneSections.length > 0 ? {
       note: showAbstained
-        ? 'No mounted pack scored a confident answer to this query. Results are shown anyway '
-          + '(matchQuality "none") because the calibrator can misjudge paraphrases — weigh '
-          + 'them yourself rather than trusting or dismissing them outright; do not cite one '
-          + 'with "strong" confidence.'
-        : 'No mounted pack contains an answer to this query with showAbstained: false. Say so '
-          + 'rather than guessing, or rerun without showAbstained: false to see what the '
-          + 'calibrator withheld — it can misjudge paraphrases that share few word forms with '
-          + 'the source.',
+        ? 'No passage restates this query (matchQuality "none"). Results are shown anyway '
+          + 'because a passage can answer a question without sharing its wording — read them and '
+          + 'weigh whether the answer is there, compose it if so and say the support is indirect; '
+          + 'do not cite one with "strong" confidence, and do not dismiss them unread.'
+        : 'No passage restates this query and results were withheld (showAbstained: false). Say '
+          + 'so rather than guessing, or rerun without showAbstained: false to read what was '
+          + 'withheld — a passage can answer a question without sharing its wording.',
     } : {}),
     ...(unscoredSections.length > 0 ? {
       unscoredWarning: `${unscoredSections.map((s) => s.pack).join(', ')}: no calibrated abstention — this `
@@ -567,11 +582,14 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
           supportedVersions,
           capabilities: { tools: {} },
           instructions: 'This server mounts .pikelet knowledge packs. Use search to retrieve '
-            + 'provenanced passages with a calibrated matchQuality; "none" means the '
-            + 'calibrator scored no confident answer, but results ship even under "none" by '
-            + 'default since the calibrator can misjudge paraphrases — weigh matchQuality and '
-            + 'confidence yourself rather than treating "none" as proof the pack has no '
-            + 'answer, and do not cite a "none" result as confidently as a "strong" one. '
+            + 'provenanced passages with a matchQuality that measures how directly the text '
+            + 'restates the question, not whether the answer is there: "strong" passages can be '
+            + 'cited directly; "none" results still ship by default because a passage can answer '
+            + 'without sharing the question\'s wording — read and compose rather than dismissing '
+            + 'them, and never cite one as confidently as a "strong" one. Each section carries '
+            + 'grounding.uncovered, the query words no passage contained: if what you were asked '
+            + 'for is in that list, the passage does not establish it whatever matchQuality says. '
+            + 'Chained questions return only their first hop — search again for the next. '
             + '"unscored" means a pack has no fitted calibrator at all — no confidence signal, '
             + 'not just a low one; the response carries an unscoredWarning for these. '
             + 'verify_pack runs the tests a pack carries inside itself, including the '
