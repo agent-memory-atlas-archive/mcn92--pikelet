@@ -430,17 +430,6 @@ public:
                 out_map[old_id] = live_id++;
             }
 
-            // Release the old graph before allocating its replacement. WASM
-            // memory cannot shrink, but emmalloc can reuse these blocks and
-            // avoid retaining the peak for two complete graphs.
-            std::vector<float>().swap(vectors_);
-            std::vector<uint32_t>().swap(base_neighbors_);
-            std::vector<uint16_t>().swap(base_sizes_);
-            decltype(upper_)().swap(upper_);
-            std::vector<int>().swap(levels_);
-            std::vector<uint8_t>().swap(deleted_);
-            std::vector<uint32_t>().swap(visited_list_);
-
             FloatHNSWConfig config;
             config.M = M_;
             config.ef_construction = ef_construction_;
@@ -455,10 +444,23 @@ public:
                     &live_vectors[static_cast<size_t>(new_id) * dims_]
                 );
                 if (inserted == UINT32_MAX) {
+                    // Leave *this untouched: the rebuild failed, so the
+                    // pre-compact graph (still correct, just fragmented)
+                    // remains the live state rather than a half-cleared one.
                     out_map.clear();
                     return;
                 }
             }
+
+            // Only now discard the old graph — the replacement is known good.
+            std::vector<float>().swap(vectors_);
+            std::vector<uint32_t>().swap(base_neighbors_);
+            std::vector<uint16_t>().swap(base_sizes_);
+            decltype(upper_)().swap(upper_);
+            std::vector<int>().swap(levels_);
+            std::vector<uint8_t>().swap(deleted_);
+            std::vector<uint32_t>().swap(visited_list_);
+
             *this = std::move(rebuilt);
             return;
         }
