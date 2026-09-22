@@ -506,7 +506,12 @@ The resident remote scan is linear in row count. The current architecture target
 ```text
 src/                              C++/WASM vector engine: HNSW, float32 and
                                    affine-u8 backends, mutation, compaction,
-                                   snapshot import/export
+                                   snapshot import/export. Used at compile
+                                   time to build and quantize the index;
+                                   query time does not load this engine (see
+                                   complete/index.mjs's header comment) —
+                                   .pikelet reads run a pure-JS sketch scan
+                                   instead, optionally SIMD-accelerated.
 complete/, pikelet-artifact.js    Readers and builders for the complete
                                    range-readable artifact
 pikelet/                          CLI, compiler, MCP server, encoder
@@ -521,6 +526,8 @@ examples/05-one-file-search/      Large single-artifact search and embedded
                                    encoder work
 examples/06-mcp-knowledge-pack/   Compile, mount, search, and hydrate
                                    records through MCP
+local-packs/                      Prebuilt example .pikelet artifacts used
+                                   by the demo commands above
 packs/                            Pack hosting and distribution examples
 ```
 
@@ -540,7 +547,7 @@ Pikelet is early. The implementation is real; the format is not frozen. One prim
 
 - prebuilt WASM included
 - local and HTTP readers
-- affine-u8 and float HNSW backends
+- affine-u8 and float HNSW backends for compile-time indexing/quantization
 - embedded query encoder
 - BM25 hybrid retrieval
 - content identity and lazy-read integrity verification
