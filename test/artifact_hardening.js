@@ -228,6 +228,43 @@ async function main() {
         index.dispose();
     }
 
+    // 7. Non-finite affine parameters are rejected at decode. A producer
+    // controls both the bytes and the digests of a file it writes, so a
+    // NaN scale passes every hash check; it must fail on the row read.
+    {
+        console.log('\n7. NaN/Infinity scale or offset in a record is rejected');
+        const fx = await buildFixtures(tmp, 'l2');
+        const range = await PikeletRangeArtifact.openFile(fx.rangePath);
+        const raw = fs.readFileSync(fx.rangePath);
+        const address = range.recordAddressForId(0);
+        const record = new Uint8Array(raw.buffer.slice(raw.byteOffset + address, raw.byteOffset + address + range.recordBytes));
+        check('a pristine record decodes', range.decodeNode(record).id === 0);
+        // Layout: u32 id, u16 level, u16 baseCount, u16 x maxLevel, dim bytes, f32 scale, f32 offset.
+        const scaleAt = 4 + 2 + 2 + 2 * range.maxLevel + range.dim;
+        for (const [label, value] of [['NaN scale', NaN], ['Infinity scale', Infinity]]) {
+            const bad = record.slice();
+            new DataView(bad.buffer).setFloat32(scaleAt, value, true);
+            await rejects(`range: ${label} is rejected`, async () => range.decodeNode(bad), 'SNAPSHOT_INVALID', /non-finite scale or offset/);
+        }
+        const badOffset = record.slice();
+        new DataView(badOffset.buffer).setFloat32(scaleAt + 4, -Infinity, true);
+        await rejects('range: -Infinity offset is rejected', async () => range.decodeNode(badOffset), 'SNAPSHOT_INVALID', /non-finite scale or offset/);
+        await range.close?.();
+
+        // Sketch: the affine table sits right after the 256-byte header
+        // (scales, then offsets). Verification is off so the hash check
+        // cannot mask the finite check.
+        const poisoned = path.join(tmp, 'nan-scale.pikelet-sketch');
+        const sketchBytes = Buffer.from(fs.readFileSync(fx.sketchPath));
+        sketchBytes.writeFloatLE(NaN, 256 + 3 * 4);
+        fs.writeFileSync(poisoned, sketchBytes);
+        await rejects('sketch: NaN scale in the affine table is rejected at open',
+            () => PikeletSketchArtifact.openFile(poisoned, { verify: false }), 'SNAPSHOT_INVALID', /non-finite scale or offset/);
+        const pristine = await PikeletSketchArtifact.openFile(fx.sketchPath, { verify: false });
+        check('sketch: the unmodified file still opens with verify:false', pristine.count === fx.count);
+        await pristine.close?.();
+    }
+
     fs.rmSync(tmp, { recursive: true, force: true });
     console.log(`\nArtifact hardening: ${passed} passed, ${failed} failed`);
     process.exit(failed > 0 ? 1 : 0);

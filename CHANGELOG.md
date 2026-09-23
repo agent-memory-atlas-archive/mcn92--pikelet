@@ -118,6 +118,13 @@ first.
   `dim` ceiling with an `INVALID_ARGUMENT` error, and the native
   `pikelet_import` rejects a non-buffer argument with a `TypeError`
   instead of continuing with a null view while a JS exception is pending.
+- **Artifacts with a NaN or infinite scale/offset are rejected.** A
+  producer signs whatever bytes it writes, so a non-finite affine pair in
+  a `.pikelet-range` record or a sketch artifact's affine table passed
+  every digest check and then made that row's distance non-finite, which
+  the result heap never evicts. The range reader rejects the record at
+  decode and the sketch reader rejects the table wherever it adopts it,
+  both with `SNAPSHOT_INVALID`.
 - **Generated Workers no longer echo internal error messages on 5xx.**
   The `pikelet` scaffold's `worker.js` / `worker.artifact.js` templates
   returned `error.message` for every failure, including unexpected ones,

@@ -38,6 +38,19 @@ const SKETCH_MAGIC = 0x31415350; // PSA1
 const SKETCH_HEADER_BYTES = 256;
 const SKETCH_KIND_U8 = 1;
 
+// The affine table feeds every rerank distance; a NaN/Infinity entry makes
+// that row's distance non-finite and lets it sit in the result set
+// unchallenged (NaN never loses a comparison). The digests do not catch
+// this, since the producer signs whatever bytes it wrote, so every path
+// that adopts the table checks it.
+function assertFiniteAffine(scales, offsets) {
+    for (let i = 0; i < scales.length; i++) {
+        if (!Number.isFinite(scales[i]) || !Number.isFinite(offsets[i])) {
+            throw pikeletError(PIKELET_ERROR_CODES.SNAPSHOT_INVALID, 'Sketch artifact affine table has a non-finite scale or offset', { id: i });
+        }
+    }
+}
+
 function buildSketchArtifact(snapshotBytes, outPath, options = {}) {
     if (typeof outPath !== 'string' || outPath.length === 0) {
         throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'buildSketchArtifact() requires an output path');
@@ -486,6 +499,7 @@ class PikeletSketchArtifact {
         }
         artifact.scales = new Float32Array(affineCopy.buffer, 0, count);
         artifact.offsets = new Float32Array(affineCopy.buffer, count * 4, count);
+        assertFiniteAffine(artifact.scales, artifact.offsets);
         artifact.sketches = null;
         artifact.microSketches = microCopy;
         if (pageTableCopy) artifact.pageTable = pageTableCopy;
@@ -516,6 +530,7 @@ class PikeletSketchArtifact {
     _adoptResident(residentCopy, count, sketchRowBytes, microRowBytes, microOffset) {
         this.scales = new Float32Array(residentCopy.buffer, 0, count);
         this.offsets = new Float32Array(residentCopy.buffer, count * 4, count);
+        assertFiniteAffine(this.scales, this.offsets);
         this.sketches = new Uint8Array(residentCopy.buffer, count * 8, count * sketchRowBytes);
         if (this.microDims) {
             this.microSketches = new Uint8Array(residentCopy.buffer, microOffset - SKETCH_HEADER_BYTES, count * microRowBytes);

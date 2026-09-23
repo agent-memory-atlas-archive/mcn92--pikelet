@@ -376,6 +376,13 @@ class PikeletRangeArtifact {
         state.offset += this.dim;
         const scale = readF32(view, state);
         const offset = readF32(view, state);
+        // A NaN/Infinity affine pair makes every distance to this node
+        // non-finite; NaN compares false everywhere, so the node can sit in
+        // the result heap without ever being displaced. Digests do not catch
+        // this (the producer signs whatever bytes it wrote), so decode does.
+        if (!Number.isFinite(scale) || !Number.isFinite(offset)) {
+            throw pikeletError(PIKELET_ERROR_CODES.SNAPSHOT_INVALID, 'Range artifact record has a non-finite scale or offset', { id, scale, offset });
+        }
         const base = new Uint32Array(baseCount);
         for (let i = 0; i < this.M0; i++) {
             const neighbor = readU32(view, state);
