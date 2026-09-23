@@ -10,6 +10,11 @@ on:
   # "Run workflow" button for exactly that case.
   workflow_dispatch:
 
+# Every job only reads the repository (checkout, caches, builds, tests);
+# none writes to GitHub, so the token needs nothing beyond contents: read.
+permissions:
+  contents: read
+
 env:
   # Browser binaries are only needed by test:browser, which has its own job.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
