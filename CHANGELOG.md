@@ -28,6 +28,14 @@ first.
 
 ### Changed
 
+- **Examples renamed, not renumbered**: `examples/04-static-wiki-pack` →
+  `examples/static-wiki-pack`, `examples/05-one-file-search` →
+  `examples/one-file-search`, `examples/06-mcp-knowledge-pack` →
+  `examples/mcp-knowledge-pack`; `npm run demo:veyra` and the committed
+  `veyra.mcp.json` follow. The raw browser demo page moves from `dist/`
+  to `examples/technical-demo.html` (loads `../dist/engine.js`), and
+  `docs/SYSTEM_DESIGN.md` is `docs/architecture.md`. The wiki playground's
+  built bundle and deployment are unchanged.
 - **Benchmarks consolidated under `benchmarks/`**: `bench/beir` →
   `benchmarks/beir`, `bench/range-proof` → `benchmarks/range-proof`, the
   engine suite (formerly `benchmarks/`) → `benchmarks/engine`, and the

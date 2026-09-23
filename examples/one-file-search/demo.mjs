@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Query the composed reader from the command line:
-//   node examples/05-one-file-search/demo.mjs "how do workers restore snapshots"
+//   node examples/one-file-search/demo.mjs "how do workers restore snapshots"
 // With no arguments, runs the manifest's own sample queries.
 
 import { openDocsSearch, docsAssetPaths } from './search-reader.mjs';

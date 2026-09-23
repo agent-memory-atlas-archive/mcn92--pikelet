@@ -13,7 +13,7 @@ import { openPikeletFile } from './pikelet-file-reader.mjs';
 const here = path.dirname(new URL(import.meta.url).pathname);
 // data-perm: the pack's canonical cluster-ordered layout; its eval ground
 // truth is in permuted id space, matching artifacts compiled from it.
-const DATA = path.join(here, '..', '04-static-wiki-pack', 'data-perm');
+const DATA = path.join(here, '..', 'static-wiki-pack', 'data-perm');
 const pikeletPath = path.join(here, 'pancake-wiki.pancake');
 
 let passed = 0;

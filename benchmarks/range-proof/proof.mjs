@@ -17,7 +17,7 @@ import { startDumbServer } from './dumb-server.mjs';
 import { openPikeletFile, httpRangeSource } from '../../complete/index.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'examples/05-one-file-search/pancake-wiki-inline.pancake'));
+const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'examples/one-file-search/pancake-wiki-inline.pancake'));
 const packDir = path.dirname(packPath);
 const packFile = path.basename(packPath);
 

@@ -18,7 +18,7 @@ const TARGET_CHARS = 700;
 const DOC_SOURCES = [
   'README.md',
   'QUICKSTART.md',
-  'docs/SYSTEM_DESIGN.md',
+  'docs/architecture.md',
   'examples/legacy/reference-worker/README.md'
 ];
 

@@ -730,7 +730,7 @@ export async function openPikeletFile(input, options = {}) {
                 } catch (err) {
                     throw new Error('kind-3 artifact requires the inline-transformer kernels at '
                         + 'complete/encoder-kernels/ (pikelet-wasm/complete); run '
-                        + 'examples/05-one-file-search/encoder-spike/build-encoder.sh to rebuild them',
+                        + 'examples/one-file-search/encoder-spike/build-encoder.sh to rebuild them',
                     { cause: err });
                 }
             }

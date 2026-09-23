@@ -32,7 +32,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const DATA = path.join(here, '..', '..', '..', 'examples', '04-static-wiki-pack', 'data-full');
+const DATA = path.join(here, '..', '..', '..', 'examples', 'static-wiki-pack', 'data-full');
 const CORPUS_BIN = path.join(DATA, 'corpus.bin');
 const OFFSETS_PATH = path.join(DATA, 'corpus-offsets.u32');
 const EVAL_GT_PATH = path.join(DATA, 'eval-gt.json');

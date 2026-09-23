@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-DATA = HERE.parent / "04-static-wiki-pack" / "data-full"
+DATA = HERE.parent / "static-wiki-pack" / "data-full"
 OUT = HERE / "student-pilot"
 
 k = int(sys.argv[1]) if len(sys.argv) > 1 else 32

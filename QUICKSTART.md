@@ -288,4 +288,4 @@ The Worker `/import` route expects the Worker export format, not a raw local pac
 
 - [README.md](README.md) for the full package API surface
 - [examples/legacy/reference-worker/README.md](examples/legacy/reference-worker/README.md) for the reference Worker deployment model
-- [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) for the deeper system design document
+- [docs/architecture.md](docs/architecture.md) for the deeper system design document

@@ -24,11 +24,11 @@ playground shows the range requests as they happen.
 To rebuild the playground from this checkout:
 
 ```bash
-cd examples/05-one-file-search/web/playground-src
+cd examples/one-file-search/web/playground-src
 npx vite build
 ```
 
-The output is `examples/05-one-file-search/web/playground-dist/`. If you
+The output is `examples/one-file-search/web/playground-dist/`. If you
 serve it yourself and keep the default pack URL, the browser still mounts
 the public R2-hosted wiki pack.
 
@@ -72,7 +72,7 @@ The `compile-wiki.mjs` notes below describe the older wiki-scale compiler and
 historical kind-2 layout kept in this example for acceptance testing.
 
 The same container compiles the Simple English Wikipedia pack (456,153
-chunks, `examples/04-static-wiki-pack/data-full`) into a 512 MiB
+chunks, `examples/static-wiki-pack/data-full`) into a 512 MiB
 `pancake-wiki.pancake` — the profile's first kind-2 artifact: the MiniLM
 encoder is *declared* with verification vectors (contract section 4.4
 mode 2) rather than embedded, and calibration is the pack's

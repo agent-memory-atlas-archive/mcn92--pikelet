@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compile the Simple English Wikipedia pack (examples/04-static-wiki-pack,
+// Compile the Simple English Wikipedia pack (examples/static-wiki-pack,
 // 456k chunks) into one .pikelet — the complete profile's scale test, and
 // its first kind-2 (pinned-external encoder) artifact: the MiniLM encoder
 // is declared and verifiable, not embedded (contract section 4.4 mode 2);
@@ -21,8 +21,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // silently forfeits the layout, which is exactly what happened to every
 // complete artifact before 2026-08-31 (~440 scattered requests/query
 // instead of ~200 at the recommended gap).
-const PERM = path.join(here, '..', '04-static-wiki-pack', 'data-perm');
-const FULL = path.join(here, '..', '04-static-wiki-pack', 'data-full');
+const PERM = path.join(here, '..', 'static-wiki-pack', 'data-perm');
+const FULL = path.join(here, '..', 'static-wiki-pack', 'data-full');
 const DATA = fs.existsSync(path.join(PERM, 'wiki.pikelet-sketch')) ? PERM : FULL;
 if (DATA === FULL) {
     console.warn('WARNING: building from data-full (unpermuted layout) — rerank candidates will be physically scattered; build the pack in data-perm first (pack README steps 3-4)');

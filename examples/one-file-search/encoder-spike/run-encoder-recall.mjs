@@ -13,7 +13,7 @@ import { openPikeletFile } from '../pikelet-file-reader.mjs';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const REAL = path.join(here, 'real');
-const DATA = path.join(here, '..', '..', '04-static-wiki-pack', 'data-full');
+const DATA = path.join(here, '..', '..', 'static-wiki-pack', 'data-full');
 const D = 384;
 
 const tokenizer = createWordPiece(fs.readFileSync(path.join(REAL, 'vocab.txt'), 'utf8'));

@@ -20,7 +20,7 @@ import torch
 from transformers import AutoModel, AutoTokenizer
 
 HERE = Path(__file__).resolve().parent
-DATA = HERE.parent.parent / "04-static-wiki-pack" / "data-full"
+DATA = HERE.parent.parent / "static-wiki-pack" / "data-full"
 OUT = HERE / "real"
 OUT.mkdir(exist_ok=True)
 

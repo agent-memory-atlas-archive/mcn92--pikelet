@@ -25,7 +25,7 @@ inventing new ones: the index segment is a complete `.pikelet-sketch`
 artifact embedded verbatim, and the query-interpretation segment carries the
 existing student-encoder and calibration formats. The container contributes
 identity, addressing, and the corpus layout — the three things the
-2026-08-13 composition spike (`examples/05-one-file-search/`) identified as
+2026-08-13 composition spike (`examples/one-file-search/`) identified as
 missing between the components.
 
 ## 2. Design decisions (resolved 2026-08-13)
@@ -434,7 +434,7 @@ after `close()`; `close()` MUST be idempotent.
   `test/fixtures/encoder-conformance` assets, whose 10 abstention goldens MUST
   reproduce their labels, whose hydration round-trips the source corpus,
   and whose compile MUST be byte-deterministic. Kind 3 is covered by
-  `examples/05-one-file-search/test-inline.mjs` against the released
+  `examples/one-file-search/test-inline.mjs` against the released
   wiki-inline artifact (its weight blob is not a CI fixture).
 - **Producer:** emits structurally valid files whose manifest digests
   verify, whose index segment passes sketch-profile conformance, whose
@@ -547,7 +547,7 @@ both as equivalent.
    of the browser bundle. `@xenova/transformers` is an
    `optionalDependency` (`pikelet/package.json`), and a real browser
    build already ships and runs the full encoder path, WASM engine
-   included (`examples/04-static-wiki-pack/web/dist/`).
+   included (`examples/static-wiki-pack/web/dist/`).
 3. Signatures over the identity (contract section 10, question 7).
 4. A `filters` or metadata-index segment — out of contract today
    (section 8), revisit only with a concrete host need.

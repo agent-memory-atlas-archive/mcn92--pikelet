@@ -216,7 +216,7 @@ mount(DEFAULT_PACK_URL);
 // --- Ablation demo tab: same question against a full pack, a pack missing
 // one record, and (separately) a pack with one record edited to contradict
 // the rest. Fictional Station Veyra research corpus — see
-// examples/05-one-file-search/web/veyra-corpus/README.md for how it's
+// examples/one-file-search/web/veyra-corpus/README.md for how it's
 // generated and compiled. Loaded lazily (first tab open), not on page
 // load, since these packs are ~25 MB each and most visitors to the search
 // tab will never open this one.

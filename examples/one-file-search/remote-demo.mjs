@@ -3,7 +3,7 @@
 // GitHub release asset (plain static HTTP, no application server) and show
 // that traffic is nothing but byte-range GETs against that one file.
 //
-//   node examples/05-one-file-search/remote-demo.mjs "question one" "question two"
+//   node examples/one-file-search/remote-demo.mjs "question one" "question two"
 //
 // With no arguments, asks two default questions. Runs two queries
 // deliberately: the first pays the real cost of fetching the lexical

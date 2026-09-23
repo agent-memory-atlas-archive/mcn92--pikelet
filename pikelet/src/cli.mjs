@@ -113,7 +113,7 @@ itself. compile also takes --source, --out, --name, --max-pages, --include,
 --encoder-weights/--encoder-vocab/--encoder-pooling/--encoder-query-prefix/
 --encoder-passage-prefix to swap the packaged MiniLM-L6 encoder for another
 BERT-shaped one built the same way (see
-examples/05-one-file-search/encoder-spike/export_encoder_blob.py) — the
+examples/one-file-search/encoder-spike/export_encoder_blob.py) — the
 compiled kernel's dimensions are fixed at build time, so a swapped model
 must match MiniLM-L6's shape (384 hidden / 6 layers / 12 heads / 1536 FFN /
 30522 vocab) exactly.

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 // Build-time abstention calibration for complete kind-3 artifacts. Mirrors
 // the signal and scoring math of the wiki pack calibrator
-// (examples/04-static-wiki-pack/calibrate_abstention.mjs) and of the reader's
+// (examples/static-wiki-pack/calibrate_abstention.mjs) and of the reader's
 // scorer (complete/retrieval-abstention.mjs) — retrieval signals (d0, margin,
 // mean10) plus the corpus-vocabulary known-token fraction, standardized and
 // passed through a fitted logistic model — but is corpus-generic.

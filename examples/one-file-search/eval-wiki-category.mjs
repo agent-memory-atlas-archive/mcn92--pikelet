@@ -11,7 +11,7 @@ import { loadStudentModel, embedTextWithStudent } from '../../test/fixtures/enco
 import { openPikeletFile } from './pikelet-file-reader.mjs';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-const DATA = path.join(here, '..', '04-static-wiki-pack', 'data-full');
+const DATA = path.join(here, '..', 'static-wiki-pack', 'data-full');
 const PILOT = path.join(here, 'student-pilot');
 
 const meta = JSON.parse(fs.readFileSync(path.join(PILOT, 'category-meta.json'), 'utf8'));

@@ -10,7 +10,7 @@
 // confidence, and the retrieved text. The README's paired LLM-session
 // claims were run separately and aren't scripted here.)
 //
-// Usage: node examples/05-one-file-search/web/public/reproduce-ablation.mjs
+// Usage: node examples/one-file-search/web/public/reproduce-ablation.mjs
 
 import fs from 'node:fs';
 import path from 'node:path';

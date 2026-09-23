@@ -1,7 +1,7 @@
 #!/usr/bin/env python3.11
 """Encode BEIR corpus records or queries with plain float32 MiniLM
 (sentence-transformers/all-MiniLM-L6-v2) — mean pooling, L2-normalized,
-exactly the recipe examples/04-static-wiki-pack/embed_corpus.py uses, and
+exactly the recipe examples/static-wiki-pack/embed_corpus.py uses, and
 the recipe Pikelet's inline quantized encoder is checked against.
 
 This is Configuration A's encoder: no chunking (one BEIR record -> one

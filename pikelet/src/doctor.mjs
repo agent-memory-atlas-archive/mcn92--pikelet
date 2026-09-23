@@ -8,7 +8,7 @@
 //     append ?r=start-end to every read because Chromium serializes
 //     concurrent fetches of one cacheable URL on its HTTP-cache entry lock
 //     (measured 5.7-18.6 s/query without it, 0.6-1.5 s with — see
-//     examples/04-static-wiki-pack/DEPLOY.md).
+//     examples/static-wiki-pack/DEPLOY.md).
 //   - Negotiated protocol — HTTP/1.1 caps browsers at ~6 connections per
 //     origin, so parallel rerank reads serialize; h2/h3 multiplex.
 //   - ETag — without one, If-Range cannot detect a swapped file mid-session.

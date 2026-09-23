@@ -201,7 +201,7 @@ The test is synthetic and intentionally narrow. The exact packs used for the res
 
 ```bash
 npm run demo:veyra
-node examples/05-one-file-search/web/public/reproduce-ablation.mjs
+node examples/one-file-search/web/public/reproduce-ablation.mjs
 ```
 
 The script reproduces `matchQuality`, confidence, and retrieved evidence for the full, ablated, and Chamber 43 packs. The paired LLM-session results — declining to confirm the removed fact, answering Chamber 43 after the mutation, and declining without Veyra mounted — were run separately and are not scripted here.
@@ -294,7 +294,7 @@ Then mount all three through Pikelet's MCP server:
 
 ```bash
 claude -p "your question here" \
-  --mcp-config examples/05-one-file-search/web/public/veyra.mcp.json \
+  --mcp-config examples/one-file-search/web/public/veyra.mcp.json \
   --strict-mcp-config \
   --allowedTools "mcp__veyra-demo__search,mcp__veyra-demo__list_packs,mcp__veyra-demo__get_record"
 ```
@@ -303,7 +303,7 @@ For an interactive session, use the same config without `-p`:
 
 ```bash
 claude \
-  --mcp-config examples/05-one-file-search/web/public/veyra.mcp.json
+  --mcp-config examples/one-file-search/web/public/veyra.mcp.json
 ```
 
 All three packs derive from the same small synthetic Station Veyra corpus, with controlled differences in the Tovash evidence. Ask where the Tovash project is housed: the full pack supports Chamber 17, the modified pack supports Chamber 43, and the ablated pack should abstain.
@@ -522,9 +522,9 @@ benchmarks/beir/                       Frozen BEIR ablation harness (encoder,
 benchmarks/range-proof/                The deliberately boring static-HTTP proof:
                                    dumb-server.mjs, proof.mjs, mcp-proof.mjs,
                                    llm-proof.mjs, failure-modes.mjs
-examples/05-one-file-search/      Large single-artifact search and embedded
+examples/one-file-search/      Large single-artifact search and embedded
                                    encoder work
-examples/06-mcp-knowledge-pack/   Compile, mount, search, and hydrate
+examples/mcp-knowledge-pack/   Compile, mount, search, and hydrate
                                    records through MCP
 local-packs/                      Prebuilt example .pikelet artifacts used
                                    by the demo commands above

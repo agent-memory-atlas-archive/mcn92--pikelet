@@ -150,14 +150,14 @@ benchmarks/beir/cache/
 benchmarks/beir/work/
 benchmarks/beir/results/
 # Exported Arctic-XS weight blob + vocab (export_encoder_blob.py) — same
-# convention as examples/05-one-file-search/encoder-spike/real/: a locally
+# convention as examples/one-file-search/encoder-spike/real/: a locally
 # regenerable export, not source.
 benchmarks/beir/arctic-xs/
 
 # Downloaded Veyra demo release assets (npm run demo:veyra). Already covered
-# by the *.pikelet rule in examples/05-one-file-search/.gitignore; restated
+# by the *.pikelet rule in examples/one-file-search/.gitignore; restated
 # here explicitly so it's visible at the root without having to know that.
-/examples/05-one-file-search/web/public/veyra*.pikelet
+/examples/one-file-search/web/public/veyra*.pikelet
 
 # Compiled packs at the repo root (e.g. a scratch `pikelet compile` output).
 # Committed fixtures live under test/fixtures/ and are unaffected.

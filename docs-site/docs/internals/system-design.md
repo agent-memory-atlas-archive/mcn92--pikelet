@@ -10,4 +10,4 @@ Pikelet's design is built around one repeated choice: store dense vectors and mo
 
 At the engine layer, that means compact HNSW storage and distance kernels that avoid unnecessary float materialization. At the artifact layer, it means sketch profiles and range-readable row hydration. At the complete-profile layer, it means query interpretation can use the same philosophy: an inline MiniLM encoder is carried as artifact data and executed by reader-owned WASM kernels.
 
-The deeper design notes currently live in the repository root under `docs/SYSTEM_DESIGN.md`. This page is a placeholder for the Docusaurus migration; it keeps the system-design topic reachable while the long-form document is moved deliberately.
+The deeper design notes currently live in the repository root under `docs/architecture.md`. This page is a placeholder for the Docusaurus migration; it keeps the system-design topic reachable while the long-form document is moved deliberately.

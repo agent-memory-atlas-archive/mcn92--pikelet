@@ -14,7 +14,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // data-perm is the canonical pack layout (cluster-ordered rows, 192-dim
 // sketch); its eval ground truth is in permuted id space, matching the
 // artifact. data-full is the unpermuted source and its GT does not match.
-const DATA = path.join(here, '..', '04-static-wiki-pack', 'data-perm');
+const DATA = path.join(here, '..', 'static-wiki-pack', 'data-perm');
 const pikeletPath = path.join(here, 'pancake-wiki-inline.pancake');
 const artifactUrl = 'https://github.com/mcn92/pikelet/releases/download/artifact-wiki-inline-v4/pancake-wiki-inline.pancake';
 const expectedIdentity = '1b180adf4c6cebb2dcd5615256df6a25dac5fda8738dbbc11d60af86046f97f3';

@@ -66,7 +66,7 @@ benchmarks/beir/
   query-H.mjs              config H: Arctic-XS + sketch artifact + BM25, hybrid RRF
   arctic-xs/               exported Arctic-XS weight blob + vocab (export_encoder_blob.py --model
                            Snowflake/snowflake-arctic-embed-xs --pooling cls); kept separate from
-                           examples/05-one-file-search/encoder-spike/real/, which stays the shared MiniLM blob
+                           examples/one-file-search/encoder-spike/real/, which stays the shared MiniLM blob
   score.py                 score a run against official qrels (nDCG@10, Recall@10/100) via pytrec_eval
   conformance/             golden-vector test proving quantize.mjs matches the real engine exactly (see below)
   cache/                  downloaded datasets (gitignored)

@@ -16,7 +16,7 @@
 //      round-trips the source corpus, and the compile is byte-deterministic.
 //
 // Kind 3 (inline transformer) needs the 24 MiB weight blob and is covered by
-// examples/05-one-file-search/test-inline.mjs, not here.
+// examples/one-file-search/test-inline.mjs, not here.
 
 import fs from 'node:fs';
 import os from 'node:os';

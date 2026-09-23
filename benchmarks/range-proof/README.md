@@ -15,10 +15,10 @@ and reports exactly how many bytes and HTTP range requests each step cost.
 node benchmarks/range-proof/proof.mjs [path/to/pack.pikelet]
 ```
 
-Defaults to `examples/05-one-file-search/pancake-wiki-inline.pancake` (the
+Defaults to `examples/one-file-search/pancake-wiki-inline.pancake` (the
 648.5 MiB Simple English Wikipedia pack; build it first with `node
-examples/05-one-file-search/compile-wiki.mjs --inline-encoder` if it isn't
-present — needs `examples/04-static-wiki-pack/data-perm/` on disk). Prints,
+examples/one-file-search/compile-wiki.mjs --inline-encoder` if it isn't
+present — needs `examples/static-wiki-pack/data-perm/` on disk). Prints,
 in order: the pack's on-disk size, the dumb server starting (plus a `ps
 aux` check showing no retrieval-backend process is running), the remote
 mount with its hash pin verified, five queries with per-query

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The MCP half of the boring proof: mount a .pikelet pack over HTTP into
 // the real `pikelet mcp` server, then drive it with the repo's own tested
-// MCP client (examples/06-mcp-knowledge-pack/mcp_client.mjs) over stdio
+// MCP client (examples/mcp-knowledge-pack/mcp_client.mjs) over stdio
 // JSON-RPC — not by importing the reader library directly. Shows the "ask
 // agent question -> answer + cited records" shape end to end, plus the
 // dumb server's own Range-request log as independent proof of what
@@ -13,10 +13,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDumbServer } from './dumb-server.mjs';
 import { openPikeletFile } from '../../complete/index.mjs';
-import { PikeletMcpClient } from '../../examples/06-mcp-knowledge-pack/mcp_client.mjs';
+import { PikeletMcpClient } from '../../examples/mcp-knowledge-pack/mcp_client.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'examples/05-one-file-search/pancake-wiki-inline.pancake'));
+const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'examples/one-file-search/pancake-wiki-inline.pancake'));
 const packDir = path.dirname(packPath);
 const packFile = path.basename(packPath);
 

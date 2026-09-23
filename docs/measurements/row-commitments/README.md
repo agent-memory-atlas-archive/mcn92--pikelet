@@ -10,7 +10,7 @@ repo root for a working config).
 
 ```bash
 # smoke it on the shipped example artifact (goldens come from the file itself)
-cd examples/05-one-file-search
+cd examples/one-file-search
 node compile.mjs
 node poc/harness.mjs docs.pikelet --k 5 --out poc/results.json
 

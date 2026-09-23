@@ -10,7 +10,7 @@ import path from 'node:path';
 import { openPikeletFile } from '../pikelet-file-reader.mjs';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-const DATA = path.join(here, '..', '..', '04-static-wiki-pack', 'data-full');
+const DATA = path.join(here, '..', '..', 'static-wiki-pack', 'data-full');
 const dim = 384;
 
 const evalQueries = JSON.parse(fs.readFileSync(path.join(DATA, 'eval-queries.json'), 'utf8'));

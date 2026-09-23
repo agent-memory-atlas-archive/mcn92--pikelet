@@ -38,7 +38,7 @@ external identifier, or data.
 - **Deprecated npm packages.** `pancake-wasm` and `create-pancake-search`
   remain on the registry as deprecated pointers to `pikelet-wasm` and
   `pikelet`.
-- **Deployed infrastructure names** in `examples/04-static-wiki-pack`
+- **Deployed infrastructure names** in `examples/static-wiki-pack`
   (`pancake-wiki-pack` R2 bucket, `pancake-wiki-pack-demo` Pages project).
   Those are the names the deployment actually has; the docs that reference
   them are deploy instructions, not branding.
@@ -52,7 +52,7 @@ external identifier, or data.
   lists `pancake` among the documentation-corpus tokens it was distilled
   against. Changing the list changes the training procedure.
 - **The test fixture `pancake-wiki.pancake`** named in
-  `examples/05-one-file-search` scripts is a locally compiled file whose
+  `examples/one-file-search` scripts is a locally compiled file whose
   name matches the release asset it mirrors.
 - **CHANGELOG entries** describe the releases as they shipped and are not
   rewritten.
