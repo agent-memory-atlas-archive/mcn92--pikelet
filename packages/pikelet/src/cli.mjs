@@ -190,7 +190,7 @@ function parseArgs(args) {
       continue;
     }
     const name = arg.slice(2);
-    if (name === 'deploy' || name === 'yes' || name === 'force' || name === 'skip-abstention' || name === 'skip-calibration' || name === 'help' || name === 'h') {
+    if (name === 'deploy' || name === 'yes' || name === 'force' || name === 'verbose' || name === 'skip-abstention' || name === 'skip-calibration' || name === 'help' || name === 'h') {
       flags[name] = true;
       continue;
     }

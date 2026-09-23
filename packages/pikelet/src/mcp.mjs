@@ -270,7 +270,11 @@ async function callVerifyPack(packs, args) {
     limit = args.limit;
   }
   const mounted = packs.get(names[0]);
-  const evaluation = await mounted.search.evaluation().catch(() => null);
+  // evaluation() returns null when the pack carries no evaluation segment
+  // and throws when the segment is present but fails its hash or does not
+  // parse. The second case is an integrity failure and must surface as a
+  // tool error, not as "0 golden queries, all passed".
+  const evaluation = await mounted.search.evaluation();
   const goldens = Array.isArray(evaluation?.goldenQueries) ? evaluation.goldenQueries.slice(0, limit) : [];
   const probes = Array.isArray(evaluation?.abstentionProbes) ? evaluation.abstentionProbes.slice(0, limit) : [];
   const goldenResults = [];

@@ -142,6 +142,15 @@ first.
   over 16 MiB are skipped with a warning naming the path and the limit
   instead of being read whole into the build, matching the crawl path's
   body cap.
+- **`pikelet rebuild --verbose` parses.** `--verbose` was read as a
+  boolean (`verbose: !!flags.verbose`) but was not registered as one, so
+  as the last argument it failed with "Missing value for --verbose" and
+  before another flag it swallowed that flag as its value.
+- **`verify_pack` surfaces a corrupt evaluation segment.** The MCP tool
+  turned any `evaluation()` failure into "no evaluation", reporting 0
+  golden queries and 0 probes, all passed, for a pack whose evaluation
+  segment failed its hash or did not parse. Those errors now propagate
+  as tool errors; a pack with no evaluation segment still reports zero.
 - **Generated Workers no longer echo internal error messages on 5xx.**
   The `pikelet` scaffold's `worker.js` / `worker.artifact.js` templates
   returned `error.message` for every failure, including unexpected ones,
