@@ -459,7 +459,7 @@ async function compileArtifact(flags) {
     },
     validation: { ...DEFAULT_CONFIG.validation },
   };
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pancake-compile-'));
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pikelet-compile-'));
   try {
     await buildAssets(tmpDir, config, { skipBundleSizeCheck: true });
     const manifest = JSON.parse(await fs.readFile(path.join(tmpDir, 'assets', 'manifest.json'), 'utf8'));

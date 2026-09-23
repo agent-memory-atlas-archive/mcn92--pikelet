@@ -73,6 +73,20 @@ first.
 
 ### Fixed
 
+- **References the 0.8.0 rename left broken are repaired.** The engine
+  benchmark scripts called `native.pancake_*` (the N-API addon exports
+  `pikelet_*`); the ANN-Benchmarks adapter imported `pancake_py` (the
+  pybind module is `pikelet_py`) and, after the benchmarks move, resolved
+  the repo root one level short; `dist/technical-demo.html` and
+  `test/ios-smoke.html` called `_pancake_*` WASM exports (the iOS page also
+  inlined a pre-rename engine build and used the pre-`ef_search` query
+  ABI — regenerated from the current `dist/`); the Docusaurus plugin's
+  webpack rule matched `pancake-(artifact|errors).js`, which no longer
+  exists, so it never applied; READMEs showed `openPancakeFile`,
+  `PancakeRangeArtifact`, `PancakeSketchArtifact` and `PancakeIndex`. The
+  scaffold template's UI title and the wiki example page's wordmark and
+  GitHub links now say Pikelet. `docs/history.md` records the rename and
+  lists what intentionally keeps the old name.
 - **`compact()`'s rebuild path no longer leaves the index half-cleared**
   when a reinsertion fails: the old graph is released only after the
   rebuilt one is complete, so a failed rebuild returns with the index

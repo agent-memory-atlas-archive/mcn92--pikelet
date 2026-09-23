@@ -1,6 +1,6 @@
 # Wiki Knowledge Pack
 
-All of Simple English Wikipedia as one searchable Pancake artifact: ~242k
+All of Simple English Wikipedia as one searchable Pikelet artifact: ~242k
 articles chunked into 456,153 passages, embedded with MiniLM, compiled into a
 range-readable sketch artifact, and queried entirely client-side — the
 encoder, the WASM scan, the exact rerank, and calibrated abstention all run

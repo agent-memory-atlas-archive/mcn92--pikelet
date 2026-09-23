@@ -82,7 +82,7 @@ function killTree(proc) {
   try { process.kill(-proc.pid, 'SIGTERM'); } catch { try { proc.kill('SIGTERM'); } catch { /* gone */ } }
 }
 
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pancake-scaffold-e2e-'));
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-scaffold-e2e-'));
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const cpsPkg = JSON.parse(fs.readFileSync(path.join(CPS_DIR, 'package.json'), 'utf8'));
 const cpsRange = cpsPkg.dependencies?.['pikelet-wasm'];
@@ -97,7 +97,7 @@ console.log(`work dir: ${work}`);
 // published — before a release, resolving it from npm fails with ETARGET.
 const packOut = run(npm, ['pack', '--pack-destination', work, '--ignore-scripts'], { cwd: ROOT });
 const tarball = path.join(work, packOut.trim().split('\n').pop());
-ok(fs.existsSync(tarball), `packed in-repo pancake-wasm: ${path.basename(tarball)}`);
+ok(fs.existsSync(tarball), `packed in-repo pikelet-wasm: ${path.basename(tarball)}`);
 const cpsPackOut = run(npm, ['pack', '--pack-destination', work, '--ignore-scripts'], { cwd: CPS_DIR });
 const cpsTarball = path.join(work, cpsPackOut.trim().split('\n').pop());
 ok(fs.existsSync(cpsTarball), `packed in-repo pikelet: ${path.basename(cpsTarball)}`);

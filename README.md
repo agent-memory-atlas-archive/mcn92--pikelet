@@ -559,7 +559,7 @@ Pikelet is early. The implementation is real; the format is not frozen. One prim
 
 `npm test` exercises the engine, artifact profiles, MCP, ingestion, format hardening, and related conformance suites.
 
-The project was renamed from **Pancake** to **Pikelet** in September 2026; some old fixture filenames and compatibility identifiers still use the previous name. `pancake-wasm` and `create-pancake-search` are deprecated compatibility pointers to the Pikelet packages. Pikelet is unrelated to the pre-existing Pikelet programming language.
+Previously known as **Pancake** (renamed September 2026); artifacts, profile strings and files from before the rename remain readable — see [`docs/history.md`](docs/history.md) for what kept the old name and why. Pikelet is unrelated to the pre-existing Pikelet programming language.
 
 ---
 

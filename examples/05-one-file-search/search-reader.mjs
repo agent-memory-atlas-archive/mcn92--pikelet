@@ -68,7 +68,7 @@ export async function openDocsSearch({ manifestPath, indexPath, encoderPath, cal
     // temp file because the builder is currently path-based — CONTAINER
     // LESSON: buildSketchArtifact needs a bytes-in/bytes-out variant before
     // the compiler can assemble segments without touching disk.
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pancake-one-file-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-one-file-'));
     const sketchPath = path.join(tmpDir, 'index.pikelet-sketch');
     buildSketchArtifact(snapshotBytes, sketchPath, {
         recommendedRerank: manifest.efSearch || 120,

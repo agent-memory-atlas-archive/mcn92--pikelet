@@ -3,7 +3,7 @@
 Everything the docs-search POC needs beyond what the example already ships:
 an instrumented query harness, a cost model, and a report template. The
 build/host/reader pieces are the parent example (`compile.mjs`, `serve.mjs`,
-`pancake-file-reader.mjs`); building from your own docs is
+`pikelet-file-reader.mjs`); building from your own docs is
 `npx pikelet compile --source <dir> --out <name>.pikelet` (or the
 Docusaurus plugin in its default `complete` mode — see `docs-site/` in the
 repo root for a working config).
@@ -12,11 +12,11 @@ repo root for a working config).
 # smoke it on the shipped example artifact (goldens come from the file itself)
 cd examples/05-one-file-search
 node compile.mjs
-node poc/harness.mjs pancake-docs.pikelet --k 5 --out poc/results.json
+node poc/harness.mjs docs.pikelet --k 5 --out poc/results.json
 
 # over HTTP range requests (real egress accounting)
 node serve.mjs &
-node poc/harness.mjs http://127.0.0.1:8790/pancake-docs.pikelet --k 5
+node poc/harness.mjs http://127.0.0.1:8790/docs.pikelet --k 5
 
 # your artifact, your queries, with ground truth for recall@10
 node poc/harness.mjs /path/to/your.pikelet --queries queries.json --k 10 --out poc/results.json

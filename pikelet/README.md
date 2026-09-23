@@ -2,8 +2,8 @@
 
 The Pikelet CLI: compile a corpus into one `.pikelet` knowledge pack,
 serve packs to LLMs over MCP, scaffold a search app, or certify hosting.
-(Formerly `pancake`; the wire format keeps its pancake-era
-names, and `.pikelet` files remain fully readable.)
+(Formerly `pancake`; artifacts and profile strings from before the rename
+remain readable — see docs/history.md.)
 
 Turn a documentation site into search: either one complete `.pikelet` file
 you can query from any JavaScript runtime, or a deployable Worker + UI app.
