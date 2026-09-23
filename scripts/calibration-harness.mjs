@@ -7,6 +7,8 @@
 // design note for why that metric has misled this project more than once).
 //
 //   node scripts/calibration-harness.mjs <artifact.pikelet> <queries.json> [--baseline <baseline.json>]
+//       [--retrieval hybrid|vector|lexical|augmented]
+//       [--rank-depth N] [--rank-modes hybrid,vector,lexical] [--rank-report <out.json>]
 //
 // queries.json accepts two shapes:
 //   1. { questions: [{ id, cls, q, answer, type, evidence }, ...] }  (Veyra style)
@@ -26,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { openPikeletFile } = await import(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'index.mjs'));
+const { loadQuestions, isAnswerable, answerPresent, recordMatchesId, rankIn } = await import(path.join(ROOT, 'scripts', 'lib', 'relevance-sets.mjs'));
 
 function extractFlag(args, name) {
   const idx = args.indexOf(name);
@@ -34,93 +37,41 @@ function extractFlag(args, name) {
 }
 
 let args = process.argv.slice(2);
-let baselinePath, retrievalMode;
+let baselinePath, retrievalMode, rankDepthArg, rankModesArg, rankReportPath;
 [args, baselinePath] = extractFlag(args, '--baseline');
 [args, retrievalMode] = extractFlag(args, '--retrieval');
+[args, rankDepthArg] = extractFlag(args, '--rank-depth');
+[args, rankModesArg] = extractFlag(args, '--rank-modes');
+[args, rankReportPath] = extractFlag(args, '--rank-report');
 const [artifactPath, queriesPath] = args;
 if (!artifactPath || !queriesPath) {
-  console.error('usage: node scripts/calibration-harness.mjs <artifact.pikelet> <queries.json> [--baseline <baseline.json>] [--retrieval hybrid|vector|lexical|augmented]');
+  console.error('usage: node scripts/calibration-harness.mjs <artifact.pikelet> <queries.json> [--baseline <baseline.json>] [--retrieval hybrid|vector|lexical|augmented]\n'
+    + '         [--rank-depth N] [--rank-modes hybrid,vector,lexical] [--rank-report <out.json>]');
   process.exit(1);
+}
+// --rank-depth N adds a retrieval-side report: for every answerable
+// question and each mode in --rank-modes, the rank (1..N) of the first
+// result carrying the evidence, or null when it is not in the top N. That
+// sorts the misses by what could fix them: 'gap' (no mode reaches the
+// evidence within N — only the index contents or the encoder can move
+// it), 'range' (reached, but deeper than 3 — a reranker's territory),
+// 'demotion' (vector or lexical has it in the top 3 and hybrid fusion
+// pushed it out — a fusion-logic fix), 'top3' (fine).
+const rankDepth = rankDepthArg ? Number(rankDepthArg) : 0;
+if (rankDepthArg && (!Number.isInteger(rankDepth) || rankDepth < 3)) {
+  console.error(`--rank-depth must be an integer >= 3, got ${rankDepthArg}`);
+  process.exit(1);
+}
+const rankModes = (rankModesArg || 'hybrid,vector,lexical').split(',').map((m) => m.trim()).filter(Boolean);
+for (const m of rankModes) {
+  if (!['hybrid', 'vector', 'lexical', 'augmented'].includes(m)) {
+    console.error(`--rank-modes entries must be hybrid, vector, lexical, or augmented, got ${m}`);
+    process.exit(1);
+  }
 }
 if (retrievalMode && !['hybrid', 'vector', 'lexical', 'augmented'].includes(retrievalMode)) {
   console.error(`--retrieval must be hybrid, vector, lexical, or augmented, got ${retrievalMode}`);
   process.exit(1);
-}
-
-const UNANSWERABLE_CLASSES = new Set(['unsupported', 'offdomain', 'unanswerable', 'nearmiss', 'near-miss']);
-
-function normalize(text) {
-  return String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function loadQuestions(raw) {
-  const list = Array.isArray(raw) ? raw : raw.questions;
-  return list.map((q) => ({
-    id: q.id,
-    cls: q.cls || q.category || 'direct',
-    text: q.q || q.text || q.question,
-    answer: q.answer ?? null,
-    type: q.type || (q.answer == null ? 'abstain' : null),
-    evidence: q.evidence || [],
-    // Veyra-style evidence is an array of fact-file ids (strings); the
-    // Pride-and-Prejudice-style set instead carries { chapter, quote }
-    // objects — quote is near-verbatim source text, and a much more
-    // reliable thing to check a retrieved passage against than a
-    // paraphrased/summarized `answer` field, which the source text may
-    // never restate word-for-word at all.
-    evidenceQuotes: (q.evidence || [])
-      .map((e) => (typeof e === 'object' && e?.quote) ? e.quote : null)
-      .filter(Boolean),
-  }));
-}
-
-function isAnswerable(q) {
-  if (UNANSWERABLE_CLASSES.has(q.cls)) return false;
-  if (q.type === 'abstain') return false;
-  if (q.answer == null) return false;
-  return true;
-}
-
-// A short quote (<=6 words) is checked as a substring — long enough to be
-// specific, short enough that near-verbatim source text reliably contains
-// it whole. A longer quote is checked by significant-word overlap against
-// a real threshold (60%+ of its content words present), not
-// requiring every word — a "near-verbatim" quote can still have minor
-// transcription drift (punctuation, a dropped "the") that an exact
-// substring check would wrongly fail on.
-function quotePresent(results, quote) {
-  const needle = normalize(quote);
-  if (!needle) return false;
-  const words = needle.split(' ').filter((w) => w.length >= 3);
-  return results.some((r) => {
-    const hay = normalize(`${r.title || ''} ${r.text || ''}`);
-    if (hay.includes(needle)) return true;
-    if (words.length <= 6) return false; // short quotes: substring only, no partial credit
-    const hits = words.filter((w) => hay.includes(w)).length;
-    return hits / words.length >= 0.6;
-  });
-}
-
-function answerPresent(results, q) {
-  if (!results.length) return false;
-  // Prefer evidence quotes (near-verbatim source text) when the question
-  // set provides them — far more reliable than matching against a
-  // paraphrased/summarized answer field, which the source may never
-  // restate word-for-word. Any one matching quote counts (a multi-hop
-  // question's evidence spans several passages; the retrieved top-k only
-  // needs to contain the specific fact being asked about).
-  if (q.evidenceQuotes.length) {
-    return q.evidenceQuotes.some((quote) => quotePresent(results, quote));
-  }
-  const needle = normalize(q.answer);
-  if (!needle) return false;
-  const words = needle.split(' ').filter((w) => w.length >= 3);
-  return results.some((r) => {
-    const hay = normalize(`${r.title || ''} ${r.text || ''}`);
-    if (hay.includes(needle)) return true;
-    if (!words.length) return false;
-    return words.every((w) => hay.includes(w));
-  });
 }
 
 const raw = JSON.parse(fs.readFileSync(queriesPath, 'utf8'));
@@ -248,6 +199,87 @@ if (baselinePath && fs.existsSync(baselinePath)) {
   console.log('\nvs baseline:');
   console.log(`  withheld rate:     ${baseline.withheldRate} -> ${result.withheldRate}`);
   console.log(`  false-answer rate: ${baseline.falseAnswerRate} -> ${result.falseAnswerRate}`);
+}
+
+if (rankDepth) {
+  // Evidence rank per mode, searched to rankDepth. The sketch sizes its
+  // candidate pool as max(k, the artifact's recommendedRerank), so k alone
+  // widens the pool to the depth without shrinking a larger default.
+  // showAbstained so the verdict never hides the list.
+  const rerank = `max(${rankDepth}, artifact default)`;
+  const answerable = questions.filter(isAnswerable);
+  // Evidence per result: the named source record when the set gives ids,
+  // otherwise the quote/answer text check the verdict pass uses.
+  const rows = [];
+  for (const q of answerable) {
+    const ranks = {};
+    let allWithin = null;
+    for (const mode of rankModes) {
+      // The serving path first (k=3, the verdict pass's own call): the
+      // sketch's candidate pool grows with k, so a deep search can shift
+      // the top few by one and turn a served rank 3 into a reported 4.
+      const served = await search.query(q.text, { k: 3, retrieval: mode, showAbstained: true });
+      let rank = rankIn(served.results, q);
+      if (rank === null) {
+        const deep = await search.query(q.text, { k: rankDepth, retrieval: mode, showAbstained: true });
+        rank = rankIn(deep.results, q);
+        if (mode === 'hybrid' && q.evidenceIds.length > 1) {
+          allWithin = q.evidenceIds.every((id) => deep.results.some((r) => recordMatchesId(r, id)));
+        }
+      } else if (mode === 'hybrid' && q.evidenceIds.length > 1) {
+        const deep = await search.query(q.text, { k: rankDepth, retrieval: mode, showAbstained: true });
+        allWithin = q.evidenceIds.every((id) => deep.results.some((r) => recordMatchesId(r, id)));
+      }
+      ranks[mode] = rank;
+    }
+    const found = Object.values(ranks).filter((r) => r !== null);
+    const best = found.length ? Math.min(...found) : null;
+    const hybrid = ranks.hybrid ?? best;
+    const others = Object.entries(ranks).filter(([m]) => m !== 'hybrid').map(([, r]) => r).filter((r) => r !== null);
+    let bucket;
+    if (best === null) bucket = 'gap';
+    else if (hybrid !== null && hybrid <= 3) bucket = 'top3';
+    else if (others.length && Math.min(...others) <= 3) bucket = 'demotion';
+    else bucket = 'range';
+    rows.push({ id: q.id, cls: q.cls, q: q.text, ranks, best, bucket, ...(allWithin === null ? {} : { allEvidenceWithinDepth: allWithin }) });
+  }
+
+  const at = (rs, mode, n) => rs.filter((r) => r.ranks[mode] !== null && r.ranks[mode] <= n).length;
+  const classes = [...new Set(rows.map((r) => r.cls))];
+  console.log(`\nEvidence rank to depth ${rankDepth} (rerank ${rerank}), answerable questions only:`);
+  if (rankDepth >= info.records) {
+    console.log(`  note: depth ${rankDepth} covers the whole corpus (${info.records} records); 'gap' cannot occur — use a smaller depth for a reachability measurement.`);
+  }
+  console.table(classes.flatMap((cls) => {
+    const rs = rows.filter((r) => r.cls === cls);
+    return rankModes.map((mode) => ({
+      cls, mode, n: rs.length, '@1': at(rs, mode, 1), '@3': at(rs, mode, 3), [`@${rankDepth}`]: at(rs, mode, rankDepth),
+    }));
+  }));
+  console.log('Miss buckets (by hybrid rank; gap = no mode within depth, demotion = another mode has it in the top 3):');
+  console.table(classes.map((cls) => {
+    const rs = rows.filter((r) => r.cls === cls);
+    const count = (b) => rs.filter((r) => r.bucket === b).length;
+    const multi = rs.filter((r) => r.allEvidenceWithinDepth !== undefined);
+    return {
+      cls, n: rs.length, top3: count('top3'), demotion: count('demotion'), range: count('range'), gap: count('gap'),
+      ...(multi.length ? { [`allEvidence@${rankDepth}`]: `${multi.filter((r) => r.allEvidenceWithinDepth).length}/${multi.length}` } : {}),
+    };
+  }));
+  const misses = rows.filter((r) => r.bucket !== 'top3');
+  if (misses.length) {
+    console.log('Misses:');
+    for (const r of misses) {
+      const rk = rankModes.map((m) => `${m[0]}=${r.ranks[m] ?? `>${rankDepth}`}`).join(' ');
+      console.log(`  ${r.bucket.padEnd(8)} ${String(r.id).padEnd(5)} ${rk.padEnd(24)} ${r.q.slice(0, 80)}`);
+    }
+  }
+  if (rankReportPath) {
+    fs.writeFileSync(rankReportPath, JSON.stringify({
+      artifact: path.basename(artifactPath), identity: info.identity, depth: rankDepth, rerank, modes: rankModes, rows,
+    }, null, 2));
+    console.log(`rank report written to ${rankReportPath}`);
+  }
 }
 
 if (process.env.HARNESS_VERBOSE) {

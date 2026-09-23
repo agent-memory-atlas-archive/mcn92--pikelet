@@ -50,6 +50,41 @@ Not part of `npm test` (needs the local corpora above). Rerun on Veyra and
 one real corpus before and after any change to `packages/pikelet/src/calibrate.mjs`
 or `packages/pikelet-wasm/complete/retrieval-abstention.mjs`.
 
+### Retrieval-side reports
+
+The same sets measure retrieval, not just the verdict. Question loading and
+evidence matching live in `scripts/lib/relevance-sets.mjs` so every tool
+agrees on what "the evidence is in this result" means: `{ quote }` evidence
+is checked against result text, string evidence (Veyra's fact-file ids)
+against the record's `sourcePath`/`url`/`anchor` stem.
+
+```bash
+# evidence rank per retrieval mode, misses bucketed by what could fix them
+node scripts/calibration-harness.mjs <pack.pikelet> <queries.json> \
+  --rank-depth 50 [--rank-modes hybrid,vector,lexical] [--rank-report out.json]
+
+# replay alternative vector/lexical fusion rules offline, judged on evidence rank
+node scripts/fusion-sim.mjs <pack.pikelet> <queries.json> [--depth 50] [--report out.json]
+```
+
+`--rank-depth` reports, per class and mode, how many answerable questions
+have their evidence at @1, @3 and @depth, then buckets the hybrid misses:
+`gap` (no mode reaches the evidence within the depth — only the index
+contents or the encoder can move it), `range` (reached, but deeper than 3 —
+a reranker's territory), `demotion` (vector or lexical has it in the top 3
+and fusion pushed it out — a fusion-logic fix). The top-3 decision uses the
+serving path (k=3) so a deeper search, which widens the sketch's candidate
+pool, cannot turn a served rank 3 into a reported 4. Use a depth smaller
+than the corpus, or `gap` cannot occur.
+
+`fusion-sim.mjs` fetches the reader's vector, lexical and hybrid lists once
+per question and scores each fusion rule as a pure function of the first
+two; its `rrf60` rule must reproduce the shipped hybrid ranks (it reports
+how many it matched — the residue is phrase pinning, which it omits). Add
+a candidate rule there and read its @1/@3 against `shipped` and `oracle`
+(the better of vector and lexical per question) before touching the
+reader.
+
 ## Running
 
 ```bash
