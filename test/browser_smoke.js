@@ -27,11 +27,11 @@ function prepareFixtureDependency() {
   const packJson = execFileSync(
     npm.command,
     [...npm.args, 'pack', '--json', '--ignore-scripts', '--dry-run=false', '--cache', npmCacheDir],
-    { cwd: ROOT_DIR, encoding: 'utf8', shell: npm.shell }
+    { cwd: path.join(ROOT_DIR, 'packages', 'pikelet-wasm'), encoding: 'utf8', shell: npm.shell }
   );
 
   const [{ filename }] = JSON.parse(packJson);
-  const tarballPath = path.join(ROOT_DIR, filename);
+  const tarballPath = path.join(ROOT_DIR, 'packages', 'pikelet-wasm', filename);
 
   try {
     const npmInstall = npmCliPath();

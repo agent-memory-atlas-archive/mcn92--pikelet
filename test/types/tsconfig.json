@@ -8,10 +8,10 @@
     "lib": ["esnext"],
     "types": [],
     "paths": {
-      "pikelet-wasm": ["../../pikelet.d.ts"],
-      "pikelet-wasm/node": ["../../pikelet.d.ts"],
-      "pikelet-wasm/web": ["../../pikelet.web.d.ts"],
-      "pikelet-wasm/artifact": ["../../pikelet-artifact.d.ts"]
+      "pikelet-wasm": ["../../packages/pikelet-wasm/src/pikelet.d.ts"],
+      "pikelet-wasm/node": ["../../packages/pikelet-wasm/src/pikelet.d.ts"],
+      "pikelet-wasm/web": ["../../packages/pikelet-wasm/src/pikelet.web.d.ts"],
+      "pikelet-wasm/artifact": ["../../packages/pikelet-wasm/src/artifact/pikelet-artifact.d.ts"]
     }
   },
   "include": ["./check.ts"]

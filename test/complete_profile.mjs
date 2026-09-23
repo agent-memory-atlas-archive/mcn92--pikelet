@@ -16,7 +16,7 @@
 //      round-trips the source corpus, and the compile is byte-deterministic.
 //
 // Kind 3 (inline transformer) needs the 24 MiB weight blob and is covered by
-// examples/05-one-file-search/test-inline.mjs, not here.
+// examples/one-file-search/test-inline.mjs, not here.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -26,13 +26,13 @@ import { fileURLToPath } from 'node:url';
 import {
     buildCorpusSegment, buildCorpusSegmentFromBuffers, buildQueryInterpSegment,
     assemblePikeletFile, buildLexicalSegment, PROFILE_V1, PROFILE_V2, sha256, canonicalJson,
-} from '../complete/builder.mjs';
-import { openPikeletFile, verifyHostEncoder } from '../complete/index.mjs';
-import { openLexicalIndex } from '../complete/lexical.mjs';
+} from 'pikelet-wasm/complete/builder';
+import { openPikeletFile, verifyHostEncoder } from 'pikelet-wasm/complete';
+import { openLexicalIndex } from '../packages/pikelet-wasm/complete/lexical.mjs';
 
 const require = createRequire(import.meta.url);
-const Pikelet = require('../pikelet.js');
-const { exportSketchArtifact } = require('../pikelet-artifact.js');
+const Pikelet = require('pikelet-wasm');
+const { exportSketchArtifact } = require('pikelet-wasm/artifact');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 let passed = 0;
@@ -469,7 +469,7 @@ const A = buildSynthetic();
             return new Response(body, { status: 206, headers: { 'content-range': `bytes ${start}-${start + body.length - 1}/${A.bytes.length}` } });
         };
         try {
-            const { httpRangeSource: rangeSource } = await import('../complete/sources.mjs');
+            const { httpRangeSource: rangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
             const src = rangeSource('http://host.invalid/b.pikelet');
             await src.init();
             await rejects('a 206 answering a different range than requested is refused', () => src.read(64, 64), /returned Content-Range bytes 80-143.*requested bytes 64-127/);
@@ -491,7 +491,7 @@ const A = buildSynthetic();
             return new Response(A.bytes, { status: 200, headers: { 'content-length': String(A.bytes.length), etag: '"v2"' } });
         };
         try {
-            const { httpRangeSource: rangeSource } = await import('../complete/sources.mjs');
+            const { httpRangeSource: rangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
             const src = rangeSource('http://host.invalid/c.pikelet');
             await src.init();
             await rejects('a 200 with a mismatched ETag is reported as a changed artifact, not a Range-ignoring host',
@@ -502,7 +502,7 @@ const A = buildSynthetic();
     }
     // 4. httpRangeSource: after the one-time full-download fallback, reads
     // are served from memory and issue no further requests.
-    const { httpRangeSource } = await import('../complete/sources.mjs');
+    const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
     const realFetch = globalThis.fetch;
     let requests = 0;
     globalThis.fetch = async (url, init = {}) => {
@@ -697,7 +697,7 @@ const A = buildSynthetic();
 {
     const realFetch3 = globalThis.fetch;
     try {
-        const { httpRangeSource: rangeSource } = await import('../complete/sources.mjs');
+        const { httpRangeSource: rangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
         // 206 without Content-Range (RFC requires it): refused.
         globalThis.fetch = async (url, init = {}) => {
             if (init.method === 'HEAD') return new Response(null, { status: 200, headers: { 'content-length': String(A.bytes.length) } });
@@ -932,7 +932,7 @@ console.log('\nD. lexical segment and hybrid retrieval');
     // The lazy opener (wiki-scale path: interpolation search over remote
     // ranges) must score identically to the eager reader on the same
     // segment bytes.
-    const { openLexicalIndexLazy } = await import('../complete/lexical.mjs');
+    const { openLexicalIndexLazy } = await import('../packages/pikelet-wasm/complete/lexical.mjs');
     const lazyIdx = await openLexicalIndexLazy(
         async (off, len) => lexical.bytes.subarray(off, off + len), lexical.bytes.length);
     check('lazy opener reports the same counts and marks itself lazy',
@@ -982,7 +982,7 @@ console.log('\nD. lexical segment and hybrid retrieval');
     // the pinned signed target must never get the cache-key param
     // (signed query strings); and an expired pin (403) must re-resolve.
     const http = await import('node:http');
-    const { httpRangeSource } = await import('../complete/sources.mjs');
+    const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
     const payload = Buffer.from(A.bytes);
     let frontDoorHits = 0;
     let signedHits = 0;

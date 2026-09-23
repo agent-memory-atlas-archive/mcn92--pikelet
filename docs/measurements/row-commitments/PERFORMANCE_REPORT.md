@@ -21,7 +21,7 @@ corpora. Raw per-query records: `poc-docs-local.json`, `poc-docs-http.json`,
 | queries | 10 embedded goldens | 200 eval queries with brute-force ground truth |
 | operating point | measured C=30 | measured C=600 |
 
-Engine baseline: `Pancake.restore()` of the same snapshots, in-process WASM.
+Engine baseline: `Pikelet.restore()` of the same snapshots, in-process WASM.
 
 ## Results
 

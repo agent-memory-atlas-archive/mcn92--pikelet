@@ -71,4 +71,4 @@ direction.
   `npm run demo:artifact`/`demo:sketch` and the 15-second hook above.
 
 There is also a raw, no-bundler browser page at
-[`../dist/technical-demo.html`](../dist/technical-demo.html).
+[`technical-demo.html`](technical-demo.html).

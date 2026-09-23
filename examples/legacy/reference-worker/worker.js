@@ -6,7 +6,7 @@
  * actually call, not as a copy of the raw WASM ABI.
  */
 
-import Pikelet, { PikeletError, PIKELET_ERROR_CODES } from '../../../pikelet.workerd.mjs';
+import Pikelet, { PikeletError, PIKELET_ERROR_CODES } from 'pikelet-wasm';
 
 let index = null;
 let indexConfig = null;
@@ -177,8 +177,8 @@ async function readJson(request, env) {
   const text = textDecoder.decode(buffer);
   try {
     return JSON.parse(text);
-  } catch (error) {
-    throw new RequestError(`Invalid JSON body: ${error.message}`);
+  } catch {
+    throw new RequestError('Invalid JSON body');
   }
 }
 
@@ -754,7 +754,7 @@ export default {
     try {
       return withCors(await handleRequest(request, env, ctx), env);
     } catch (error) {
-      const message = error && error.message ? error.message : String(error);
+      const message = error instanceof Error ? error.message : 'Request failed';
       const status = error instanceof RequestError
         ? error.status
         : (error instanceof PikeletError && CLIENT_ERROR_CODES.has(error.code) ? 400 : 500);

@@ -5,10 +5,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const createPikeletApi = require('../pikelet-core.js');
+const createPikeletApi = require('../packages/pikelet-wasm/src/core/pikelet-core.js');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST = path.join(ROOT, 'dist');
+const DIST = path.join(ROOT, 'packages', 'pikelet-wasm', 'dist');
 const SCALAR_BASENAME = 'engine.scalar';
 
 function makeRng(seed) {
@@ -60,9 +60,9 @@ function ensureScalarBuild() {
     const scalarWasm = path.join(DIST, `${SCALAR_BASENAME}.wasm`);
     const buildInputs = [
         path.join(ROOT, 'build.sh'),
-        path.join(ROOT, 'src', 'engine.cpp'),
-        path.join(ROOT, 'src', 'float_hnsw.hpp'),
-        path.join(ROOT, 'src', 'uint8_float_hnsw.hpp'),
+        path.join(ROOT, 'packages', 'pikelet-wasm', 'engine', 'engine.cpp'),
+        path.join(ROOT, 'packages', 'pikelet-wasm', 'engine', 'float_hnsw.hpp'),
+        path.join(ROOT, 'packages', 'pikelet-wasm', 'engine', 'uint8_float_hnsw.hpp'),
     ];
     if (fs.existsSync(scalarJs) && fs.existsSync(scalarWasm)) {
         const scalarMtime = Math.min(fs.statSync(scalarJs).mtimeMs, fs.statSync(scalarWasm).mtimeMs);

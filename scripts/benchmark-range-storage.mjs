@@ -36,7 +36,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(SCRIPT), '..');
-const RESULT_PREFIX = '__PANCAKE_RANGE_BENCH_RESULT__';
+const RESULT_PREFIX = '__PIKELET_RANGE_BENCH_RESULT__';
 
 function usage(exitCode = 0) {
   const out = exitCode ? console.error : console.log;
@@ -335,7 +335,7 @@ async function worker(options) {
   try {
     const baselineMemory = memorySnapshot();
     const { openPikeletFile, httpRangeSource } = await import(
-      pathToFileURL(path.join(ROOT, 'complete', 'index.mjs')).href
+      pathToFileURL(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'index.mjs')).href
     );
     const encodeQuery = await loadExternalEncoder(options.encoderModule);
     const source = httpRangeSource(server.url, {
@@ -523,7 +523,7 @@ function runChild(artifact, options) {
     ['--expose-gc', SCRIPT, '--worker'],
     {
       cwd: ROOT,
-      env: { ...process.env, PANCAKE_RANGE_BENCH_OPTIONS: JSON.stringify(childOptions) },
+      env: { ...process.env, PIKELET_RANGE_BENCH_OPTIONS: JSON.stringify(childOptions) },
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
     },
@@ -539,7 +539,7 @@ function runChild(artifact, options) {
 
 async function main() {
   if (process.argv[2] === '--worker') {
-    const raw = process.env.PANCAKE_RANGE_BENCH_OPTIONS;
+    const raw = process.env.PIKELET_RANGE_BENCH_OPTIONS;
     if (!raw) throw new Error('worker options missing');
     const result = await worker(JSON.parse(raw));
     process.stdout.write(`${RESULT_PREFIX}${JSON.stringify(result)}\n`);

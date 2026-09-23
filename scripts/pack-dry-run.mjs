@@ -13,6 +13,7 @@ function npmCliPath() {
 
 const npm = npmCliPath();
 const result = spawnSync(npm.command, [...npm.args, 'pack', '--dry-run', '--cache', cacheDir], {
+  cwd: path.join(process.cwd(), 'packages', 'pikelet-wasm'),
   stdio: 'inherit',
   env: process.env,
   shell: npm.shell,

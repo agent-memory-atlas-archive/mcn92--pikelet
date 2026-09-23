@@ -1,0 +1,133 @@
+{
+  "name": "pikelet-wasm",
+  "version": "0.8.0",
+  "description": "Vector search engine and .pikelet artifact readers/builders, in WebAssembly. Compile a corpus into one self-contained, hash-verified search file, or use the underlying HNSW engine directly. Runs in Node.js, browsers, and Cloudflare Workers with no native dependencies.",
+  "main": "src/pikelet.js",
+  "types": "src/pikelet.d.ts",
+  "exports": {
+    ".": {
+      "workerd": {
+        "types": "./src/pikelet.web.d.ts",
+        "default": "./src/pikelet.workerd.mjs"
+      },
+      "browser": {
+        "types": "./src/pikelet.web.d.ts",
+        "default": "./src/pikelet.web.mjs"
+      },
+      "import": {
+        "types": "./src/pikelet.d.ts",
+        "default": "./src/pikelet.node.mjs"
+      },
+      "require": {
+        "types": "./src/pikelet.d.ts",
+        "default": "./src/pikelet.js"
+      },
+      "default": {
+        "types": "./src/pikelet.d.ts",
+        "default": "./src/pikelet.js"
+      }
+    },
+    "./web": {
+      "workerd": {
+        "types": "./src/pikelet.web.d.ts",
+        "default": "./src/pikelet.workerd.mjs"
+      },
+      "browser": {
+        "types": "./src/pikelet.web.d.ts",
+        "default": "./src/pikelet.web.mjs"
+      },
+      "import": {
+        "types": "./src/pikelet.web.d.ts",
+        "default": "./src/pikelet.web.mjs"
+      },
+      "default": {
+        "types": "./src/pikelet.web.d.ts",
+        "default": "./src/pikelet.web.mjs"
+      }
+    },
+    "./node": {
+      "import": {
+        "types": "./src/pikelet.d.ts",
+        "default": "./src/pikelet.node.mjs"
+      },
+      "require": {
+        "types": "./src/pikelet.d.ts",
+        "default": "./src/pikelet.js"
+      },
+      "default": {
+        "types": "./src/pikelet.d.ts",
+        "default": "./src/pikelet.js"
+      }
+    },
+    "./artifact": {
+      "types": "./src/artifact/pikelet-artifact.d.ts",
+      "default": "./src/artifact/pikelet-artifact.js"
+    },
+    "./complete": {
+      "types": "./complete/index.d.ts",
+      "default": "./complete/index.mjs"
+    },
+    "./complete/builder": {
+      "types": "./complete/builder.d.ts",
+      "default": "./complete/builder.mjs"
+    },
+    "./engine.wasm": "./dist/engine.wasm"
+  },
+  "files": [
+    "src",
+    "complete",
+    "dist/engine.js",
+    "dist/engine.wasm",
+    "dist/engine.scalar.js",
+    "dist/engine.scalar.wasm",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "NOTICE"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/stage-package-docs.mjs pikelet-wasm",
+    "postpack": "node ../../scripts/stage-package-docs.mjs pikelet-wasm --clean",
+    "prepublishOnly": "npm --prefix ../.. run prepublish-checks"
+  },
+  "keywords": [
+    "vector-search",
+    "search-artifact",
+    "knowledge-pack",
+    "retrieval",
+    "rag",
+    "mcp",
+    "model-context-protocol",
+    "ann",
+    "hnsw",
+    "wasm",
+    "webassembly",
+    "simd",
+    "uint8",
+    "quantization",
+    "embedding",
+    "embeddings",
+    "nearest-neighbor",
+    "similarity-search",
+    "cloudflare-workers",
+    "edge",
+    "edge-compute"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcn92/pikelet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mcn92/pikelet/issues"
+  },
+  "homepage": "https://github.com/mcn92/pikelet#readme",
+  "author": "Matthew Noonan",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false
+}

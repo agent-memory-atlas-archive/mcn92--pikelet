@@ -1,0 +1,11 @@
+# Copied in from the repository root by scripts/stage-package-docs.mjs during
+# npm prepack (so the tarball carries them) and removed by postpack.
+/CHANGELOG.md
+/LICENSE
+/NOTICE
+/README.md
+
+# Experimental engine build variants (OUT_BASENAME=<name> builds); the shipped
+# artifacts are dist/engine.{js,wasm} and dist/engine.scalar.{js,wasm}.
+/dist/engine_*.js
+/dist/engine_*.wasm

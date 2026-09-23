@@ -30,9 +30,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { PikeletSketchArtifact } = require('../../../pikelet-artifact.js');
+const { PikeletSketchArtifact } = require('pikelet-wasm/artifact');
 
-const DATA = path.join(here, '..', '..', '..', 'examples', '04-static-wiki-pack', 'data-full');
+const DATA = path.join(here, '..', '..', '..', 'examples', 'static-wiki-pack', 'data-full');
 const SKETCH_PATH = path.join(DATA, 'wiki.pikelet-sketch');
 const QUERIES_PATH = path.join(DATA, 'eval-queries.f32');
 const DIM = 384;

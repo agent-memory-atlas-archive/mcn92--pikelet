@@ -11,8 +11,8 @@
   "dependencies": {
     "@docusaurus/core": "3.10.2",
     "@docusaurus/preset-classic": "3.10.2",
-    "pikelet": "file:../pikelet",
-    "pikelet-wasm": "file:..",
+    "pikelet": "file:../packages/pikelet",
+    "pikelet-wasm": "file:../packages/pikelet-wasm",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { stripMarkdown } = await import(pathToFileURL(path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs')).href);
+const { stripMarkdown } = await import(pathToFileURL(path.resolve(here, '..', '..', 'packages', 'pikelet', 'src', 'ingest.mjs')).href);
 
 section('stripMarkdown: content survives');
 const keep = [

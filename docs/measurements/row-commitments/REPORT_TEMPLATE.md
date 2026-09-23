@@ -1,4 +1,4 @@
-# Pancake docs-search POC report
+# Pikelet docs-search POC report
 
 Date: <!-- -->
 Authors: <!-- -->
@@ -48,7 +48,7 @@ From `poc/cost.mjs` (paste the invocation and output).
 
 | | $/month |
 |---|---|
-| Pancake total (egress + storage + requests + builds + ops) | |
+| Pikelet total (egress + storage + requests + builds + ops) | |
 | Current managed spend | |
 | Savings | |
 | Breakeven on integration cost | <!-- months --> |

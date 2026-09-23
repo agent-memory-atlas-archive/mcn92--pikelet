@@ -27,7 +27,7 @@
 
 'use strict';
 
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 // ─── PRNG (seeded xoshiro128** for reproducibility) ─────────────────────────
 

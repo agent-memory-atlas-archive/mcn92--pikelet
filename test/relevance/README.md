@@ -35,20 +35,20 @@ the harness checks the returned text against.
   6 near-miss.
 - `veyra-baseline.json` — harness result for the Station Veyra synthetic
   registry. Its 90-question set is generated, not tracked: `node
-  examples/05-one-file-search/web/veyra-corpus/gen.mjs` writes
+  examples/one-file-search/web/veyra-corpus/gen.mjs` writes
   `questions.json` beside the corpus it generates (deterministic; the
   generator has no random source).
 
 ```bash
 node scripts/calibration-harness.mjs <pack.pikelet> test/relevance/internal-docs-queries.json
 node scripts/calibration-harness.mjs <pack.pikelet> \
-  examples/05-one-file-search/web/veyra-corpus/questions.json \
+  examples/one-file-search/web/veyra-corpus/questions.json \
   --baseline test/relevance/veyra-baseline.json
 ```
 
 Not part of `npm test` (needs the local corpora above). Rerun on Veyra and
-one real corpus before and after any change to `pikelet/src/calibrate.mjs`
-or `complete/retrieval-abstention.mjs`.
+one real corpus before and after any change to `packages/pikelet/src/calibrate.mjs`
+or `packages/pikelet-wasm/complete/retrieval-abstention.mjs`.
 
 ## Running
 

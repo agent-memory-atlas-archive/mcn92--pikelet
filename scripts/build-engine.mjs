@@ -123,7 +123,7 @@ console.log('==============================================');
 console.log(`Building Pikelet WASM Engine (${buildDesc})`);
 console.log('==============================================');
 
-fs.mkdirSync('dist', { recursive: true });
+fs.mkdirSync('packages/pikelet-wasm/dist', { recursive: true });
 
 let simdDesc = 'scalar';
 const simdFlags = [];
@@ -215,10 +215,10 @@ const emccArgs = [
   '-fvectorize',
   '-fslp-vectorize',
   '--no-entry',
-  '-Isrc',
+  '-Ipackages/pikelet-wasm/engine',
   '-o',
-  `dist/${outBasename}.js`,
-  'src/engine.cpp',
+  `packages/pikelet-wasm/dist/${outBasename}.js`,
+  'packages/pikelet-wasm/engine/engine.cpp',
 ];
 
 run(emccCommand[0], emccArgs, { env: buildEnv });
@@ -245,7 +245,7 @@ if (patchEngineJs === '1' && outBasename === 'engine') {
 
 console.log('');
 console.log('Build complete!');
-printFileDetails(`dist/${outBasename}.js`);
-printFileDetails(`dist/${outBasename}.wasm`);
+printFileDetails(`packages/pikelet-wasm/dist/${outBasename}.js`);
+printFileDetails(`packages/pikelet-wasm/dist/${outBasename}.wasm`);
 console.log('Running test...');
-run('node', [...nodeWasmFlags, 'run_tests.js'], { env: buildEnv });
+run('node', [...nodeWasmFlags, 'test/run_tests.js'], { env: buildEnv });

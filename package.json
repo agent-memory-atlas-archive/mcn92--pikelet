@@ -1,117 +1,26 @@
 {
-  "name": "pikelet-wasm",
-  "version": "0.8.0",
-  "description": "Vector search engine and .pikelet artifact readers/builders, in WebAssembly. Compile a corpus into one self-contained, hash-verified search file, or use the underlying HNSW engine directly. Runs in Node.js, browsers, and Cloudflare Workers with no native dependencies.",
-  "main": "pikelet.js",
-  "types": "pikelet.d.ts",
-  "exports": {
-    ".": {
-      "workerd": {
-        "types": "./pikelet.web.d.ts",
-        "default": "./pikelet.workerd.mjs"
-      },
-      "browser": {
-        "types": "./pikelet.web.d.ts",
-        "default": "./pikelet.web.mjs"
-      },
-      "import": {
-        "types": "./pikelet.d.ts",
-        "default": "./pikelet.node.mjs"
-      },
-      "require": {
-        "types": "./pikelet.d.ts",
-        "default": "./pikelet.js"
-      },
-      "default": {
-        "types": "./pikelet.d.ts",
-        "default": "./pikelet.js"
-      }
-    },
-    "./web": {
-      "workerd": {
-        "types": "./pikelet.web.d.ts",
-        "default": "./pikelet.workerd.mjs"
-      },
-      "browser": {
-        "types": "./pikelet.web.d.ts",
-        "default": "./pikelet.web.mjs"
-      },
-      "import": {
-        "types": "./pikelet.web.d.ts",
-        "default": "./pikelet.web.mjs"
-      },
-      "default": {
-        "types": "./pikelet.web.d.ts",
-        "default": "./pikelet.web.mjs"
-      }
-    },
-    "./node": {
-      "import": {
-        "types": "./pikelet.d.ts",
-        "default": "./pikelet.node.mjs"
-      },
-      "require": {
-        "types": "./pikelet.d.ts",
-        "default": "./pikelet.js"
-      },
-      "default": {
-        "types": "./pikelet.d.ts",
-        "default": "./pikelet.js"
-      }
-    },
-    "./artifact": {
-      "types": "./pikelet-artifact.d.ts",
-      "default": "./pikelet-artifact.js"
-    },
-    "./complete": {
-      "types": "./complete/index.d.ts",
-      "default": "./complete/index.mjs"
-    },
-    "./complete/builder": {
-      "types": "./complete/builder.d.ts",
-      "default": "./complete/builder.mjs"
-    },
-    "./engine.wasm": "./dist/engine.wasm"
-  },
-  "files": [
-    "complete",
-    "pikelet.js",
-    "pikelet-artifact.js",
-    "pikelet-artifact-common.js",
-    "pikelet-artifact-range.js",
-    "pikelet-artifact-sketch.js",
-    "pikelet.node.mjs",
-    "pikelet.web.mjs",
-    "pikelet.workerd.mjs",
-    "pikelet-core.js",
-    "pikelet-errors.js",
-    "pikelet-loader.js",
-    "pikelet.d.ts",
-    "pikelet.web.d.ts",
-    "pikelet-artifact.d.ts",
-    "dist/engine.js",
-    "dist/engine.wasm",
-    "dist/engine.scalar.js",
-    "dist/engine.scalar.wasm",
-    "LICENSE",
-    "README.md",
-    "CHANGELOG.md",
-    "NOTICE"
+  "name": "pikelet-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Workspace root for pikelet-wasm (engine + artifact readers/builders) and pikelet (CLI, MCP server, Docusaurus plugin). Not published.",
+  "workspaces": [
+    "packages/pikelet-wasm",
+    "packages/pikelet"
   ],
   "scripts": {
     "build": "node scripts/build-engine.mjs",
     "build:scalar": "node scripts/build-all.mjs --scalar-only",
     "build:all": "node scripts/build-all.mjs",
-    "bench": "node benchmarks/run.js",
+    "bench": "node benchmarks/engine/run.js",
     "demo:data": "node scripts/make-demo-vectors.mjs",
-    "demo:veyra": "node examples/05-one-file-search/web/veyra-corpus/fetch-veyra.mjs",
-    "demo:veyra:reproduce": "npm run demo:veyra && node examples/05-one-file-search/web/public/reproduce-ablation.mjs",
+    "demo:veyra": "node examples/one-file-search/web/veyra-corpus/fetch-veyra.mjs",
+    "demo:veyra:reproduce": "npm run demo:veyra && node examples/one-file-search/web/public/reproduce-ablation.mjs",
     "demo:artifact": "node examples/legacy/range-artifact-demo/demo.js --compact",
     "demo:sketch": "node examples/legacy/range-artifact-demo/sketch_demo.js --compact",
     "demo:artifact:browser:build": "vite build examples/legacy/range-artifact-demo/static",
     "demo:artifact:browser": "vite preview examples/legacy/range-artifact-demo/static --host 127.0.0.1",
     "build:pages-demo": "node examples/legacy/03-edge-docs-search/pages-ui/build.mjs",
-    "test": "node run_tests.js && node test/model_c_loader.js && node test/sketch_profile.js && node test/sketch_staged.js && node test/sketch_row_integrity.js && node test/artifact_hardening.js && node test/complete_profile.mjs && node test/mcp_conformance.mjs && node test/ingestion/run.mjs && npm run test:types",
+    "test": "node test/run_tests.js && node test/model_c_loader.js && node test/sketch_profile.js && node test/sketch_staged.js && node test/sketch_row_integrity.js && node test/artifact_hardening.js && node test/complete_profile.mjs && node test/mcp_conformance.mjs && node test/ingestion/run.mjs && npm run test:types",
     "test:types": "tsc -p test/types/tsconfig.json",
     "test:browser": "node test/browser_smoke.js",
     "test:worker-web": "node test/test_worker_web_entry.js",
@@ -121,48 +30,11 @@
     "test:scaffold": "node scripts/test-scaffold-e2e.mjs",
     "bench:range-storage": "node scripts/benchmark-range-storage.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs",
-    "prepublishOnly": "npm run build:all && npm test && npm run test:fuzz && npm run test:simd && npm run test:browser && npm run test:worker-web && npm run test:worker-example && npm run pack:dry-run"
-  },
-  "keywords": [
-    "vector-search",
-    "search-artifact",
-    "knowledge-pack",
-    "retrieval",
-    "rag",
-    "mcp",
-    "model-context-protocol",
-    "ann",
-    "hnsw",
-    "wasm",
-    "webassembly",
-    "simd",
-    "uint8",
-    "quantization",
-    "embedding",
-    "embeddings",
-    "nearest-neighbor",
-    "similarity-search",
-    "cloudflare-workers",
-    "edge",
-    "edge-compute"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/mcn92/pikelet.git"
-  },
-  "bugs": {
-    "url": "https://github.com/mcn92/pikelet/issues"
-  },
-  "homepage": "https://github.com/mcn92/pikelet#readme",
-  "author": "Matthew Noonan",
-  "license": "Apache-2.0",
-  "publishConfig": {
-    "access": "public"
+    "prepublish-checks": "npm run build:all && npm test && npm run test:fuzz && npm run test:simd && npm run test:browser && npm run test:worker-web && npm run test:worker-example && npm run pack:dry-run"
   },
   "engines": {
     "node": ">=18"
   },
-  "sideEffects": false,
   "devDependencies": {
     "miniflare": "^4.20260409.0",
     "playwright": "^1.60.0",
@@ -172,5 +44,10 @@
   },
   "overrides": {
     "esbuild": "^0.28.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcn92/pikelet.git"
+  },
+  "license": "Apache-2.0"
 }

@@ -28,7 +28,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CPS_DIR = path.join(ROOT, 'pikelet');
+const CPS_DIR = path.join(ROOT, 'packages', 'pikelet');
 const CPS_BIN = path.join(CPS_DIR, 'bin', 'pikelet.mjs');
 const requestedRuntimes = process.argv.slice(2).flatMap((arg, i, all) => (arg === '--runtime' ? [all[i + 1]] : []));
 const RUNTIMES = requestedRuntimes.length ? requestedRuntimes : ['artifact', 'snapshot'];
@@ -82,8 +82,8 @@ function killTree(proc) {
   try { process.kill(-proc.pid, 'SIGTERM'); } catch { try { proc.kill('SIGTERM'); } catch { /* gone */ } }
 }
 
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pancake-scaffold-e2e-'));
-const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-scaffold-e2e-'));
+const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages', 'pikelet-wasm', 'package.json'), 'utf8'));
 const cpsPkg = JSON.parse(fs.readFileSync(path.join(CPS_DIR, 'package.json'), 'utf8'));
 const cpsRange = cpsPkg.dependencies?.['pikelet-wasm'];
 
@@ -95,9 +95,9 @@ console.log(`work dir: ${work}`);
 // and pikelet because the generated devDependency pins the
 // in-repo version, which does not exist on the registry until it is
 // published — before a release, resolving it from npm fails with ETARGET.
-const packOut = run(npm, ['pack', '--pack-destination', work, '--ignore-scripts'], { cwd: ROOT });
+const packOut = run(npm, ['pack', '--pack-destination', work, '--ignore-scripts'], { cwd: path.join(ROOT, 'packages', 'pikelet-wasm') });
 const tarball = path.join(work, packOut.trim().split('\n').pop());
-ok(fs.existsSync(tarball), `packed in-repo pancake-wasm: ${path.basename(tarball)}`);
+ok(fs.existsSync(tarball), `packed in-repo pikelet-wasm: ${path.basename(tarball)}`);
 const cpsPackOut = run(npm, ['pack', '--pack-destination', work, '--ignore-scripts'], { cwd: CPS_DIR });
 const cpsTarball = path.join(work, cpsPackOut.trim().split('\n').pop());
 ok(fs.existsSync(cpsTarball), `packed in-repo pikelet: ${path.basename(cpsTarball)}`);
@@ -127,7 +127,7 @@ console.log('\n--- compile ---');
   run(process.execPath, [CPS_BIN, 'compile', '--source', fixtureDir, '--out', outFile], { cwd: CPS_DIR });
   ok(fs.existsSync(outFile), 'compile wrote the .pikelet artifact');
 
-  const { openPikeletFile } = await import(path.join(ROOT, 'complete', 'index.mjs'));
+  const { openPikeletFile } = await import(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'index.mjs'));
   const search = await openPikeletFile(outFile);
   try {
     const info = search.info();
@@ -264,7 +264,7 @@ console.log('\n--- compile ---');
     });
     await new Promise((resolve) => rangeSrv.listen(0, '127.0.0.1', resolve));
     const packUrl = `http://127.0.0.1:${rangeSrv.address().port}/search.pikelet`;
-    const { openPikeletFile: openForIdentity } = await import(path.join(ROOT, 'complete', 'index.mjs'));
+    const { openPikeletFile: openForIdentity } = await import(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'index.mjs'));
     const identityReader = await openForIdentity(outFile);
     const packIdentity = identityReader.info().identity;
     await identityReader.close();
