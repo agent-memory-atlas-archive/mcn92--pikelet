@@ -416,6 +416,15 @@ async function testCreation() {
             `create() rejects maxElements=${bad} with INVALID_ARGUMENT`);
     }
 
+    // dim ceiling: matches the engine constructors' MAX_DIMS, so the JS
+    // error carries the argument name instead of a bare INVALID_HANDLE.
+    for (const bad of [65537, 1e6]) {
+        let err = null;
+        try { await Pikelet.create({ ...DEFAULT_CONFIG, dim: bad }); } catch (e) { err = e; }
+        assert(err && err.code === 'INVALID_ARGUMENT' && /between 1 and 65536/.test(err.message),
+            `create() rejects dim=${bad} with INVALID_ARGUMENT`);
+    }
+
     // Capacity guard: configurations whose eager arena allocation cannot fit
     // the wasm32 heap must be rejected with a coded error at create(), before
     // the engine is even loaded — an uncaught std::bad_alloc inside

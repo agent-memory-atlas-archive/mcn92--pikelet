@@ -159,6 +159,22 @@ public:
     // caps attacker-controlled allocations during deserialize(). See float_hnsw.
     static constexpr uint32_t MAX_DESERIALIZE_LEVEL = 64;
 
+    // Live-construction limits; see FloatHNSW::validate_config for the
+    // reasoning (M = 1 level_mult_ UB, size_t wraparound of the arena
+    // products on wasm32). Same bounds as the JS-side create().
+    static constexpr size_t MAX_DIMS = 65536;
+    static constexpr size_t MAX_M = 128;
+    static void validate_config(size_t dims, const Uint8FloatHNSWConfig& config) {
+        if (dims == 0 || dims > MAX_DIMS) throw std::invalid_argument("Uint8FloatHNSW: dims must be between 1 and 65536");
+        if (config.M < 2 || config.M > MAX_M) throw std::invalid_argument("Uint8FloatHNSW: M must be between 2 and 128");
+        if (config.max_elements == 0) throw std::invalid_argument("Uint8FloatHNSW: max_elements must be positive");
+        const size_t m0 = config.M * 2;
+        if (config.max_elements > SIZE_MAX / dims
+            || config.max_elements > (SIZE_MAX / sizeof(Edge)) / m0) {
+            throw std::invalid_argument("Uint8FloatHNSW: max_elements * dims exceeds addressable memory");
+        }
+    }
+
     Uint8FloatHNSW(size_t dims, const Uint8FloatHNSWConfig& config = {})
         : dims_(dims)
         , metric_(config.metric)
@@ -176,6 +192,7 @@ public:
         , cached_query_(nullptr)
         , cached_insert_(nullptr)
     {
+        validate_config(dims, config);
         qdata_.reserve(max_elements_ * dims_);
         scales_.reserve(max_elements_);
         offsets_.reserve(max_elements_);

@@ -105,6 +105,26 @@ public:
     // during deserialize(). 64 levels covers >10^18 elements at any sane M.
     static constexpr uint32_t MAX_DESERIALIZE_LEVEL = 64;
 
+    // Live-construction limits. deserialize() validates 1 < M <= 128 for
+    // snapshots, but the constructor took caller-supplied dims / M /
+    // max_elements unchecked: M = 1 makes level_mult_ = 1/log(1) = +inf and
+    // the first insert's static_cast<int> of it is undefined behaviour, and
+    // max_elements * dims or max_elements * M0 can wrap a 32-bit size_t
+    // (wasm32) into a small arena that later writes overrun. Mirrors the
+    // JS-side create() bounds (dim <= 65536, 2 <= M <= 128).
+    static constexpr size_t MAX_DIMS = 65536;
+    static constexpr size_t MAX_M = 128;
+    static void validate_config(size_t dims, const FloatHNSWConfig& config) {
+        if (dims == 0 || dims > MAX_DIMS) throw std::invalid_argument("FloatHNSW: dims must be between 1 and 65536");
+        if (config.M < 2 || config.M > MAX_M) throw std::invalid_argument("FloatHNSW: M must be between 2 and 128");
+        if (config.max_elements == 0) throw std::invalid_argument("FloatHNSW: max_elements must be positive");
+        const size_t m0 = config.M * 2;
+        if (config.max_elements > (SIZE_MAX / sizeof(float)) / dims
+            || config.max_elements > (SIZE_MAX / sizeof(uint32_t)) / m0) {
+            throw std::invalid_argument("FloatHNSW: max_elements * dims exceeds addressable memory");
+        }
+    }
+
     FloatHNSW(size_t dims, const FloatHNSWConfig& config = {})
         : dims_(dims)
         , metric_(config.metric)
@@ -122,6 +142,7 @@ public:
         , use_heuristic_(config.use_heuristic)
         , cached_query_(nullptr)
     {
+        validate_config(dims, config);
         vectors_.reserve(max_elements_ * dims_);
         base_neighbors_.resize(max_elements_ * M0_);
         base_sizes_.assign(max_elements_, 0);

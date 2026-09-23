@@ -104,6 +104,20 @@ first.
 
 ### Fixed
 
+- **Engine constructors validate their configuration.** `pikelet_init`
+  (WASM and the native addon) passed caller-supplied `dims`, `M` and
+  `max_elements` straight into the index constructors. `M = 1` made the
+  level multiplier `1/log(1) = +inf`, whose conversion to an integer on
+  the first insert is undefined behaviour, and `max_elements * dims` or
+  `max_elements * M0` could wrap a 32-bit `size_t` on wasm32 into an
+  undersized arena. Both backends now reject `dims` outside 1..65536, `M`
+  outside 2..128 (0 still selects the default), `max_elements = 0`, and
+  products that do not fit `size_t`; WASM returns `INVALID_HANDLE`, the
+  native addon throws a `RangeError` (a C++ exception used to escape the
+  N-API boundary and abort the process). `Pikelet.create()` mirrors the
+  `dim` ceiling with an `INVALID_ARGUMENT` error, and the native
+  `pikelet_import` rejects a non-buffer argument with a `TypeError`
+  instead of continuing with a null view while a JS exception is pending.
 - **Generated Workers no longer echo internal error messages on 5xx.**
   The `pikelet` scaffold's `worker.js` / `worker.artifact.js` templates
   returned `error.message` for every failure, including unexpected ones,

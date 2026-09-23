@@ -856,9 +856,10 @@ function createPikeletApi(loadEngineImpl) {
     async function create(opts) {
         if (!opts || !opts.dim) throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT,
             'opts.dim is required', { argument: 'dim' });
-        if (!Number.isInteger(opts.dim) || opts.dim <= 0) {
+        // Upper bound matches the engine constructors' MAX_DIMS.
+        if (!Number.isInteger(opts.dim) || opts.dim <= 0 || opts.dim > 65536) {
             throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT,
-                'opts.dim must be a positive integer', { argument: 'dim', value: opts.dim });
+                'opts.dim must be an integer between 1 and 65536', { argument: 'dim', value: opts.dim });
         }
         if ('compressed' in opts) {
             throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'opts.compressed has been removed');

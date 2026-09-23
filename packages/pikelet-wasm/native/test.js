@@ -35,8 +35,28 @@ try {
   assert.equal(native.pikelet_add(handle, new Float32Array([0, 0, 0, 0])), 0);
   const result = native.pikelet_query(handle, new Float32Array([0, 0, 0, 0]), 99);
   assert.equal(result.count, 1);
+  assert.throws(
+    () => native.pikelet_import(handle, 'not a buffer'),
+    /must be a Buffer or Uint8Array/
+  );
+  assert.throws(
+    () => native.pikelet_import(handle, new Float32Array(4)),
+    /must be a Buffer or Uint8Array/
+  );
 } finally {
   native.pikelet_dispose(handle);
+}
+
+// Constructor limits reach the binding as JS RangeErrors instead of UB
+// (M = 1 made level_mult_ infinite) or a process abort (a C++ exception
+// crossing N-API). M = 0 still means "default".
+for (const quantized of [0, 1]) {
+  assert.throws(() => native.pikelet_init(4, 8, quantized, 0, 1, 16, 16), /M must be between 2 and 128/);
+  assert.throws(() => native.pikelet_init(4, 8, quantized, 0, 129, 16, 16), /M must be between 2 and 128/);
+  assert.throws(() => native.pikelet_init(65537, 8, quantized, 0, 4, 16, 16), /dims must be between 1 and 65536/);
+  const dflt = native.pikelet_init(4, 8, quantized, 0, 0, 16, 16);
+  assert.notEqual(dflt, 0xFFFFFFFF);
+  native.pikelet_dispose(dflt);
 }
 
 // serialize() must refuse while ghosts are resident: the wire format has no

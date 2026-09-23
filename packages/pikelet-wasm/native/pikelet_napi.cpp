@@ -243,25 +243,37 @@ Napi::Value Init(const Napi::CallbackInfo& info) {
 
     bool use_cosine = (metric == 1);
 
-    if (quant) {
-        Uint8FloatHNSWConfig cfg;
-        cfg.max_elements = maxElem;
-        cfg.M = (M > 0) ? static_cast<size_t>(M) : DEFAULT_M;
-        cfg.ef_construction = (efC > 0) ? static_cast<size_t>(efC) : DEFAULT_EF_CONSTRUCTION;
-        cfg.ef_search = (efS > 0) ? static_cast<size_t>(efS) : DEFAULT_EF_SEARCH;
-        cfg.seed = (seed > 0) ? static_cast<uint32_t>(seed) : DEFAULT_SEED;
-        cfg.metric = use_cosine ? DistanceMetric::Cosine : DistanceMetric::L2;
-        cfg.use_heuristic = true;
-        g_handles[h] = new Uint8FloatHNSWWrapper(dim, cfg);
-    } else {
-        FloatHNSWConfig cfg;
-        cfg.max_elements = maxElem;
-        cfg.M = (M > 0) ? static_cast<size_t>(M) : DEFAULT_M;
-        cfg.ef_construction = (efC > 0) ? static_cast<size_t>(efC) : DEFAULT_EF_CONSTRUCTION;
-        cfg.ef_search = (efS > 0) ? static_cast<size_t>(efS) : DEFAULT_EF_SEARCH;
-        cfg.seed = (seed > 0) ? static_cast<uint32_t>(seed) : DEFAULT_SEED;
-        cfg.metric = use_cosine ? DistanceMetric::Cosine : DistanceMetric::L2;
-        g_handles[h] = new FloatHNSWWrapper(dim, cfg);
+    // The constructors reject out-of-range dims / M / max_elements
+    // (std::invalid_argument) and can fail allocation (std::bad_alloc).
+    // Either must become a JS exception: a C++ exception crossing the N-API
+    // boundary terminates the process. g_handles[h] is still null on the
+    // throwing path, so the slot is simply free again.
+    try {
+        if (quant) {
+            Uint8FloatHNSWConfig cfg;
+            cfg.max_elements = maxElem;
+            cfg.M = (M > 0) ? static_cast<size_t>(M) : DEFAULT_M;
+            cfg.ef_construction = (efC > 0) ? static_cast<size_t>(efC) : DEFAULT_EF_CONSTRUCTION;
+            cfg.ef_search = (efS > 0) ? static_cast<size_t>(efS) : DEFAULT_EF_SEARCH;
+            cfg.seed = (seed > 0) ? static_cast<uint32_t>(seed) : DEFAULT_SEED;
+            cfg.metric = use_cosine ? DistanceMetric::Cosine : DistanceMetric::L2;
+            cfg.use_heuristic = true;
+            g_handles[h] = new Uint8FloatHNSWWrapper(dim, cfg);
+        } else {
+            FloatHNSWConfig cfg;
+            cfg.max_elements = maxElem;
+            cfg.M = (M > 0) ? static_cast<size_t>(M) : DEFAULT_M;
+            cfg.ef_construction = (efC > 0) ? static_cast<size_t>(efC) : DEFAULT_EF_CONSTRUCTION;
+            cfg.ef_search = (efS > 0) ? static_cast<size_t>(efS) : DEFAULT_EF_SEARCH;
+            cfg.seed = (seed > 0) ? static_cast<uint32_t>(seed) : DEFAULT_SEED;
+            cfg.metric = use_cosine ? DistanceMetric::Cosine : DistanceMetric::L2;
+            g_handles[h] = new FloatHNSWWrapper(dim, cfg);
+        }
+    } catch (const std::exception& e) {
+        g_handles[h] = nullptr;
+        Napi::RangeError::New(env, std::string("pikelet_init: ") + e.what())
+            .ThrowAsJavaScriptException();
+        return Napi::Number::New(env, INVALID_HANDLE);
     }
 
     return Napi::Number::New(env, h);
@@ -462,12 +474,23 @@ Napi::Value Export(const Napi::CallbackInfo& info) {
 Napi::Value Import(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     uint32_t h = info[0].As<Napi::Number>().Uint32Value();
-    Napi::Buffer<uint8_t> buf = info[1].As<Napi::Buffer<uint8_t>>();
     if (h >= MAX_HANDLES || !g_handles[h])
         return Napi::Number::New(env, -1);
+    // Same argument discipline as the other bindings: an unchecked As<>()
+    // on a non-buffer leaves a pending JS exception and a null/zero view,
+    // and the function would then return a value with that exception
+    // pending, which N-API forbids. Buffers are Uint8Arrays, so one check
+    // accepts both.
+    if (!info[1].IsTypedArray()
+        || info[1].As<Napi::TypedArray>().TypedArrayType() != napi_uint8_array) {
+        Napi::TypeError::New(env, "pikelet_import: snapshot must be a Buffer or Uint8Array")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Uint8Array buf = info[1].As<Napi::Uint8Array>();
     // The snapshot header's count field is untrusted and sizes the rebuilt
     // index; reject counts the buffer cannot possibly hold before allocating.
-    if (!g_handles[h]->snapshot_plausible(buf.Data(), buf.Length())) {
+    if (!g_handles[h]->snapshot_plausible(buf.Data(), buf.ElementLength())) {
         Napi::TypeError::New(env, "pikelet_import: snapshot count field exceeds buffer capacity")
             .ThrowAsJavaScriptException();
         return Napi::Number::New(env, -1);
@@ -478,7 +501,7 @@ Napi::Value Import(const Napi::CallbackInfo& info) {
     // letting it escape the N-API boundary and abort the process.
     bool ok = false;
     try {
-        ok = g_handles[h]->deserialize(buf.Data(), buf.Length());
+        ok = g_handles[h]->deserialize(buf.Data(), buf.ElementLength());
     } catch (const std::exception& e) {
         Napi::Error::New(env, std::string("pikelet_import: ") + e.what())
             .ThrowAsJavaScriptException();
