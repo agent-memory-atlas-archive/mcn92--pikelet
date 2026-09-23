@@ -23,11 +23,30 @@ import type {
   SketchTier,
 } from 'pikelet-wasm';
 
+import { fuseCandidates, FUSION_DEFAULTS } from 'pikelet-wasm/complete';
+import type { FusionOptions } from 'pikelet-wasm/complete';
+
 // The entrypoints provide PikeletError / PIKELET_ERROR_CODES as named runtime
 // exports, but NOT the artifact classes — those are properties of the API
 // object (or named exports of pikelet-wasm/artifact). Importing the name only
 // yields a type; using it as a value must not compile.
 import { PikeletRangeArtifact as NotAValue } from 'pikelet-wasm';
+
+function fusionSurface(): void {
+  // fuseCandidates is generic over the hit type: it returns the caller's own
+  // objects, so extra fields survive the reorder.
+  const pool = [{ id: 1, distance: 0.2, title: 'a' }, { id: 2, distance: 0.3, title: 'b' }];
+  const fused = fuseCandidates(pool, [2], { rrfK: 60, lexicalWeight: 0.5, guardMargin: 0.05 });
+  fused[0]?.title.toUpperCase();
+  const opts: FusionOptions = { guardMargin: FUSION_DEFAULTS.guardMargin };
+  fuseCandidates(pool, [], opts);
+  // @ts-expect-error hits need an id and a distance
+  fuseCandidates([{ id: 1 }], []);
+  // @ts-expect-error lexical ids are numbers
+  fuseCandidates(pool, ['2']);
+  // @ts-expect-error the defaults are read-only
+  FUSION_DEFAULTS.rrfK = 10;
+}
 
 async function nodeSurface(): Promise<void> {
   const index: PikeletIndex = await Pikelet.create({ dim: 8, metric: 'l2', maxElements: 100 });

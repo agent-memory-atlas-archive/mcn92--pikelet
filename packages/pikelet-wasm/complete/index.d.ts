@@ -244,6 +244,25 @@ export declare function openPikeletFile(
 ): Promise<CompleteSearch>;
 
 /** Header formatVersion -> manifest profile accepted by this reader. */
+/** Rank-fusion parameters shared by the reader, the calibrator and the BEIR ladder. */
+export interface FusionOptions {
+  /** Reciprocal-rank-fusion constant (default 60). */
+  rrfK?: number;
+  /** Weight of the lexical (BM25) rank term relative to the vector term (default 1). */
+  lexicalWeight?: number;
+  /** Relative distance margin (top-2 minus top-1, over top-1) at or above which the vector top-1 keeps rank 1 (default 0: off). */
+  guardMargin?: number;
+}
+export declare const FUSION_DEFAULTS: Readonly<Required<FusionOptions>>;
+/**
+ * Fuse the exact-reranked vector order (every lexical candidate included) with the BM25 order.
+ * Returns the same hit objects, reordered.
+ */
+export declare function fuseCandidates<T extends { id: number; distance: number }>(
+  vectorOrder: T[],
+  lexicalIds: number[],
+  options?: FusionOptions,
+): T[];
 export declare const SUPPORTED_PROFILES: Readonly<Record<number, string>>;
 export declare const CORPUS_LAYOUT_V2: 'records-v2';
 /**

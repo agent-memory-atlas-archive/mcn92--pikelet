@@ -63,26 +63,24 @@ const byScore = (rows, score) => rows
   .sort((a, b) => (b.s - a.s) || (a.r.distance - b.r.distance))
   .map((x) => x.r.id);
 
-const rrf = (K, w) => (lists) => byScore(ranked(lists), (r) => 1 / (K + r.v) + (r.l ? w / (K + r.l) : 0));
-// Vector-margin guard: plain RRF, but when the vector top-1 leads the
-// top-2 by a relative margin >= tau it keeps rank 1.
-const guard = (tau, K = 60, w = 1) => (lists) => {
-  const order = rrf(K, w)(lists);
-  const [a, b] = lists.vector;
-  if (a && b && a.distance > 0 && (b.distance - a.distance) / a.distance >= tau) {
-    return [a.id, ...order.filter((id) => id !== a.id)];
-  }
-  return order;
-};
+// RRF and the vector-margin guard are the reader's own fuseCandidates
+// (complete/fusion.mjs), fed the pool in exact-distance order the way the
+// reader's rerank output is; a rule that wins here is the rule that ships.
+const { fuseCandidates } = await import(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'fusion.mjs'));
+const poolByDistance = (lists) => ranked(lists).sort((a, b) => a.distance - b.distance).map((r) => ({ id: r.id, distance: r.distance }));
+const rrf = (K, w) => (lists) => fuseCandidates(poolByDistance(lists), lists.lexical.map((h) => h.id), { rrfK: K, lexicalWeight: w }).map((h) => h.id);
+const guard = (tau, K = 60, w = 1) => (lists) => fuseCandidates(poolByDistance(lists), lists.lexical.map((h) => h.id), { rrfK: K, lexicalWeight: w, guardMargin: tau }).map((h) => h.id);
 // Agreement-limited: lexical rank only counts for records already in the
 // vector top-m (it reorders the vector head instead of importing a pile of
 // term matches), unless the lexical list is short (<= s hits survive the
 // reader's cutoff), which is the known-item shape: then full RRF.
 const agree = (m, s, K = 60, w = 1) => (lists) => {
   if (lists.lexical.length <= s) return rrf(K, w)(lists);
-  return byScore(ranked(lists), (r) => 1 / (K + r.v) + (r.l && r.v <= m ? w / (K + r.l) : 0));
+  const lexRank = new Map(lists.lexical.map((h, i) => [h.id, i + 1]));
+  const rows = poolByDistance(lists).map((h, i) => ({ ...h, v: i + 1, l: lexRank.get(h.id) || null }));
+  return byScore(rows, (r) => 1 / (K + r.v) + (r.l && r.v <= m ? w / (K + r.l) : 0));
 };
-const augmented = (lists) => ranked(lists).sort((a, b) => a.distance - b.distance).map((r) => r.id);
+const augmented = (lists) => poolByDistance(lists).map((r) => r.id);
 const vectorOnly = (lists) => lists.vector.map((h) => h.id);
 const lexicalFirst = (lists) => [...lists.lexical.map((h) => h.id), ...lists.vector.map((h) => h.id).filter((id) => !lists.lexical.some((h) => h.id === id))];
 

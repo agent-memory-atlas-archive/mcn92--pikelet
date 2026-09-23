@@ -102,6 +102,14 @@ first.
 - Public browser playground for the Wikipedia pack, with an ablation
   tab.
 
+- **`pikelet-wasm/complete` exports `fuseCandidates()` and
+  `FUSION_DEFAULTS`.** The hybrid rank-fusion rule (reciprocal-rank fusion
+  of the exact-reranked vector order with the BM25 order) is one function
+  the reader, the calibrator (`calibrate.mjs`, which fits coverage on the
+  fused top passage) and the BEIR ladder (`query-E.mjs`) all call, instead
+  of three copies of the arithmetic. It takes `{ rrfK, lexicalWeight,
+  guardMargin }`; the defaults (60, 1, 0) reproduce the previous behavior
+  exactly.
 ### Fixed
 
 - **Engine constructors validate their configuration.** `pikelet_init`

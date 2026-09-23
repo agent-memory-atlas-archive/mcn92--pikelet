@@ -41,6 +41,8 @@ export { httpRangeSource } from './sources.mjs';
 // in-memory lexical searcher over the segment bytes already assembled by
 // buildLexicalSegment, before the artifact is written to disk.
 export { openLexicalIndex } from './lexical.mjs';
+export { fuseCandidates, FUSION_DEFAULTS } from './fusion.mjs';
+import { fuseCandidates } from './fusion.mjs';
 export {
     KERNEL_LAYOUT, expectedBlobBytes, parseInlineTransformerEncoder,
     createInlineTransformerEmbedder, INLINE_TEST_VECTOR_TEXTS,
@@ -75,9 +77,9 @@ const RECORD_CACHE = 256;
 // its fixed-size header is what format 2 commits to in the manifest.
 const SKETCH_HEADER_BYTES = 256;
 // Hybrid retrieval: BM25 candidates fetched from the lexical segment per
-// query, and the reciprocal-rank-fusion constant (the standard untuned 60).
+// query; the fusion rule and its constants live in fusion.mjs, shared with
+// the calibrator so fit-time rankings match what is served.
 const LEXICAL_CANDIDATES = 24;
-const RRF_K = 60;
 // scoreQuality's coverage term hydrates the fused top passagesNeeded
 // records (asset.coverage.topK, 5 by default — see calibrate.mjs's
 // COVERAGE_TOP_PASSAGES) once retrieval returns. The scorer that knows
@@ -1111,13 +1113,7 @@ export async function openPikeletFile(input, options = {}) {
                         fusedFull = lexicalHits.map((h) => byId.get(h.id)).filter(Boolean);
                     } else if (retrieval !== 'augmented' && lexicalHits.length) {
                         const lexRank = new Map(lexicalHits.map((h, i) => [h.id, i]));
-                        fusedFull = searched
-                            .map((hit, vRank) => ({
-                                hit,
-                                score: 1 / (RRF_K + vRank) + (lexRank.has(hit.id) ? 1 / (RRF_K + lexRank.get(hit.id)) : 0),
-                            }))
-                            .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
-                            .map((entry) => entry.hit);
+                        fusedFull = fuseCandidates(searched, lexicalHits.map((h) => h.id));
                         // One batched hydration for everything this block and
                         // scoreQuality's coverage term (below) will need, in
                         // place of two separate staged fetches (phrase-pin's

@@ -27,7 +27,7 @@ import {
     buildCorpusSegment, buildCorpusSegmentFromBuffers, buildQueryInterpSegment,
     assemblePikeletFile, buildLexicalSegment, PROFILE_V1, PROFILE_V2, sha256, canonicalJson,
 } from 'pikelet-wasm/complete/builder';
-import { openPikeletFile, verifyHostEncoder } from 'pikelet-wasm/complete';
+import { openPikeletFile, verifyHostEncoder, fuseCandidates, FUSION_DEFAULTS } from 'pikelet-wasm/complete';
 import { openLexicalIndex } from '../packages/pikelet-wasm/complete/lexical.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1165,6 +1165,33 @@ console.log('\nD. lexical segment and hybrid retrieval');
         `engine ${JSON.stringify(viaAuto.results.map((r) => r.id))} vs js ${JSON.stringify(viaJs.results.map((r) => r.id))}`);
     await auto.close();
     await jsBig.close();
+}
+
+{
+    // --- fuseCandidates (complete/fusion.mjs): the one fusion rule the
+    // reader, the calibrator and the BEIR ladder share ---
+    const pool = [
+        { id: 10, distance: 0.20 }, { id: 11, distance: 0.30 }, { id: 12, distance: 0.31 },
+        { id: 13, distance: 0.40 }, { id: 14, distance: 0.50 },
+    ];
+    const ids = (hits) => hits.map((h) => h.id);
+    check('defaults are K=60, weight 1, guard off', FUSION_DEFAULTS.rrfK === 60 && FUSION_DEFAULTS.lexicalWeight === 1 && FUSION_DEFAULTS.guardMargin === 0);
+    check('no lexical hits: vector order, as a copy', JSON.stringify(ids(fuseCandidates(pool, []))) === JSON.stringify([10, 11, 12, 13, 14]) && fuseCandidates(pool, []) !== pool);
+    // 1/(60+3) + 1/60 > 1/60: a record in both lists outranks a vector-only rank 1.
+    check('RRF: a record in both lists outranks a vector-only top hit', ids(fuseCandidates(pool, [13]))[0] === 13);
+    check('RRF: lexical order breaks ties among lexical hits', JSON.stringify(ids(fuseCandidates(pool, [12, 11])).slice(0, 2)) === JSON.stringify([12, 11]));
+    check('RRF returns the same hit objects', fuseCandidates(pool, [13])[0] === pool[3]);
+    check('lexicalWeight 0 restores vector order', JSON.stringify(ids(fuseCandidates(pool, [13, 14], { lexicalWeight: 0 }))) === JSON.stringify([10, 11, 12, 13, 14]));
+    check('a lexical id missing from the pool is ignored', ids(fuseCandidates(pool, [99, 13]))[0] === 13);
+    check('duplicate lexical ids keep their first rank', JSON.stringify(ids(fuseCandidates(pool, [13, 13, 11])).slice(0, 2)) === JSON.stringify([13, 11]));
+    // Guard: top-1 leads top-2 by (0.30-0.20)/0.20 = 50%.
+    check('guard keeps the vector top-1 first when its margin clears the threshold', ids(fuseCandidates(pool, [13], { guardMargin: 0.05 }))[0] === 10);
+    check('guard leaves the fused order intact below it', JSON.stringify(ids(fuseCandidates(pool, [13], { guardMargin: 0.05 })).slice(1, 3)) === JSON.stringify([13, 11]));
+    check('guard does not fire when the margin is below the threshold', ids(fuseCandidates(pool, [13], { guardMargin: 0.60 }))[0] === 13);
+    check('guard does not fire on a single-hit pool', ids(fuseCandidates([pool[0]], [10], { guardMargin: 0.05 }))[0] === 10);
+    let threw = false;
+    try { fuseCandidates(pool, [13], { rrfK: 0 }); } catch { threw = true; }
+    check('invalid fusion options are rejected', threw);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

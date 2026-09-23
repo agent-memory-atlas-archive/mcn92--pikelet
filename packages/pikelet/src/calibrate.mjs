@@ -782,12 +782,10 @@ function aucFor(posRows, negRows) {
   return score / (posRows.length * negRows.length);
 }
 
-// Reciprocal-rank-fusion constant, kept identical to complete/index.mjs's
-// RRF_K so a fit-time fused ranking matches what the reader actually
-// serves. A build-time-only constant drifting from the reader's would
-// make coverage grade a passage the reader would never actually rank
-// first.
-const RRF_K = 60;
+// The fusion rule itself is the reader's own fuseCandidates (imported where
+// fusedTop is built below), so a fit-time fused ranking is the ranking the
+// reader serves; a build-time copy drifting from the reader's would make
+// coverage grade a passage the reader would never actually rank first.
 // The lexical candidate cutoff: only BM25 hits within this fraction of
 // the top score join fusion. Kept in sync with complete/index.mjs's own
 // cutoff for the same reason as RRF_K. Tighter than the reader's original
@@ -892,22 +890,17 @@ export async function calibrateRetrievalAbstention({ Pikelet, chunks, vectors, c
   // ranks far down. Restricted to the retained set so a held-out
   // document's own title can't leak in through BM25 and inflate coverage
   // for a query calibration expects unanswerable.
+  const { fuseCandidates } = await import('pikelet-wasm/complete');
   const fusedTop = (text, vectorHits, excludeSet = null) => {
     if (!lexicalIndex) return vectorHits;
     const lexHits = lexicalIndex.search(text, 5)
       .filter((h) => retainedSet.has(h.id) && !(excludeSet && excludeSet.has(h.id)));
     const cut = lexHits.length ? lexHits[0].score / LEXICAL_CUTOFF : Infinity;
-    const lexRank = new Map(lexHits.filter((h) => h.score >= cut).map((h, i) => [h.id, i]));
-    if (lexRank.size === 0) return vectorHits;
+    const lexicalIds = lexHits.filter((h) => h.score >= cut).map((h) => h.id);
+    if (lexicalIds.length === 0) return vectorHits;
     const byId = new Map(vectorHits.map((h) => [h.id, h]));
-    for (const id of lexRank.keys()) if (!byId.has(id)) byId.set(id, { id, distance: 1 });
-    return [...byId.values()]
-      .map((hit, vRank) => ({
-        hit,
-        score: 1 / (RRF_K + vRank) + (lexRank.has(hit.id) ? 1 / (RRF_K + lexRank.get(hit.id)) : 0),
-      }))
-      .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
-      .map((entry) => entry.hit);
+    for (const id of lexicalIds) if (!byId.has(id)) byId.set(id, { id, distance: 1 });
+    return fuseCandidates([...byId.values()], lexicalIds);
   };
   // A chunk's text starts with its own heading, echoed as the first line
   // (ingest.mjs's section-to-chunk join). Excluding it entirely (the first

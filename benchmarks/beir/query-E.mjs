@@ -30,6 +30,7 @@ import { performance } from 'node:perf_hooks';
 import Pikelet from 'pikelet-wasm';
 import { buildSketchArtifactBytes } from 'pikelet-wasm/artifact';
 import { PikeletSketchArtifact } from 'pikelet-wasm/artifact';
+import { fuseCandidates, FUSION_DEFAULTS } from 'pikelet-wasm/complete';
 import { buildLexicalSegment } from 'pikelet-wasm/complete/builder';
 import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.mjs';
 
@@ -46,7 +47,7 @@ const config = JSON.parse(readFileSync(path.join(__dirname, 'config.json'), 'utf
 
 // Kept identical to complete/index.mjs's constants — a benchmark using its
 // own tuned values would measure a fusion the reader never actually serves.
-const RRF_K = 60;
+const RRF_K = FUSION_DEFAULTS.rrfK; // reported in the run metadata; the rule itself is fuseCandidates
 const LEXICAL_CUTOFF = 1.5;
 const LEXICAL_CANDIDATES = 24;
 
@@ -176,19 +177,9 @@ for (let qi = 0; qi < queries.count; qi++) {
     fullRerankOutput: true,
   })).results;
 
-  let fused;
-  if (lexicalHits.length) {
-    const lexRank = new Map(lexicalHits.map((h, i) => [h.id, i]));
-    fused = searched
-      .map((hit, vRank) => ({
-        hit,
-        score: 1 / (RRF_K + vRank) + (lexRank.has(hit.id) ? 1 / (RRF_K + lexRank.get(hit.id)) : 0),
-      }))
-      .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
-      .map((entry) => entry.hit);
-  } else {
-    fused = searched;
-  }
+  // The reader's own fusion function (complete/fusion.mjs), so the ladder
+  // scores exactly the ranking the reader serves.
+  const fused = fuseCandidates(searched, lexicalHits.map((h) => h.id));
   latencies.push(performance.now() - t0);
 
   results[qid] = fused.slice(0, K).map((h) => ({
