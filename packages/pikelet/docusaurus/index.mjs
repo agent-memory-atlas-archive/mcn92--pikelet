@@ -7,15 +7,23 @@ import { buildSearchAssets, fetchInlineEncoderWeights } from '../src/cli.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// Strip runs of one character from both ends without a regex: `^x+|x+$`
+// patterns backtrack quadratically on long runs of the character, and these
+// two helpers see config-supplied strings (site names, baseUrl).
+function trimChar(value, ch) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === ch) start += 1;
+  while (end > start && value[end - 1] === ch) end -= 1;
+  return value.slice(start, end);
+}
+
 function slugifyName(value) {
-  return String(value || 'docusaurus')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'docusaurus';
+  return trimChar(String(value || 'docusaurus').toLowerCase().replace(/[^a-z0-9]+/g, '-'), '-') || 'docusaurus';
 }
 
 function trimSlashes(value) {
-  return String(value || '').replace(/^\/+|\/+$/g, '');
+  return trimChar(String(value || ''), '/');
 }
 
 function joinSitePath(baseUrl, ...parts) {

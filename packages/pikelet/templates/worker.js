@@ -326,7 +326,14 @@ export default {
           : error instanceof PikeletError && CLIENT_ERROR_CODES.has(error.code)
             ? 400
             : 500;
-      return withCors(jsonResponse({ error: error.message || String(error), code: error.code }, status), env);
+      if (status >= 500) {
+        // Unexpected failures go to the Worker log (wrangler tail), not to the
+        // caller: internal messages can name bundled paths and asset state.
+        console.error('pikelet worker: unhandled error', error);
+        return withCors(jsonResponse({ error: 'Internal server error', code: error?.code }, status), env);
+      }
+      const message = error instanceof Error ? error.message : 'Request failed';
+      return withCors(jsonResponse({ error: message, code: error?.code }, status), env);
     }
   },
 };

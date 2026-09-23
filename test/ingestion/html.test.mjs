@@ -49,7 +49,7 @@ section('html: minified pages with unquoted attributes (nodejs.org style)');
   check('unquoted id attribute becomes the anchor',
     chunks.some((c) => c.anchor === 'fsreadfilesyncpath-options' && /blocking the event loop/.test(c.text)),
     JSON.stringify(chunks.map((c) => c.anchor)));
-  const links = extractLinks(minified, 'https://nodejs.org/api/', 'https://nodejs.org');
-  check('unquoted hrefs are crawlable', links.includes('https://nodejs.org/api/documentation.html') && links.includes('https://nodejs.org/other'),
-    JSON.stringify(links));
+  const links = new Set(extractLinks(minified, 'https://nodejs.org/api/', 'https://nodejs.org'));
+  check('unquoted hrefs are crawlable', links.has('https://nodejs.org/api/documentation.html') && links.has('https://nodejs.org/other'),
+    JSON.stringify([...links]));
 }

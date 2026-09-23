@@ -61,7 +61,10 @@ int main() {
         normalize_cosine(query.data(), queryNormed.data(), dim);
 
         double exactDot = 0, sumQuery = 0;
-        for (size_t d = 0; d < dim; d++) { exactDot += queryNormed[d] * normed[d]; sumQuery += queryNormed[d]; }
+        for (size_t d = 0; d < dim; d++) {
+            exactDot += static_cast<double>(queryNormed[d]) * static_cast<double>(normed[d]);
+            sumQuery += queryNormed[d];
+        }
 
         printf("  {\n");
         printf("    \"inputRow\": [");
