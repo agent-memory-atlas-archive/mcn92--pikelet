@@ -102,7 +102,7 @@
     "build": "node scripts/build-engine.mjs",
     "build:scalar": "node scripts/build-all.mjs --scalar-only",
     "build:all": "node scripts/build-all.mjs",
-    "bench": "node benchmarks/run.js",
+    "bench": "node benchmarks/engine/run.js",
     "demo:data": "node scripts/make-demo-vectors.mjs",
     "demo:veyra": "node examples/05-one-file-search/web/veyra-corpus/fetch-veyra.mjs",
     "demo:veyra:reproduce": "npm run demo:veyra && node examples/05-one-file-search/web/public/reproduce-ablation.mjs",

@@ -28,6 +28,13 @@ first.
 
 ### Changed
 
+- **Benchmarks consolidated under `benchmarks/`**: `bench/beir` →
+  `benchmarks/beir`, `bench/range-proof` → `benchmarks/range-proof`, the
+  engine suite (formerly `benchmarks/`) → `benchmarks/engine`, and the
+  committed release runs (formerly `benchmark_results/release`) →
+  `benchmarks/results`, with raw runs under the ignored
+  `benchmarks/results/raw`. `npm run bench` runs `benchmarks/engine/run.js`.
+  Nothing published changes.
 - **Abstention calibration is fit against a different negative pool.**
   Hard negatives are now ablation pairs (a verified positive's own text,
   scored with its source excluded), entity swaps (a proper noun replaced

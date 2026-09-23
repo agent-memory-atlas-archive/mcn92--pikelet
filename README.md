@@ -242,7 +242,7 @@ These results are more useful because they are not uniformly flattering.
 
 **The largest observed loss is the embedded query encoder on ArguAna**: A→B moves nDCG@10 from 0.3698 to 0.3506, about a 5% relative reduction. Recall@100 actually improves slightly (0.9772→0.9801) — the relevant document is generally still in the candidate set; the degradation is in fine ordering near the top. That limitation isn't hidden: MiniLM is small *because* the goal is to fit the query encoder inside the artifact. It is not state of the art, and the compact implementation is not behaviorally identical to an upstream sentence-transformers runtime on every task.
 
-The benchmark harness, quantization-conformance test, frozen configuration, and raw runs live under `bench/beir/`.
+The benchmark harness, quantization-conformance test, frozen configuration, and raw runs live under `benchmarks/beir/`.
 
 ---
 
@@ -332,7 +332,7 @@ A range-readable artifact cannot hash the entire file on every open without defe
 
 One exception: a lexical (BM25) segment above 8 MiB opens lazily and is covered only by the manifest's whole-segment digest, not per-read like index rows and corpus records — the same transitional stance format-1 sketch rows carry. A pack large enough for this to apply can have its lexical candidates altered between open and a full verification pass without failing a query.
 
-The failure-mode suite (`bench/range-proof/failure-modes.mjs`) exercises the important cases:
+The failure-mode suite (`benchmarks/range-proof/failure-modes.mjs`) exercises the important cases:
 
 ```text
 correct Range server         → mounts, queries successfully
@@ -517,9 +517,9 @@ complete/, pikelet-artifact.js    Readers and builders for the complete
 pikelet/                          CLI, compiler, MCP server, encoder
                                    integration, higher-level tooling
 spec/                             Byte-level artifact contracts
-bench/beir/                       Frozen BEIR ablation harness (encoder,
+benchmarks/beir/                       Frozen BEIR ablation harness (encoder,
                                    quantization, HNSW quality)
-bench/range-proof/                The deliberately boring static-HTTP proof:
+benchmarks/range-proof/                The deliberately boring static-HTTP proof:
                                    dumb-server.mjs, proof.mjs, mcp-proof.mjs,
                                    llm-proof.mjs, failure-modes.mjs
 examples/05-one-file-search/      Large single-artifact search and embedded
@@ -535,9 +535,9 @@ packs/                            Pack hosting and distribution examples
 
 ## Reproduce the proofs
 
-**Range proof** (`bench/range-proof/`) is built around a server that does not understand Pikelet. It checks: static HTTP + Range + Pikelet client = remote semantic retrieval, without a full download. The main script reports artifact size, records, mount bytes/requests, per-query bytes/requests, cache behavior. `failure-modes.mjs` independently exercises Range supported / ignored / tampered bytes / truncated response. `mcp-proof.mjs` and `llm-proof.mjs` use a real MCP client and a real headless Claude process rather than a mocked model response.
+**Range proof** (`benchmarks/range-proof/`) is built around a server that does not understand Pikelet. It checks: static HTTP + Range + Pikelet client = remote semantic retrieval, without a full download. The main script reports artifact size, records, mount bytes/requests, per-query bytes/requests, cache behavior. `failure-modes.mjs` independently exercises Range supported / ignored / tampered bytes / truncated response. `mcp-proof.mjs` and `llm-proof.mjs` use a real MCP client and a real headless Claude process rather than a mocked model response.
 
-**BEIR evaluation** (`bench/beir/`) keeps stages separate so a quality change can be attributed to the component that caused it, plus a standalone conformance fixture checking the JS benchmark path against the actual C++ affine-u8 representation. Don't read the latency columns as a universal native-performance comparison — they measure the benchmark paths under the stated harness. The quality deltas are the important part.
+**BEIR evaluation** (`benchmarks/beir/`) keeps stages separate so a quality change can be attributed to the component that caused it, plus a standalone conformance fixture checking the JS benchmark path against the actual C++ affine-u8 representation. Don't read the latency columns as a universal native-performance comparison — they measure the benchmark paths under the stated harness. The quality deltas are the important part.
 
 ---
 

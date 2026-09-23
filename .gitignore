@@ -17,11 +17,9 @@ Thumbs.db
 *.swo
 *~
 
-# Local benchmark output — only benchmark_results/release/ is committed
+# Raw benchmark runs — only benchmarks/results/ (release artifacts) is committed
 **/benchmark_results/
-!/benchmark_results/
-/benchmark_results/*
-!/benchmark_results/release/
+/benchmarks/results/raw/
 
 # Pre-refactor backups
 .backup/
@@ -148,13 +146,13 @@ examples/legacy/range-artifact-demo/static/dist/
 
 # BEIR benchmark — downloaded datasets, converted records/packs, raw+scored
 # results. Commit the adapter scripts and config.json, not the data.
-bench/beir/cache/
-bench/beir/work/
-bench/beir/results/
+benchmarks/beir/cache/
+benchmarks/beir/work/
+benchmarks/beir/results/
 # Exported Arctic-XS weight blob + vocab (export_encoder_blob.py) — same
 # convention as examples/05-one-file-search/encoder-spike/real/: a locally
 # regenerable export, not source.
-bench/beir/arctic-xs/
+benchmarks/beir/arctic-xs/
 
 # Downloaded Veyra demo release assets (npm run demo:veyra). Already covered
 # by the *.pikelet rule in examples/05-one-file-search/.gitignore; restated
