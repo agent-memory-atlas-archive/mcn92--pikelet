@@ -20,8 +20,8 @@
 
 export const FUSION_DEFAULTS = Object.freeze({
     rrfK: 60,
-    lexicalWeight: 1,
-    guardMargin: 0,
+    lexicalWeight: 0.5,
+    guardMargin: 0.05,
 });
 
 /**

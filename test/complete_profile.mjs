@@ -1175,19 +1175,30 @@ console.log('\nD. lexical segment and hybrid retrieval');
         { id: 13, distance: 0.40 }, { id: 14, distance: 0.50 },
     ];
     const ids = (hits) => hits.map((h) => h.id);
-    check('defaults are K=60, weight 1, guard off', FUSION_DEFAULTS.rrfK === 60 && FUSION_DEFAULTS.lexicalWeight === 1 && FUSION_DEFAULTS.guardMargin === 0);
+    // Plain RRF (weight 1, no guard) for the arithmetic checks; the shipped
+    // defaults are checked separately below.
+    const plain = { lexicalWeight: 1, guardMargin: 0 };
+    check('defaults are K=60, lexical weight 0.5, guard margin 0.05', FUSION_DEFAULTS.rrfK === 60 && FUSION_DEFAULTS.lexicalWeight === 0.5 && FUSION_DEFAULTS.guardMargin === 0.05);
     check('no lexical hits: vector order, as a copy', JSON.stringify(ids(fuseCandidates(pool, []))) === JSON.stringify([10, 11, 12, 13, 14]) && fuseCandidates(pool, []) !== pool);
-    // 1/(60+3) + 1/60 > 1/60: a record in both lists outranks a vector-only rank 1.
-    check('RRF: a record in both lists outranks a vector-only top hit', ids(fuseCandidates(pool, [13]))[0] === 13);
-    check('RRF: lexical order breaks ties among lexical hits', JSON.stringify(ids(fuseCandidates(pool, [12, 11])).slice(0, 2)) === JSON.stringify([12, 11]));
-    check('RRF returns the same hit objects', fuseCandidates(pool, [13])[0] === pool[3]);
+    // 1/(60+3) + 1/60 > 1/60: under plain RRF a record in both lists outranks a vector-only rank 1.
+    check('plain RRF: a record in both lists outranks a vector-only top hit', ids(fuseCandidates(pool, [13], plain))[0] === 13);
+    check('plain RRF: lexical order breaks ties among lexical hits', JSON.stringify(ids(fuseCandidates(pool, [12, 11], plain)).slice(0, 2)) === JSON.stringify([12, 11]));
+    check('RRF returns the same hit objects', fuseCandidates(pool, [13], plain)[0] === pool[3]);
     check('lexicalWeight 0 restores vector order', JSON.stringify(ids(fuseCandidates(pool, [13, 14], { lexicalWeight: 0 }))) === JSON.stringify([10, 11, 12, 13, 14]));
-    check('a lexical id missing from the pool is ignored', ids(fuseCandidates(pool, [99, 13]))[0] === 13);
-    check('duplicate lexical ids keep their first rank', JSON.stringify(ids(fuseCandidates(pool, [13, 13, 11])).slice(0, 2)) === JSON.stringify([13, 11]));
+    check('a lexical id missing from the pool is ignored', ids(fuseCandidates(pool, [99, 13], plain))[0] === 13);
+    check('duplicate lexical ids keep their first rank', JSON.stringify(ids(fuseCandidates(pool, [13, 13, 11], plain)).slice(0, 2)) === JSON.stringify([13, 11]));
+    // Shipped defaults on the same pool: the guard fires (top-1 leads by 50%),
+    // and with weight 0.5 the lexical hit still moves up to rank 2:
+    // 1/63 + 0.5/60 = 0.0242 > 1/61 = 0.0164.
+    check('defaults: guard keeps the vector top-1, the lexical hit takes rank 2', JSON.stringify(ids(fuseCandidates(pool, [13])).slice(0, 3)) === JSON.stringify([10, 13, 11]));
+    // Close top-2 (0.30 vs 0.31 -> 3%): the guard does not fire, so with
+    // weight 0.5 a vector rank-1 still loses to a record in both lists.
+    const close = pool.slice(1);
+    check('defaults: below the margin a both-list record still outranks a vector-only top hit', ids(fuseCandidates(close, [13]))[0] === 13);
     // Guard: top-1 leads top-2 by (0.30-0.20)/0.20 = 50%.
-    check('guard keeps the vector top-1 first when its margin clears the threshold', ids(fuseCandidates(pool, [13], { guardMargin: 0.05 }))[0] === 10);
-    check('guard leaves the fused order intact below it', JSON.stringify(ids(fuseCandidates(pool, [13], { guardMargin: 0.05 })).slice(1, 3)) === JSON.stringify([13, 11]));
-    check('guard does not fire when the margin is below the threshold', ids(fuseCandidates(pool, [13], { guardMargin: 0.60 }))[0] === 13);
+    check('guard keeps the vector top-1 first when its margin clears the threshold', ids(fuseCandidates(pool, [13], { lexicalWeight: 1, guardMargin: 0.05 }))[0] === 10);
+    check('guard leaves the fused order intact below it', JSON.stringify(ids(fuseCandidates(pool, [13], { lexicalWeight: 1, guardMargin: 0.05 })).slice(1, 3)) === JSON.stringify([13, 11]));
+    check('guard does not fire when the margin is below the threshold', ids(fuseCandidates(pool, [13], { lexicalWeight: 1, guardMargin: 0.60 }))[0] === 13);
     check('guard does not fire on a single-hit pool', ids(fuseCandidates([pool[0]], [10], { guardMargin: 0.05 }))[0] === 10);
     let threw = false;
     try { fuseCandidates(pool, [13], { rrfK: 0 }); } catch { threw = true; }

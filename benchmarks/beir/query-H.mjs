@@ -21,6 +21,7 @@ import { performance } from 'node:perf_hooks';
 import Pikelet from 'pikelet-wasm';
 import { buildSketchArtifactBytes } from 'pikelet-wasm/artifact';
 import { PikeletSketchArtifact } from 'pikelet-wasm/artifact';
+import { fuseCandidates, FUSION_DEFAULTS } from 'pikelet-wasm/complete';
 import { buildLexicalSegment } from 'pikelet-wasm/complete/builder';
 import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.mjs';
 
@@ -35,7 +36,7 @@ const workDir = path.join(__dirname, 'work', dataset);
 const cacheDir = path.join(__dirname, 'cache', dataset);
 const config = JSON.parse(readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
 
-const RRF_K = 60;
+const RRF_K = FUSION_DEFAULTS.rrfK; // reported in the run metadata; the rule itself is fuseCandidates
 const LEXICAL_CUTOFF = 1.5;
 const LEXICAL_CANDIDATES = 24;
 
@@ -155,22 +156,13 @@ for (let qi = 0; qi < queries.count; qi++) {
     fullRerankOutput: true,
   })).results;
 
-  let fused;
-  if (lexicalHits.length) {
-    const lexRank = new Map(lexicalHits.map((h, i) => [h.id, i]));
-    fused = searched
-      .map((hit, vRank) => ({
-        hit,
-        score: 1 / (RRF_K + vRank) + (lexRank.has(hit.id) ? 1 / (RRF_K + lexRank.get(hit.id)) : 0),
-      }))
-      .sort((a, b) => (b.score - a.score) || (a.hit.distance - b.hit.distance))
-      .map((entry) => entry.hit);
-  } else {
-    fused = searched;
-  }
+  // The reader's own fusion function (complete/fusion.mjs).
+  const fused = fuseCandidates(searched, lexicalHits.map((h) => h.id));
   latencies.push(performance.now() - t0);
 
-  results[qid] = fused.slice(0, K).map((h) => ({ score: 1 - h.distance, beirId: corpus.ids[h.id] }));
+  // pytrec_eval ranks by score, so the score must encode the FUSED rank
+  // (1 - distance would score this run in vector order, as dense-only G).
+  results[qid] = fused.slice(0, K).map((h, rank) => ({ score: K - rank, distance: h.distance, beirId: corpus.ids[h.id] }));
 }
 
 latencies.sort((a, b) => a - b);

@@ -182,8 +182,12 @@ for (let qi = 0; qi < queries.count; qi++) {
   const fused = fuseCandidates(searched, lexicalHits.map((h) => h.id));
   latencies.push(performance.now() - t0);
 
-  results[qid] = fused.slice(0, K).map((h) => ({
-    score: 1 - h.distance,
+  // pytrec_eval ranks by score, so the score must encode the FUSED rank:
+  // writing 1 - distance here (as the vector-only configurations do) had
+  // this run scored in vector order, i.e. as 'augmented', not hybrid.
+  results[qid] = fused.slice(0, K).map((h, rank) => ({
+    score: K - rank,
+    distance: h.distance,
     beirId: corpus.ids[h.id],
   }));
 }

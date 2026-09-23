@@ -108,8 +108,26 @@ first.
   the reader, the calibrator (`calibrate.mjs`, which fits coverage on the
   fused top passage) and the BEIR ladder (`query-E.mjs`) all call, instead
   of three copies of the arithmetic. It takes `{ rrfK, lexicalWeight,
-  guardMargin }`; the defaults (60, 1, 0) reproduce the previous behavior
-  exactly.
+  guardMargin }`.
+- **Hybrid fusion weights the lexical rank at 0.5 and keeps a confident
+  vector top-1 in place.** `FUSION_DEFAULTS` is now `{ rrfK: 60,
+  lexicalWeight: 0.5, guardMargin: 0.05 }`: the BM25 rank term counts half
+  as much as the vector rank term, and when the vector top-1 leads the
+  top-2 by at least 5% of its own distance it keeps rank 1 regardless of
+  fusion. Under equal weights any record present in both lists outranked a
+  vector-only rank 1 (`1/(60+v) + 1/(60+l) > 1/60` for every finite `v`),
+  so a query whose terms match many chunks — a character's name in a
+  novel — filled the top ranks with term matches and buried the passage
+  the encoder placed first. Measured with the evidence-rank report and the
+  fusion simulator (`test/relevance/README.md`): evidence in the top 3 on
+  Pride & Prejudice 36 → 42 of 157 direct questions, internal-docs
+  paraphrases 19 → 21 of 24, Veyra direct 19 → 20 of 20 and multihop
+  17 → 18 of 20; BEIR E by fused rank scifact nDCG@10 0.694 → 0.699
+  (recall@10 0.827 → 0.853), nfcorpus 0.3345 → 0.3359, arguana unchanged.
+  Verdicts on packs calibrated under the old rule move the same way (false
+  answers: internal-docs 10 → 9, Pride & Prejudice 74 → 66, Veyra 13 → 13);
+  a Veyra pack recalibrated under the new rule fits at cvAUC 0.890 (was
+  0.870). Packs need no rebuild to get the new ranking.
 ### Fixed
 
 - **Engine constructors validate their configuration.** `pikelet_init`
