@@ -29,8 +29,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import os from 'node:os';
-import { embedChunksWithInlineTransformer } from '../../pikelet/src/embed.mjs';
-import { inlineEncoderDeclaration } from '../../pikelet/src/complete-build.mjs';
+import { embedChunksWithInlineTransformer } from '../../packages/pikelet/src/embed.mjs';
+import { inlineEncoderDeclaration } from '../../packages/pikelet/src/complete-build.mjs';
 import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/complete/inline-transformer.mjs';
 import createEncoder from '../../complete/encoder-kernels/encoder.node.mjs';
 

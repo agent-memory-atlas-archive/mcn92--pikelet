@@ -3,7 +3,7 @@
     "veyra-demo": {
       "command": "node",
       "args": [
-        "pikelet/bin/pikelet.mjs",
+        "packages/pikelet/bin/pikelet.mjs",
         "mcp",
         "--pack",
         "examples/one-file-search/web/public/veyra.pikelet",

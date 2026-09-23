@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CPS = path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs');
+const CPS = path.resolve(here, '..', '..', 'packages', 'pikelet', 'src', 'ingest.mjs');
 const { extractByExtension, chunkDocs, applySourceRoutes, tokenize } = await import(pathToFileURL(CPS).href);
 
 export function pipeline(file, { routePrefix = 'docs', targetTokens = 256 } = {}) {

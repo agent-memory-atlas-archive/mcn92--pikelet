@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CPS = path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs');
+const CPS = path.resolve(here, '..', '..', 'packages', 'pikelet', 'src', 'ingest.mjs');
 const { extractHtml, chunkDocs } = await import(pathToFileURL(CPS).href);
 
 section('html: page.html (id attributes, fallback slugs, chrome stripping)');

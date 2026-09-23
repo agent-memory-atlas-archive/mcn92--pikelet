@@ -20,7 +20,7 @@ import { check, section } from './harness.mjs';
 import { pipeline } from './markdown.test.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CPS = path.resolve(here, '..', '..', 'pikelet', 'src', 'ingest.mjs');
+const CPS = path.resolve(here, '..', '..', 'packages', 'pikelet', 'src', 'ingest.mjs');
 const { extractMarkdown } = await import(pathToFileURL(CPS).href);
 
 const KNOWN_DIVERGENCES = new Map([

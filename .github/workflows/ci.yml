@@ -130,6 +130,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
+      # Root install first: it creates the workspace links (node_modules/pikelet,
+      # node_modules/pikelet-wasm) that the docs-site's file: copies of the
+      # packages resolve pikelet-wasm through.
+      - run: npm ci
       - run: npm ci
         working-directory: docs-site
       - run: npm run build

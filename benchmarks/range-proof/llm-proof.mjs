@@ -32,7 +32,7 @@ import { startDumbServer } from './dumb-server.mjs';
 import { openPikeletFile } from 'pikelet-wasm/complete';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const PIKELET_BIN = path.join(ROOT, 'pikelet/bin/pikelet.mjs');
+const PIKELET_BIN = path.join(ROOT, 'packages/pikelet/bin/pikelet.mjs');
 const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'examples/one-file-search/pancake-wiki-inline.pancake'));
 const packDir = path.dirname(packPath);
 const packFile = path.basename(packPath);
