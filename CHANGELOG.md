@@ -125,6 +125,23 @@ first.
   the result heap never evicts. The range reader rejects the record at
   decode and the sketch reader rejects the table wherever it adopts it,
   both with `SNAPSHOT_INVALID`.
+- **`stripMarkdown` no longer backtracks quadratically on backtick runs.**
+  The fenced-block and inline-code regexes took seconds to minutes on a
+  line of 40k backticks (each candidate fence length re-scanned the rest
+  of the document; each suffix of an inline run was retried). Both are
+  replaced by linear scanners with CommonMark's rules: a fence closes on
+  the first later fence line of the same character at least as long, an
+  unclosed fence runs to the end of the document, and an inline span of N
+  backticks closes on the next run of exactly N on the same line, may
+  contain runs of other lengths (`` ``a ` b`` ``), and drops one padding
+  space from each end. Under the old regexes a shorter closing fence or
+  an unclosed one left the block as prose.
+- **Folder ingestion reports what it skips and caps file size.** The walk
+  skipped symlinked files and directories silently (Dirents carry lstat
+  semantics); it now logs `warn: skipped symlink <path>` for each. Files
+  over 16 MiB are skipped with a warning naming the path and the limit
+  instead of being read whole into the build, matching the crawl path's
+  body cap.
 - **Generated Workers no longer echo internal error messages on 5xx.**
   The `pikelet` scaffold's `worker.js` / `worker.artifact.js` templates
   returned `error.message` for every failure, including unexpected ones,

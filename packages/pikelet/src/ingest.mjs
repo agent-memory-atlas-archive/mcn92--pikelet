@@ -7,16 +7,25 @@ import path from 'node:path';
 import { CliError } from './common.mjs';
 
 const MAX_CRAWL_BODY_BYTES = 2 * 1024 * 1024;
+// Per-file ceiling for folder sources, the counterpart of the crawl cap: a
+// misclassified asset or a generated dump in the source tree is skipped with
+// a warning instead of being read whole into the single-threaded build.
+const MAX_SOURCE_FILE_BYTES = 16 * 1024 * 1024;
 async function ingestFolder(root, source, log) {
   const docs = [];
   if (!fssync.existsSync(root)) {
     throw new CliError(`Source folder not found: ${root}\nNext: check --source or source.path in pikelet.config.json.`, 1);
   }
-  const files = await walk(root);
+  const files = await walk(root, log);
   for (const file of files) {
     const rel = path.relative(root, file).split(path.sep).join('/');
     if (!matchesSource(rel, source)) continue;
     try {
+      const { size } = await fs.stat(file);
+      if (size > MAX_SOURCE_FILE_BYTES) {
+        log(`warn: skipped ${rel}: ${size} bytes exceeds the ${MAX_SOURCE_FILE_BYTES}-byte per-file limit`);
+        continue;
+      }
       const text = await fs.readFile(file, 'utf8');
       const extracted = extractByExtension(text, file);
       if (extracted.text.trim()) docs.push({ id: docs.length, sourcePath: rel, title: extracted.title || path.basename(file), slug: extracted.slug || null, text: extracted.text, sections: extracted.sections });
@@ -27,18 +36,23 @@ async function ingestFolder(root, source, log) {
   return docs;
 }
 
-async function walk(root) {
+async function walk(root, log, dir = root) {
   const out = [];
   let entries;
   try {
-    entries = await fs.readdir(root, { withFileTypes: true });
+    entries = await fs.readdir(dir, { withFileTypes: true });
   } catch (error) {
-    throw new CliError(`Unable to read source folder ${root}: ${error.message}`, 1);
+    throw new CliError(`Unable to read source folder ${dir}: ${error.message}`, 1);
   }
   for (const entry of entries) {
-    const full = path.join(root, entry.name);
-    if (entry.isDirectory()) out.push(...await walk(full));
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...await walk(root, log, full));
     else if (entry.isFile()) out.push(full);
+    // Dirents carry lstat semantics, so a symlink is neither a file nor a
+    // directory here. Links are not followed (a link out of the tree or a
+    // cycle would otherwise be walked), but the skip is reported like every
+    // other skip in this path instead of silently dropping the content.
+    else if (entry.isSymbolicLink()) log(`warn: skipped symlink ${path.relative(root, full).split(path.sep).join('/')} (symlinks are not followed)`);
   }
   return out;
 }
@@ -504,6 +518,98 @@ function extractLinks(html, baseHref, origin) {
   return links;
 }
 
+// A fence line: optional indent, then three or more of one fence character.
+// Returns the character, the run length, and whatever follows the run.
+function fenceRun(line) {
+  let p = 0;
+  while (p < line.length && (line[p] === ' ' || line[p] === '\t')) p += 1;
+  const ch = line[p];
+  if (ch !== '`' && ch !== '~') return null;
+  let len = 0;
+  while (p + len < line.length && line[p + len] === ch) len += 1;
+  if (len < 3) return null;
+  return { ch, len, rest: line.slice(p + len) };
+}
+
+// Fenced code blocks, CommonMark-style: an opening fence line is closed by
+// the first later line holding only a fence of the same character at least
+// as long; an unclosed fence runs to the end of the document. Each line is
+// visited once, so the cost is linear. The regex this replaces
+// (`^(\`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\2$`) re-scanned the rest of the
+// document for every candidate fence length, which on a line of N backticks
+// with no closer cost N full passes.
+function protectFences(src, keep) {
+  const lines = src.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const open = fenceRun(lines[i]);
+    if (!open) {
+      out.push(lines[i]);
+      continue;
+    }
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      const close = fenceRun(lines[j]);
+      if (close && close.ch === open.ch && close.len >= open.len && close.rest.trim() === '') break;
+    }
+    out.push(keep(`\n${lines.slice(i + 1, j).join('\n')}\n`));
+    i = j;
+  }
+  return out.join('\n');
+}
+
+// Inline code spans, CommonMark-style: a run of N backticks is closed by
+// the next run of exactly N backticks on the same line, and the body may
+// hold runs of other lengths (``a ` b`` is how a backtick is quoted). A run
+// with no such closer is literal text and scanning resumes right after it.
+// The regex this replaces (`(\`+)([^\`\n]+?)\1`) backtracked through every
+// suffix of a long backtick run, which was quadratic; here a run is
+// scanned at most once as an opener and once as a candidate closer.
+function protectInlineCode(src, keep) {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const open = src.indexOf('`', i);
+    if (open < 0) {
+      out += src.slice(i);
+      break;
+    }
+    out += src.slice(i, open);
+    let openLen = 0;
+    while (open + openLen < n && src[open + openLen] === '`') openLen += 1;
+    const bodyStart = open + openLen;
+    let close = -1;
+    for (let k = bodyStart; k < n && src[k] !== '\n';) {
+      if (src[k] !== '`') {
+        k += 1;
+        continue;
+      }
+      let runLen = 0;
+      while (k + runLen < n && src[k + runLen] === '`') runLen += 1;
+      if (runLen === openLen) {
+        close = k;
+        break;
+      }
+      k += runLen;
+    }
+    if (close < 0) {
+      out += src.slice(open, bodyStart);
+      i = bodyStart;
+      continue;
+    }
+    // CommonMark strips one space from each end when both are present and
+    // the body is not all spaces (`` ` `` is how a backtick is written).
+    let body = src.slice(bodyStart, close);
+    if (body.length >= 2 && body[0] === ' ' && body[body.length - 1] === ' ' && body.trim() !== '') {
+      body = body.slice(1, -1);
+    }
+    out += keep(body);
+    i = close + openLen;
+  }
+  return out;
+}
+
 // Markdown syntax is removed by position, never by deleting characters
 // globally: hyphens, minus signs, underscores in identifiers, and
 // comparison operators are content the record must carry verbatim.
@@ -515,11 +621,9 @@ function stripMarkdown(text) {
   const stash = [];
   const keep = (s) => ` ${stash.push(s) - 1} `;
 
-  let out = src
-    // 1. Protect code first. Fenced blocks keep their body byte-for-byte;
-    //    inline spans keep their contents.
-    .replace(/^([ \t]*)(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n[ \t]*\2[ \t]*$/gm, (_, indent, fence, body) => keep(`\n${body}\n`))
-    .replace(/(`+)([^`\n]+?)\1/g, (_, ticks, body) => keep(body))
+  // 1. Protect code first, with the linear scanners below. Fenced blocks
+  //    keep their body byte-for-byte; inline spans keep their contents.
+  let out = protectInlineCode(protectFences(src, keep), keep)
     // 2. Images and links: keep alt/link text, drop the URL.
     .replace(/!\[([^\]]*)]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
