@@ -77,7 +77,7 @@ const POSITIONAL_ARGS = parsedArgs.args.filter((arg, idx, arr) => {
   return true;
 });
 
-const DBPEDIA_DIR = POSITIONAL_ARGS[0] || path.join(__dirname, '..', 'dbpedia');
+const DBPEDIA_DIR = POSITIONAL_ARGS[0] || path.join(__dirname, '..', '..', 'dbpedia');
 const N_BASE = getArg('count', 50_000);
 const N_QUERIES = 1_000;
 const K = 10;

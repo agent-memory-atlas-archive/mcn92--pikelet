@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/complete/inline-transformer.mjs';
-import createEncoder from '../../complete/encoder-kernels/encoder.node.mjs';
+import createEncoder from '../../packages/pikelet-wasm/complete/encoder-kernels/encoder.node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataset = process.argv[2];

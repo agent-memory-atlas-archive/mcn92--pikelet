@@ -45,7 +45,7 @@ const POSITIONAL_ARGS = parsedArgs.args.filter((arg, idx, arr) => {
   if (idx > 0 && arr[idx - 1] === '--count') return false;
   return true;
 });
-const DBPEDIA_DIR = POSITIONAL_ARGS[0] || path.join(__dirname, '..', 'dbpedia');
+const DBPEDIA_DIR = POSITIONAL_ARGS[0] || path.join(__dirname, '..', '..', 'dbpedia');
 const REGENERATE_GT = parsedArgs.args.includes('--regenerate-gt');
 
 // --- Config ---

@@ -775,7 +775,7 @@ async function buildSnapshot(snapshotPath, dataDir, count, opts) {
 }
 
 async function main() {
-  const dataDir = path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift')));
+  const dataDir = path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift')));
   const snapshotPath = path.resolve(arg('snapshot', arg('build-snapshot', '/tmp/pikelet-sift1m-u8.pnck')));
   const count = parseIntArg('count', 1000000);
   const queries = parseIntArg('queries', 1000);

@@ -64,12 +64,12 @@ function getStrArg(name, def) {
 const DATASETS = {
   nytimes: {
     label: 'NYTimes-256',
-    file: path.join(__dirname, '..', 'nytimes', 'nytimes-256-angular.hdf5'),
+    file: path.join(__dirname, '..', '..', 'nytimes', 'nytimes-256-angular.hdf5'),
     url: 'http://ann-benchmarks.com/nytimes-256-angular.hdf5',
   },
   glove: {
     label: 'GloVe-100',
-    file: path.join(__dirname, '..', 'glove', 'glove-100-angular.hdf5'),
+    file: path.join(__dirname, '..', '..', 'glove', 'glove-100-angular.hdf5'),
     url: 'http://ann-benchmarks.com/glove-100-angular.hdf5',
   },
 };

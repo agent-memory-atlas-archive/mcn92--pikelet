@@ -18,7 +18,7 @@ const { parseBenchmarkArgs } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
 
-const NYTIMES_DIR = parsedArgs.args[0] || path.join(__dirname, '..', 'nytimes');
+const NYTIMES_DIR = parsedArgs.args[0] || path.join(__dirname, '..', '..', 'nytimes');
 const RESULTS_DIR = path.join(__dirname, '..', 'results', 'raw');
 if (!fs.existsSync(RESULTS_DIR)) fs.mkdirSync(RESULTS_DIR);
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');

@@ -1086,6 +1086,87 @@ console.log('\nD. lexical segment and hybrid retrieval');
         /sketchScanner must be false/);
 }
 
+{
+    // --- automatic scanner staging (no sketchScanner option) ---
+    // In Node the reader stages the engine scanner by itself once the sketch
+    // holds SCANNER_AUTO_CELLS (16 Mi) cells. That path imports the Node
+    // engine entrypoint by a relative path the injected-factory tests above
+    // never exercise, and its failures are swallowed by design, so a broken
+    // import shows up only as every large pack quietly using the JS scan.
+    const small = await openPikeletFile(memorySource(A.bytes), { encodeQuery: hostEncode });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    check('a pack below the auto threshold stays on the JS scan', small.info().residentScan === 'js');
+    await small.close();
+
+    const BIG_DIM = 256;
+    const BIG_COUNT = (16 * 1024 * 1024) / BIG_DIM; // exactly SCANNER_AUTO_CELLS cells
+    const bigEncode = (text) => {
+        const rand = mulberry32(fnv1a(text));
+        const v = new Float32Array(BIG_DIM);
+        let n = 0;
+        for (let d = 0; d < BIG_DIM; d++) { const x = rand() * 2 - 1; v[d] = x; n += x * x; }
+        n = 1 / Math.sqrt(n);
+        for (let d = 0; d < BIG_DIM; d++) v[d] *= n;
+        return v;
+    };
+    // Rows are unit vectors like the small pack's (random bytes would leave
+    // most cosine distances clamped at 0 and both scans tie-breaking by id).
+    const qdata = new Uint8Array(BIG_COUNT * BIG_DIM);
+    const scales = new Float32Array(BIG_COUNT);
+    const offsets = new Float32Array(BIG_COUNT);
+    for (let i = 0; i < BIG_COUNT; i++) {
+        const v = bigEncode(`r ${i}`);
+        let mn = Infinity, mx = -Infinity;
+        for (let d = 0; d < BIG_DIM; d++) { if (v[d] < mn) mn = v[d]; if (v[d] > mx) mx = v[d]; }
+        const s = (mx - mn) / 255 || 1e-12;
+        scales[i] = s; offsets[i] = mn;
+        for (let d = 0; d < BIG_DIM; d++) {
+            const b = Math.round((v[d] - mn) / s);
+            qdata[i * BIG_DIM + d] = b < 0 ? 0 : b > 255 ? 255 : b;
+        }
+    }
+    const bigSketchPath = path.join(tmp, 'big.pikelet-sketch');
+    exportSketchArtifact({ dim: BIG_DIM, count: BIG_COUNT, metric: 1, qdata, scales, offsets }, bigSketchPath,
+        { sketchDims: BIG_DIM, sketchBits: 8, recommendedRerank: 40 });
+    const bigRecords = Array.from({ length: BIG_COUNT }, (_, i) => Buffer.from(`{"title":"r${i}","text":"r${i}"}`, 'utf8'));
+    const bigCorpus = buildCorpusSegment(bigRecords, { pageRecords: 1024 });
+    const bigDeclaration = {
+        kind: 'external-transformers-v1', model: 'test/deterministic-hash-encoder', dim: BIG_DIM, pooling: 'none', normalized: true, maxTokens: 64,
+        testVectors: ['r 1', 'r 4242'].map((text) => ({ text, embedding: Array.from(bigEncode(text), (v) => Number(v.toFixed(6))), tolerance: 1e-3 })),
+    };
+    const bigPath = path.join(tmp, 'big.pikelet');
+    assemblePikeletFile({
+        profile: PROFILE_V2,
+        corpus: { ...bigCorpus.corpus, provenance: null },
+        dim: BIG_DIM,
+        metric: 'cosine',
+        encoder: { kind: bigDeclaration.kind, model: bigDeclaration.model },
+        recommendedRerank: 40,
+    }, [
+        { kind: 'index', bytes: fs.readFileSync(bigSketchPath) },
+        { kind: 'corpus', bytes: bigCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify(bigDeclaration), 'utf8'), CALIBRATION) },
+    ], bigPath);
+    const bigBytes = fs.readFileSync(bigPath);
+
+    const auto = await openPikeletFile(memorySource(bigBytes), { encodeQuery: bigEncode });
+    check('the big pack reports the auto threshold geometry', auto.info().records === BIG_COUNT, `records ${auto.info().records}`);
+    for (let i = 0; i < 400 && auto.info().residentScan !== 'engine'; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    check('a pack at the auto threshold stages the engine scanner by itself (residentScan engine)',
+        auto.info().residentScan === 'engine', `residentScan ${auto.info().residentScan}`);
+    const jsBig = await openPikeletFile(memorySource(bigBytes), { encodeQuery: bigEncode, sketchScanner: false });
+    const viaAuto = await auto.query('r 4242', { k: 5 });
+    const viaJs = await jsBig.query('r 4242', { k: 5 });
+    check('auto-staged scanner finds the record behind the query', viaAuto.results[0]?.id === 4242, `top ${viaAuto.results[0]?.id}`);
+    check('auto-staged scanner matches the JS scan',
+        JSON.stringify(viaAuto.results.map((r) => [r.id, r.distance])) === JSON.stringify(viaJs.results.map((r) => [r.id, r.distance])),
+        `engine ${JSON.stringify(viaAuto.results.map((r) => r.id))} vs js ${JSON.stringify(viaJs.results.map((r) => r.id))}`);
+    await auto.close();
+    await jsBig.close();
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nComplete-profile reader conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

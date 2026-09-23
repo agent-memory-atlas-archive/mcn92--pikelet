@@ -18,13 +18,13 @@ const DIMS = 1536;
 const K = 10;
 const MAX_ELEM = 11_000;
 const QUERY_COUNT = 100;
-const FVECS_PATH = path.join(__dirname, '..', 'dbpedia', 'dbpedia_base_5k.fvecs');
+const FVECS_PATH = path.join(__dirname, '..', '..', 'dbpedia', 'dbpedia_base_5k.fvecs');
 const M = resolveSingleValue(parsedArgs.m, 12);
 const EF_CONSTRUCTION = resolveSingleValue(parsedArgs.efConstruction, 150);
 const EF_SEARCH = resolveSingleValue(parsedArgs.efSearch, 250);
 
 async function loadPikelet() {
-    const mod = await import(pathToFileURL(path.join(__dirname, '..', 'pikelet.node.mjs')).href);
+    const mod = await import(pathToFileURL(path.join(__dirname, '..', '..', 'packages', 'pikelet-wasm', 'src', 'pikelet.node.mjs')).href);
     return mod.default;
 }
 

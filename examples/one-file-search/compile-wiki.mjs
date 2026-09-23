@@ -83,7 +83,7 @@ async function buildInlineQueryInterp(packManifest) {
     // this very kernel+blob, so readers can prove theirs matches.
     const { createInlineTransformerEmbedder, buildInlineTestVectors } =
         await import('../../packages/pikelet-wasm/complete/inline-transformer.mjs');
-    const createEncoder = (await import('../../complete/encoder-kernels/encoder.node.mjs')).default;
+    const createEncoder = (await import('../../packages/pikelet-wasm/complete/encoder-kernels/encoder.node.mjs')).default;
     const embedder = await createInlineTransformerEmbedder({
         declaration: declarationFields,
         vocabText: vocab.toString('utf8'),

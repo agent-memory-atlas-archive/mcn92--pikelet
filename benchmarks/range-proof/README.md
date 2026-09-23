@@ -65,7 +65,7 @@ node benchmarks/range-proof/mcp-proof.mjs [path/to/pack.pikelet]
 ```
 
 The other half of the demo: mounts the pack over HTTP into the *real*
-`pikelet mcp` server (`pikelet/bin/pikelet.mjs mcp <url>#<sha256>`) as a
+`pikelet mcp` server (`packages/pikelet/bin/pikelet.mjs mcp <url>#<sha256>`) as a
 subprocess, then drives it as an actual MCP client would — JSON-RPC 2.0
 over stdio (`initialize`, `tools/list`, `tools/call` with `list_packs` and
 `search`) — exactly what an agent framework's LLM tool caller does, not a

@@ -94,7 +94,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=pathlib.Path,
-        default=pathlib.Path("benchmarks/ann_benchmarks/local_results"),
+        default=pathlib.Path("benchmarks/engine/ann_benchmarks/local_results"),
         help="Directory for the combined table and generated plots.",
     )
     parser.add_argument("--x-axis", default="k-nn", help="Pareto plot x-axis metric.")

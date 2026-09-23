@@ -198,8 +198,7 @@ let a weak signal disturb a strong one. This ladder does not yet include a
 dataset where the two rankings meaningfully disagree at the top (that would
 be the interesting case to add next — a corpus with real known-item/keyword
 lookups, closer to what surfaced the calibration-side lexical blind spot;
-see `pikelet/src/calibrate.mjs`'s `fusedTop`/`LEXICAL_CUTOFF` and the
-`calibration-lexical-blindspot-2026-09-11` memory).
+see `packages/pikelet/src/calibrate.mjs`'s `fusedTop`/`LEXICAL_CUTOFF`).
 
 **`config.json`'s `hybridWeight: 0.35` field is stale/unused dead config.**
 Production's RRF (`complete/index.mjs`) has no weight term — it's an
@@ -235,8 +234,7 @@ expect the same effect size.
 
 **Mixed, dataset-dependent — not a clean win.** Comparing G/H (Arctic-XS)
 against D/E (MiniLM), the same encoder swap that helped at ~2800-record real
-Wikipedia scale (see the `calibration-lexical-blindspot-2026-09-11` memory:
-Arctic-XS "rescued" 16/18 false-abstention cases there, but by sidestepping
+Wikipedia scale (there Arctic-XS "rescued" 16/18 false-abstention cases, but by sidestepping
 a calibration blind spot, not by being a better encoder in general) does not
 reproduce as a general win here:
 
@@ -293,7 +291,7 @@ sequential loop through the raw kernel (one `embed()` call at a time,
 no parallelism) — the wrong comparison, since it measured Pikelet's
 *fallback* single-threaded path, not what `pikelet compile` actually does.
 `encode-pikelet.mjs` now calls `embedChunksWithInlineTransformer` from
-`pikelet/src/embed.mjs` directly — the same function the CLI uses — which
+`packages/pikelet/src/embed.mjs` directly — the same function the CLI uses — which
 dispatches to a `worker_threads` pool once a corpus exceeds 32 chunks.
 
 Measured on this 8-core machine (`work/<dataset>/encode-pikelet.json`):

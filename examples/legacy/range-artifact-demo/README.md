@@ -29,7 +29,7 @@ the comparison is the graph's frontier against the sketch's single point:
 
 ```bash
 node examples/legacy/range-artifact-demo/sketch_demo.js --compact \
-  --artifact benchmark_results/layout/pancake-sift1m-u8-metis-split.pikelet-range \
+  --artifact benchmarks/results/raw/layout/pancake-sift1m-u8-metis-split.pikelet-range \
   --query-file sift/sift_query.fvecs --gt-file sift/sift_groundtruth.ivecs \
   --rerank 300 --ef-search 60 --range-sweep --queries 100
 ```
@@ -72,7 +72,7 @@ For full JSON output:
 
 ```bash
 node examples/legacy/range-artifact-demo/demo.js \
-  --artifact benchmark_results/layout/pancake-sift1m-u8-metis-split.pikelet-range \
+  --artifact benchmarks/results/raw/layout/pancake-sift1m-u8-metis-split.pikelet-range \
   --query-file sift/sift_query.fvecs \
   --queries 10 \
   --k 10 \

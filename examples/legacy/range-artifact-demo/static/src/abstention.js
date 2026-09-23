@@ -4,7 +4,7 @@
 // static demo applies the same shipped calibration as the Worker. The learned
 // scoring itself comes from the canonical student-embedder module.
 
-import { scoreQuery } from '../../../../03-edge-docs-search/student-embedder.mjs';
+import { scoreQuery } from '../../../../../test/fixtures/encoder-conformance/student-embedder.mjs';
 
 function buildKnownBucketTables(model) {
   const word = new Map();

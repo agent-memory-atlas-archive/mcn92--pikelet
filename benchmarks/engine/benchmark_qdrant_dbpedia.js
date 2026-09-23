@@ -44,7 +44,7 @@ function getBoolArg(name) {
   return rawArgs.includes('--' + name);
 }
 
-const DBPEDIA_DIR = path.resolve(getStrArg('data-dir', path.join(__dirname, '..', 'dbpedia')));
+const DBPEDIA_DIR = path.resolve(getStrArg('data-dir', path.join(__dirname, '..', '..', 'dbpedia')));
 const QDRANT_URL = (getStrArg('url', process.env.QDRANT_URL || 'http://127.0.0.1:6333')).replace(/\/+$/, '');
 const COLLECTION = getStrArg('collection', 'pikelet_dbpedia_l2');
 const N_BASE = getIntArg('count', 50_000);

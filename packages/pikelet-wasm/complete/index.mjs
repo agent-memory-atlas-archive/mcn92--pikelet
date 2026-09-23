@@ -848,7 +848,7 @@ export async function openPikeletFile(input, options = {}) {
                 // Hidden from bundlers like the node encoder kernels: the
                 // web entrypoint's ?url wasm imports would break a browser
                 // build that statically pulled this in.
-                const { default: Pikelet } = await import(/* webpackIgnore: true */ /* @vite-ignore */ '../pikelet.node.mjs');
+                const { default: Pikelet } = await import(/* webpackIgnore: true */ /* @vite-ignore */ '../src/pikelet.node.mjs');
                 await sketch.fullyResident;
                 const created = await Pikelet.createSketchScanner(sketch, {
                     maxRerank: Math.min(sketch.count, SCANNER_MAX_RERANK),

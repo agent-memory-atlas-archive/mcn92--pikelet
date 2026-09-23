@@ -102,7 +102,7 @@ function getUsearchWasmPath(dtype) {
 const DATASET = getStrArg('dataset', 'dbpedia').toLowerCase();
 const DATASETS = {
   dbpedia: {
-    dir: path.join(__dirname, '..', 'dbpedia'),
+    dir: path.join(__dirname, '..', '..', 'dbpedia'),
     baseFile: (n) => (n <= 5000 ? 'dbpedia_base_5k.fvecs' : 'dbpedia_base_100k.fvecs'),
     queryFile: 'dbpedia_query.fvecs',
     gtFile: null,
@@ -115,7 +115,7 @@ const DATASETS = {
   // builds ground truth with cosine. Caches are keyed per dataset name and
   // metric, so the two never share ground-truth entries.
   'dbpedia-cosine': {
-    dir: path.join(__dirname, '..', 'dbpedia'),
+    dir: path.join(__dirname, '..', '..', 'dbpedia'),
     baseFile: (n) => (n <= 5000 ? 'dbpedia_base_5k.fvecs' : 'dbpedia_base_100k.fvecs'),
     queryFile: 'dbpedia_query.fvecs',
     gtFile: null,
@@ -123,7 +123,7 @@ const DATASETS = {
     metric: 'cosine',
   },
   sift: {
-    dir: path.join(__dirname, '..', 'sift'),
+    dir: path.join(__dirname, '..', '..', 'sift'),
     baseFile: () => 'sift_base.fvecs',
     queryFile: 'sift_query.fvecs',
     gtFile: 'sift_groundtruth.ivecs',  // precomputed, read from disk
@@ -131,7 +131,7 @@ const DATASETS = {
     metric: 'l2',
   },
   nytimes: {
-    dir: path.join(__dirname, '..', 'nytimes'),
+    dir: path.join(__dirname, '..', '..', 'nytimes'),
     baseFile: () => 'nytimes_base.fvecs',
     queryFile: 'nytimes_query.fvecs',
     gtFile: 'nytimes_groundtruth.ivecs',
@@ -139,7 +139,7 @@ const DATASETS = {
     metric: 'cosine',
   },
   glove: {
-    dir: path.join(__dirname, '..', 'glove'),
+    dir: path.join(__dirname, '..', '..', 'glove'),
     hdf5File: 'glove-100-angular.hdf5',
     defaultCount: null,
     metric: 'cosine',

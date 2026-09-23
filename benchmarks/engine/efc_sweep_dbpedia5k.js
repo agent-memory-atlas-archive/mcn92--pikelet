@@ -14,7 +14,7 @@ const { parseBenchmarkArgs, resolveSingleValue } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
 
-const DBPEDIA_DIR = path.join(__dirname, '..', 'dbpedia');
+const DBPEDIA_DIR = path.join(__dirname, '..', '..', 'dbpedia');
 const BASE_PATH = path.join(DBPEDIA_DIR, 'dbpedia_base_5k.fvecs');
 const QUERY_PATH = path.join(DBPEDIA_DIR, 'dbpedia_query.fvecs');
 

@@ -31,7 +31,7 @@ const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue, resolveSweepValues } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
-const HDF5_PATH = parsedArgs.args[0] || path.join(__dirname, '..', 'nytimes', 'nytimes-256-angular.hdf5');
+const HDF5_PATH = parsedArgs.args[0] || path.join(__dirname, '..', '..', 'nytimes', 'nytimes-256-angular.hdf5');
 
 // --- Sweep configuration ---
 // K, M, and EF_CONSTRUCTION are fixed for fair comparison, but can be changed if desired.

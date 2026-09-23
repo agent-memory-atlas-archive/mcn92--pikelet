@@ -125,7 +125,7 @@ function loadSketchSidecar(sidecarPath) {
 async function createWasmScanner(sidecar, maxC) {
   const factory = require('../../packages/pikelet-wasm/dist/engine.js');
   const Module = await factory({
-    wasmBinary: fs.readFileSync(path.join(__dirname, '..', 'dist', 'engine.wasm')),
+    wasmBinary: fs.readFileSync(path.join(__dirname, '..', '..', 'packages', 'pikelet-wasm', 'dist', 'engine.wasm')),
   });
   const { count, sketchDims } = sidecar;
   const sketchesPtr = Module._emsc_malloc(count * sketchDims);

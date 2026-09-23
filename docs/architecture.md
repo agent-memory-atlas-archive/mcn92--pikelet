@@ -107,7 +107,7 @@ The native addon (`native/pikelet_napi.cpp`) replaces the *C ABI* layer with an
 N-API binding but reuses the identical backend layer — it `#include`s
 `float_hnsw.hpp` and `uint8_float_hnsw.hpp` directly.
 
-The same `IndexWrapper` abstraction (`src/engine.cpp:38`) is used by both the
+The same `IndexWrapper` abstraction (`packages/pikelet-wasm/engine/engine.cpp:44`) is used by both the
 WASM C ABI and the native addon (the native addon defines an equivalent wrapper
 pair in `pikelet_napi.cpp`). Backend choice is made once, at construction, from
 the `quantized` flag, and dispatched through virtual calls thereafter — there is

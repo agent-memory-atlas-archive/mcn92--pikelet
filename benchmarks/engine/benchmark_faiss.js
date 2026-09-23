@@ -26,7 +26,7 @@ const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
-const DBPEDIA_DIR = path.join(__dirname, '..', 'dbpedia');
+const DBPEDIA_DIR = path.join(__dirname, '..', '..', 'dbpedia');
 
 // --- Config ---
 const args = process.argv.slice(2);

@@ -29,7 +29,7 @@ const K = parseInt(args.k ?? '10');
 const QUANTIZED = (args.quantized ?? '1') !== '0';
 const N_QUERIES = 512; // pool per worker, cycled
 
-const pikeletPath = path.resolve('./pikelet.node.mjs');
+const pikeletPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'packages', 'pikelet-wasm', 'src', 'pikelet.node.mjs');
 
 function makeSynthetic(n, d) {
   const centers = 128, C = new Float32Array(centers * d);

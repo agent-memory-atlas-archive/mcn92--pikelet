@@ -30,7 +30,7 @@ const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue, resolveSweepValues } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
-const DBPEDIA_DIR = parsedArgs.args.find(a => !a.startsWith('-')) || path.join(__dirname, '..', 'dbpedia');
+const DBPEDIA_DIR = parsedArgs.args.find(a => !a.startsWith('-')) || path.join(__dirname, '..', '..', 'dbpedia');
 const REGENERATE_GT = parsedArgs.args.includes('--regenerate-gt');
 
 // --- Config ---

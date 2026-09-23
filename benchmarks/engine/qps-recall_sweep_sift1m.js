@@ -21,7 +21,7 @@ const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue, resolveSweepValues } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
-const SIFT_DIR = parsedArgs.args[0] || path.join(__dirname, '..', 'sift');
+const SIFT_DIR = parsedArgs.args[0] || path.join(__dirname, '..', '..', 'sift');
 
 // --- Sweep configuration ---
 const K = 10;

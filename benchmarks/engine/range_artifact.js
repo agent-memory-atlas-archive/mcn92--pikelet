@@ -2366,7 +2366,7 @@ function main() {
     if (!artifact) throw new Error('--search requires --artifact');
     runLocalSearch(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 100),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2382,7 +2382,7 @@ function main() {
     runParity(
       path.resolve(snapshot),
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 25),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2395,7 +2395,7 @@ function main() {
     if (!artifact) throw new Error('--working-set requires --artifact');
     runWorkingSet(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2409,7 +2409,7 @@ function main() {
     if (!artifact) throw new Error('--latency-model requires --artifact');
     runLatencyModel(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2426,7 +2426,7 @@ function main() {
     if (!artifact) throw new Error('--page-sweep requires --artifact');
     runPageSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2444,7 +2444,7 @@ function main() {
     if (!artifact) throw new Error('--hot-prefix-sweep requires --artifact');
     runHotPrefixSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2462,7 +2462,7 @@ function main() {
     if (!artifact) throw new Error('--trace-resident-sweep requires --artifact');
     runTraceResidentSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('train-queries', 500),
       parseIntArg('eval-start', 500),
@@ -2482,7 +2482,7 @@ function main() {
     if (!artifact) throw new Error('--lookahead-sweep requires --artifact');
     runLookaheadSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2505,7 +2505,7 @@ function main() {
     if (!artifact) throw new Error('--batch-sweep requires --artifact');
     runBatchSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2526,7 +2526,7 @@ function main() {
     if (!artifact) throw new Error('--gap-sweep requires --artifact');
     runGapSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2547,7 +2547,7 @@ function main() {
     if (!artifact) throw new Error('--structural-resident-sweep requires --artifact');
     runStructuralResidentSweep(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2570,7 +2570,7 @@ function main() {
     if (!artifact) throw new Error('--miss-round-trace requires --artifact');
     runMissRoundTrace(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('k', 10),
       parseIntArg('ef-search', OPERATIONAL_EF_SEARCH),
@@ -2588,7 +2588,7 @@ function main() {
     if (!artifact) throw new Error('--miss-page-sim requires --artifact');
     runMissPageSim(
       path.resolve(artifact),
-      path.resolve(arg('data-dir', path.join(__dirname, '..', 'sift'))),
+      path.resolve(arg('data-dir', path.join(__dirname, '..', '..', 'sift'))),
       parseIntArg('queries', 1000),
       parseIntArg('train-queries', 500),
       parseIntArg('k', 10),

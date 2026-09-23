@@ -32,7 +32,7 @@ import os from 'node:os';
 import { embedChunksWithInlineTransformer } from '../../packages/pikelet/src/embed.mjs';
 import { inlineEncoderDeclaration } from '../../packages/pikelet/src/complete-build.mjs';
 import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/complete/inline-transformer.mjs';
-import createEncoder from '../../complete/encoder-kernels/encoder.node.mjs';
+import createEncoder from '../../packages/pikelet-wasm/complete/encoder-kernels/encoder.node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataset = process.argv[2];

@@ -1,5 +1,5 @@
 import Pikelet from 'pikelet-wasm/web';
-import { loadStudentModel, embedTextWithStudent } from '../../../../03-edge-docs-search/student-embedder.mjs';
+import { loadStudentModel, embedTextWithStudent } from '../../../../../test/fixtures/encoder-conformance/student-embedder.mjs';
 import { createAbstentionScorer } from './abstention.js';
 import './style.css';
 

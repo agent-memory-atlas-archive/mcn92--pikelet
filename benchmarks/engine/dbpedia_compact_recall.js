@@ -66,7 +66,7 @@ function parseUnitFraction(value, flagName) {
   return parsed;
 }
 
-const DBPEDIA_DIR = firstPositionalArg() || path.join(__dirname, '..', 'dbpedia');
+const DBPEDIA_DIR = firstPositionalArg() || path.join(__dirname, '..', '..', 'dbpedia');
 const N_BASE = parsePositiveInt(takeFlagValue('--base-count', 50_000), '--base-count');
 const N_QUERIES = parsePositiveInt(takeFlagValue('--queries', 1_000), '--queries');
 const DELETE_FRACTION = parseUnitFraction(takeFlagValue('--delete-fraction', 0.2), '--delete-fraction');

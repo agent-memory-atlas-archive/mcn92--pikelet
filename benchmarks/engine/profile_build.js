@@ -41,7 +41,7 @@ const EF_C = resolveSingleValue(parsedArgs.efConstruction, getArg('efc', 150));
 const EF_SEARCH = resolveSingleValue(parsedArgs.efSearch, 250);
 const MAX_ELEM = COUNT + 1000;
 
-const VECTORS_PATH = path.join(__dirname, '..', 'dist', 'vectors.bin');
+const VECTORS_PATH = path.join(__dirname, '..', '..', 'dist', 'vectors.bin');
 
 function generateSyntheticVec(dims) {
     const v = new Float32Array(dims);
@@ -60,7 +60,7 @@ function generateSyntheticVec(dims) {
     console.log(`  dims=${DIMS} count=${COUNT} M=${M} ef_c=${EF_C} report_interval=${REPORT_INTERVAL}`);
     console.log();
 
-    const wasmBinary = fs.readFileSync(path.join(__dirname, '..', 'dist', 'engine.wasm'));
+    const wasmBinary = fs.readFileSync(path.join(__dirname, '..', '..', 'packages', 'pikelet-wasm', 'dist', 'engine.wasm'));
     const engine = await Pikelet({ wasmBinary });
 
     // Check profile functions exist

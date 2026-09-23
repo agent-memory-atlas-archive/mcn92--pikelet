@@ -21,7 +21,7 @@ const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
-const SIFT_DIR = parsedArgs.args[0] || path.join(__dirname, '..', 'sift');
+const SIFT_DIR = parsedArgs.args[0] || path.join(__dirname, '..', '..', 'sift');
 
 const RESULTS_DIR = path.join(__dirname, '..', 'results', 'raw');
 if (!fs.existsSync(RESULTS_DIR)) fs.mkdirSync(RESULTS_DIR);
