@@ -1,4 +1,4 @@
-import { pikeletError, PIKELET_ERROR_CODES } from '../pikelet-errors.js';
+import { pikeletError, PIKELET_ERROR_CODES } from '../src/errors/pikelet-errors.js';
 
 export function httpRangeSource(url, options = {}) {
     const stats = { requests: 0, bytes: 0, acceptRanges: null, etag: null, fullFallback: false, retries: 0, redirects: 0 };

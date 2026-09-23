@@ -10,7 +10,7 @@
 
 'use strict';
 
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();

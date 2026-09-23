@@ -10,8 +10,8 @@ const { pathToFileURL } = require('url');
 // import from an ESM graph on Node 18), and that must not trip the
 // compile-once assertion.
 const ENGINE_SIZES = new Set([
-    fs.statSync(path.join(__dirname, '..', 'dist', 'engine.wasm')).size,
-    fs.statSync(path.join(__dirname, '..', 'dist', 'engine.scalar.wasm')).size,
+    fs.statSync(path.join(__dirname, '..', 'packages', 'pikelet-wasm', 'dist', 'engine.wasm')).size,
+    fs.statSync(path.join(__dirname, '..', 'packages', 'pikelet-wasm', 'dist', 'engine.scalar.wasm')).size,
 ]);
 
 async function verifyEntry(loadApi, label) {
@@ -55,12 +55,12 @@ async function verifyEntry(loadApi, label) {
 
 async function main() {
     await verifyEntry(async () => {
-        const url = pathToFileURL(path.join(__dirname, '..', 'pikelet.node.mjs')).href;
+        const url = pathToFileURL(path.join(__dirname, '..', 'packages', 'pikelet-wasm', 'src', 'pikelet.node.mjs')).href;
         return (await import(`${url}?model-c-loader-test`)).default;
     }, 'Node ESM');
 
     await verifyEntry(async () => {
-        const entry = require.resolve('../pikelet.js');
+        const entry = require.resolve('pikelet-wasm');
         delete require.cache[entry];
         return require(entry);
     }, 'Node CJS');

@@ -8,7 +8,7 @@
     "build": "node-gyp rebuild",
     "clean": "node-gyp clean",
     "test": "node test.js && npm run test:compact",
-    "test:compact": "g++ -std=c++17 -O0 -Wall -I../src compact_test.cpp -o /tmp/pikelet_compact_test && /tmp/pikelet_compact_test"
+    "test:compact": "g++ -std=c++17 -O0 -Wall -I../engine compact_test.cpp -o /tmp/pikelet_compact_test && /tmp/pikelet_compact_test"
   },
   "dependencies": {
     "node-addon-api": "^7.0.0",

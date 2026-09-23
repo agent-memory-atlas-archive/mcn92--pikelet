@@ -23,7 +23,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();

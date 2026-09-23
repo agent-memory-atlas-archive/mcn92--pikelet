@@ -1,11 +1,11 @@
 'use strict';
 
-const loadEngine = require('./dist/engine.js');
-const loadScalarEngine = require('./dist/engine.scalar.js');
-const createPikeletApi = require('./pikelet-core.js');
-const { PikeletError, PIKELET_ERROR_CODES, pikeletError } = require('./pikelet-errors.js');
-const { PikeletRangeArtifact, PikeletSketchArtifact, createSketchScanner, NodeFileRangeSource, buildRangeArtifact, buildRangeArtifactFile, buildSketchArtifact, buildSketchArtifactBytes, buildSketchArtifactFile } = require('./pikelet-artifact.js');
-const { createCachedModuleLoader } = require('./pikelet-loader.js');
+const loadEngine = require('../dist/engine.js');
+const loadScalarEngine = require('../dist/engine.scalar.js');
+const createPikeletApi = require('./core/pikelet-core.js');
+const { PikeletError, PIKELET_ERROR_CODES, pikeletError } = require('./errors/pikelet-errors.js');
+const { PikeletRangeArtifact, PikeletSketchArtifact, createSketchScanner, NodeFileRangeSource, buildRangeArtifact, buildRangeArtifactFile, buildSketchArtifact, buildSketchArtifactBytes, buildSketchArtifactFile } = require('./artifact/pikelet-artifact.js');
+const { createCachedModuleLoader } = require('./loader/pikelet-loader.js');
 const _path = require('path');
 const _fs = require('fs');
 let _engineVariantPromise = null;
@@ -22,7 +22,7 @@ const SUPPORTED_SNAPSHOT_MAGICS = new Set([
 
 function readWasmBinary(fileName) {
     try {
-        const wasmBinary = _fs.readFileSync(_path.join(__dirname, 'dist', fileName));
+        const wasmBinary = _fs.readFileSync(_path.join(__dirname, '..', 'dist', fileName));
         return wasmBinary.buffer.slice(
             wasmBinary.byteOffset,
             wasmBinary.byteOffset + wasmBinary.byteLength

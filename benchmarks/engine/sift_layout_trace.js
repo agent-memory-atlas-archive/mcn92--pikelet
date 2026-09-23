@@ -35,7 +35,7 @@ const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
 
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 const PIKELET_MAGIC = 0x504E434B;
 const V1_ENVELOPE_HEADER_SIZE = 24;

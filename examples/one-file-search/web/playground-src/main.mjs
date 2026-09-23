@@ -129,7 +129,7 @@ async function mount(url) {
         source = httpRangeSource(url);
         search = await openPikeletFile(source, {
             sketchScanner: async (sketch) => {
-                const { default: Pikelet } = await import('../../../../pikelet.web.mjs');
+                const { default: Pikelet } = await import('pikelet-wasm/web');
                 return Pikelet.createSketchScanner(sketch, { maxRerank: 4096 });
             },
         });

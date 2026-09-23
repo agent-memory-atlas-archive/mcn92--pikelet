@@ -29,7 +29,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startDumbServer } from './dumb-server.mjs';
-import { openPikeletFile } from '../../complete/index.mjs';
+import { openPikeletFile } from 'pikelet-wasm/complete';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PIKELET_BIN = path.join(ROOT, 'pikelet/bin/pikelet.mjs');

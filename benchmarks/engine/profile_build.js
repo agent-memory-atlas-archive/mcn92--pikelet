@@ -23,7 +23,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const Pikelet = require('../dist/engine.js');
+const Pikelet = require('../../packages/pikelet-wasm/dist/engine.js');
 const { parseBenchmarkArgs, resolveSingleValue } = require('./bench_args');
 
 const args = process.argv.slice(2);

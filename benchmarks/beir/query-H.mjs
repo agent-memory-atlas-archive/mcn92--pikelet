@@ -19,10 +19,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import Pikelet from 'pikelet-wasm';
-import { buildSketchArtifactBytes } from '../../pikelet-artifact-sketch.js';
-import { PikeletSketchArtifact } from '../../pikelet-artifact.js';
-import { buildLexicalSegment } from '../../complete/builder.mjs';
-import { openLexicalIndex } from '../../complete/lexical.mjs';
+import { buildSketchArtifactBytes } from 'pikelet-wasm/artifact';
+import { PikeletSketchArtifact } from 'pikelet-wasm/artifact';
+import { buildLexicalSegment } from 'pikelet-wasm/complete/builder';
+import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataset = process.argv[2];

@@ -9,13 +9,13 @@
 
 'use strict';
 
-const Pikelet = require('./pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const goldenSnapshots = require('./test/fixtures/golden_snapshots.js');
-const searchOracles = require('./test/fixtures/search_oracles.js');
+const goldenSnapshots = require('./fixtures/golden_snapshots.js');
+const searchOracles = require('./fixtures/search_oracles.js');
 
 // ─── Minimal test harness ────────────────────────────────────────────────────
 
@@ -452,7 +452,7 @@ async function testCreation() {
     // uint32_t INVALID_HANDLE (0xFFFFFFFF), which the i32 ABI delivers to JS
     // as -1; create() must detect it and free its scratch allocations.
     {
-        const createPikeletApi = require('./pikelet-core.js');
+        const createPikeletApi = require('../packages/pikelet-wasm/src/core/pikelet-core.js');
         const freed = [];
         let nextPtr = 0;
         const FailingInit = createPikeletApi(async () => ({
@@ -884,7 +884,7 @@ async function testRuntimeEntryPoints() {
 
     // CommonJS package entry
     {
-        const CjsPikelet = require('./pikelet.js');
+        const CjsPikelet = require('pikelet-wasm');
         const idx = await CjsPikelet.create({ dim: 4, maxElements: 10 });
         idx.add(new Float32Array([1, 0, 0, 0]));
         const results = idx.search(new Float32Array([1, 0, 0, 0]), 1);
@@ -894,7 +894,7 @@ async function testRuntimeEntryPoints() {
 
     // ESM package entry
     {
-        const { default: EsmPikelet } = await import(pathToFileURL(path.join(process.cwd(), 'pikelet.node.mjs')).href);
+        const { default: EsmPikelet } = await import('pikelet-wasm');
         const idx = await EsmPikelet.create({ dim: 4, maxElements: 10 });
         idx.add(new Float32Array([1, 0, 0, 0]));
         const results = idx.search(new Float32Array([1, 0, 0, 0]), 1);
@@ -905,8 +905,8 @@ async function testRuntimeEntryPoints() {
     // Browser-style instantiateWasm path. This validates the web runtime
     // loading contract without depending on a specific bundler or browser.
     {
-        const loadEngine = require('./dist/engine.js');
-        const createPikeletApi = require('./pikelet-core.js');
+        const loadEngine = require('../packages/pikelet-wasm/dist/engine.js');
+        const createPikeletApi = require('../packages/pikelet-wasm/src/core/pikelet-core.js');
         async function compileWasmWithFallback() {
             const entries = [
                 ['engine.wasm', 'simd'],
@@ -915,7 +915,7 @@ async function testRuntimeEntryPoints() {
             let lastError = null;
             for (const [fileName, label] of entries) {
                 try {
-                    const wasmBinary = fs.readFileSync(path.join(process.cwd(), 'dist', fileName));
+                    const wasmBinary = fs.readFileSync(path.join(process.cwd(), 'packages', 'pikelet-wasm', 'dist', fileName));
                     const compiled = await WebAssembly.compile(
                         wasmBinary.buffer.slice(
                             wasmBinary.byteOffset,
@@ -2852,7 +2852,7 @@ async function testPikeletErrorContract() {
     assert(Pikelet.PIKELET_ERROR_CODES.INDEX_DISPOSED === 'INDEX_DISPOSED',
         'CJS API exposes stable error codes');
 
-    const esm = await import(pathToFileURL(path.join(process.cwd(), 'pikelet.node.mjs')).href);
+    const esm = await import('pikelet-wasm');
     assert(esm.PikeletError === Pikelet.PikeletError, 'Node ESM exposes the same PikeletError class');
 
     await expectCodeAsync(

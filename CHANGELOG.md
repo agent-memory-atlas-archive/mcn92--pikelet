@@ -28,6 +28,24 @@ first.
 
 ### Changed
 
+- **The repository is an npm workspace with the two packages under
+  `packages/`.** `packages/pikelet-wasm/` holds the published library —
+  entrypoints and readers under `src/` (`src/core`, `src/artifact`,
+  `src/errors`, `src/loader`), the C++ engine under `engine/`
+  (formerly the root `src/`), `complete/`, `native/` and the four tracked
+  `dist/` build outputs; `packages/pikelet/` holds the CLI (formerly
+  `pikelet/`). The root `package.json` is a private workspace root
+  carrying the test ladder and dev tooling; `npm install` links
+  `node_modules/pikelet-wasm` and `node_modules/pikelet` to the checkouts,
+  so tests, benchmarks and examples import `pikelet-wasm` exactly as
+  consumers do, and the CLI's and Docusaurus plugin's "repo root is
+  pikelet-wasm" resolution fallbacks are gone. The published tarball's
+  file list is unchanged: `main`/`types`/`exports` point into `src/`, and
+  `CHANGELOG.md`, `LICENSE`, `NOTICE` and `README.md` are staged into the
+  package by an npm `prepack` script instead of being duplicated in the
+  tree. `run_tests.js` lives at `test/run_tests.js`; the engine benchmark
+  scripts, whose relative requires had been left pointing one directory
+  too high by the benchmarks move, resolve the package again.
 - **Examples renamed, not renumbered**: `examples/04-static-wiki-pack` →
   `examples/static-wiki-pack`, `examples/05-one-file-search` →
   `examples/one-file-search`, `examples/06-mcp-knowledge-pack` →

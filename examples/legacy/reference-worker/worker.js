@@ -6,7 +6,7 @@
  * actually call, not as a copy of the raw WASM ABI.
  */
 
-import Pikelet, { PikeletError, PIKELET_ERROR_CODES } from '../../../pikelet.workerd.mjs';
+import Pikelet, { PikeletError, PIKELET_ERROR_CODES } from 'pikelet-wasm';
 
 let index = null;
 let indexConfig = null;

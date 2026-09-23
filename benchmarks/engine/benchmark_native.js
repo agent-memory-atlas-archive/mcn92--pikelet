@@ -21,12 +21,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue, resolveSweepValues } = require('./bench_args');
 
 let native;
 try {
-  native = require('../native');
+  native = require('../../packages/pikelet-wasm/native');
 } catch (e) {
   console.error('ERROR: native binding not built. Run: cd native && npm install');
   process.exit(1);

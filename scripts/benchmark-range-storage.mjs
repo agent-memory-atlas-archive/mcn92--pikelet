@@ -335,7 +335,7 @@ async function worker(options) {
   try {
     const baselineMemory = memorySnapshot();
     const { openPikeletFile, httpRangeSource } = await import(
-      pathToFileURL(path.join(ROOT, 'complete', 'index.mjs')).href
+      pathToFileURL(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'index.mjs')).href
     );
     const encodeQuery = await loadExternalEncoder(options.encoderModule);
     const source = httpRangeSource(server.url, {

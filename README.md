@@ -47,7 +47,7 @@ console.log(out.matchQuality, out.results[0]?.title);
 // 'strong' 'Snapshot restore'
 ```
 
-That's the whole loop. `compile` also takes a live URL (`--source https://docs.example.com`) instead of a directory. If you want a deployed search app — a Worker + UI, not a file — use `npx pikelet create` instead; see [`pikelet/README.md`](pikelet/README.md) for the full CLI reference and the tradeoffs between the two. `compile` never needs the scaffold path's `@xenova/transformers` dependency; skip its ~140 MB install with `npm install -g pikelet --omit=optional` if you only need `compile`/`mcp`.
+That's the whole loop. `compile` also takes a live URL (`--source https://docs.example.com`) instead of a directory. If you want a deployed search app — a Worker + UI, not a file — use `npx pikelet create` instead; see [`packages/pikelet/README.md`](packages/pikelet/README.md) for the full CLI reference and the tradeoffs between the two. `compile` never needs the scaffold path's `@xenova/transformers` dependency; skip its ~140 MB install with `npm install -g pikelet --omit=optional` if you only need `compile`/`mcp`.
 
 Under the hood, the file is one container for everything a reader needs:
 
@@ -270,18 +270,22 @@ The resident remote scan is linear in row count. The current architecture target
 ## Repository map
 
 ```text
-src/                              C++/WASM vector engine: HNSW, float32 and
+packages/pikelet-wasm/            The published pikelet-wasm package:
+  engine/                          C++ vector engine (HNSW, float32 and
                                    affine-u8 backends, mutation, compaction,
-                                   snapshot import/export. Used at compile
-                                   time to build and quantize the index;
-                                   query time does not load this engine (see
-                                   complete/index.mjs's header comment) —
-                                   .pikelet reads run a pure-JS sketch scan
-                                   instead, optionally SIMD-accelerated.
-complete/, pikelet-artifact.js    Readers and builders for the complete
-                                   range-readable artifact
-pikelet/                          CLI, compiler, MCP server, encoder
-                                   integration, higher-level tooling
+                                   snapshot import/export), compiled to WASM
+                                   in dist/. Used at compile time to build and
+                                   quantize the index; query time does not load
+                                   it (see complete/index.mjs's header comment)
+                                   — .pikelet reads run a pure-JS sketch scan,
+                                   optionally SIMD-accelerated.
+  src/                             Engine wrapper and artifact readers/builders
+                                   (the entrypoints, core/, artifact/, errors/)
+  complete/                        Reader and builder for the complete
+                                   range-readable .pikelet artifact
+  native/                          N-API build of the same engine (benchmarks)
+packages/pikelet/                 The published pikelet CLI: compiler, MCP
+                                   server, encoder integration, Docusaurus plugin
 docs/                             Deeper dives (how a query runs, the Veyra
                                    ablation, why a file), architecture notes,
                                    rename history, measurement reports

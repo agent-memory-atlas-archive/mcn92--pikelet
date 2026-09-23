@@ -26,8 +26,8 @@
 // mutate max_elements_ (to force that failure deterministically), neither
 // of which the public API exposes. Confined to this translation unit only.
 #define private public
-#include "../src/float_hnsw.hpp"
-#include "../src/uint8_float_hnsw.hpp"
+#include "../engine/float_hnsw.hpp"
+#include "../engine/uint8_float_hnsw.hpp"
 #undef private
 
 using pikelet::wasm::DistanceMetric;

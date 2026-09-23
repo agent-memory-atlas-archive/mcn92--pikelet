@@ -18,11 +18,11 @@ import {
     MAGIC, HEADER_BYTES, TABLE_ENTRY_BYTES, KIND_NAMES,
     sha256, buildQueryInterpSegment, buildCorpusSegment, assemblePikeletFile,
     measureRecommendedRerank, PROFILE_V2, FORMAT_VERSIONS,
-} from '../../complete/builder.mjs';
+} from 'pikelet-wasm/complete/builder';
 
 const require = createRequire(import.meta.url);
-const Pikelet = require('../../pikelet.js');
-const Artifact = require('../../pikelet-artifact.js');
+const Pikelet = require('pikelet-wasm');
+const Artifact = require('pikelet-wasm/artifact');
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 // The full student evaluation is per-row and large; the evaluation segment

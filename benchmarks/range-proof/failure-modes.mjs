@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openPikeletFile, httpRangeSource } from '../../complete/index.mjs';
+import { openPikeletFile, httpRangeSource } from 'pikelet-wasm/complete';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'local-packs/pride-prejudice.pikelet'));
@@ -142,7 +142,7 @@ async function run(name, setup) {
 }
 
 async function main() {
-  const { openPikeletFile: local } = await import('../../complete/index.mjs');
+  const { openPikeletFile: local } = await import('pikelet-wasm/complete');
   const localSearch = await local(packPath);
   const realIdentity = localSearch.info().identity;
   await localSearch.close();

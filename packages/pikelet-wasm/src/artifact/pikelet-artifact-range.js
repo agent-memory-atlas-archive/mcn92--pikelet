@@ -4,7 +4,7 @@
 // Split out of pikelet-artifact.js (the public entry, which re-exports the
 // three parts); see that file for the module map.
 
-const { pikeletError, PIKELET_ERROR_CODES } = require('./pikelet-errors.js');
+const { pikeletError, PIKELET_ERROR_CODES } = require('../errors/pikelet-errors.js');
 const {
     MAX_COALESCED_RANGE_BYTES,
     readChecked,

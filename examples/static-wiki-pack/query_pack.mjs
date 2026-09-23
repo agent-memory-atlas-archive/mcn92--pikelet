@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from '@huggingface/transformers';
-import Pikelet from '../../pikelet.node.mjs';
+import Pikelet from 'pikelet-wasm';
 
 // Usage: node query_pack.mjs [dataDir] [query ...]
 const here = path.dirname(fileURLToPath(import.meta.url));

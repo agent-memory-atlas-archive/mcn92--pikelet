@@ -1,1 +1,1 @@
-export { createWordPiece } from '../../../complete/wordpiece.mjs';
+export { createWordPiece } from '../../../packages/pikelet-wasm/complete/wordpiece.mjs';

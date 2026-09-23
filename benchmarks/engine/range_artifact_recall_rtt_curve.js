@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 const OPERATIONAL_EF_SEARCH = 80;
 

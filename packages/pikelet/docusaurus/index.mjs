@@ -349,10 +349,6 @@ function resolveArtifactModule(context) {
       attempts.push(error.message.split('\n')[0]);
     }
   }
-  // Monorepo dev fallback: the repo root IS pikelet-wasm, with no
-  // node_modules self-reference to resolve through.
-  const repoArtifactModule = path.resolve(context.siteDir, '..', 'pikelet-artifact.js');
-  if (fssync.existsSync(repoArtifactModule)) return repoArtifactModule;
   throw new Error(
     `docusaurus-plugin-pikelet-search could not resolve pikelet-wasm/artifact; install pikelet-wasm alongside pikelet. Tried: ${attempts.join(' | ')}`
   );
@@ -370,8 +366,6 @@ function resolveCompleteModule(context) {
       attempts.push(error.message.split('\n')[0]);
     }
   }
-  const repoCompleteModule = path.resolve(context.siteDir, '..', 'complete', 'index.mjs');
-  if (fssync.existsSync(repoCompleteModule)) return repoCompleteModule;
   throw new Error(
     `docusaurus-plugin-pikelet-search could not resolve pikelet-wasm/complete; install pikelet-wasm >= 0.3 alongside pikelet. Tried: ${attempts.join(' | ')}`
   );
@@ -382,12 +376,12 @@ export default function pikeletDocusaurusPlugin(context, rawOptions = {}) {
   const workDir = path.resolve(context.siteDir, options.workDir);
   const siteArtifactModule = resolveArtifactModule(context);
   // Docusaurus's babel-loader excludes node_modules. When the artifact module
-  // resolves outside it (the monorepo's file:-linked layout realpaths to the
-  // repo root), babel transpiles the CommonJS file with sourceType module,
-  // webpack flags it as ESM, and the widget dies at runtime on its
+  // resolves outside it (a file:-linked or workspace layout realpaths to the
+  // package checkout), babel transpiles the CommonJS file with sourceType
+  // module, webpack flags it as ESM, and the widget dies at runtime on its
   // module.exports assignment. Keep the alias and webpack's resolution on
   // the symlinked node_modules side in that layout.
-  const symlinkedArtifact = path.join(context.siteDir, 'node_modules', 'pikelet-wasm', 'pikelet-artifact.js');
+  const symlinkedArtifact = path.join(context.siteDir, 'node_modules', 'pikelet-wasm', 'src', 'artifact', 'pikelet-artifact.js');
   const useSymlinkPaths = !siteArtifactModule.includes(`${path.sep}node_modules${path.sep}`)
     && fssync.existsSync(symlinkedArtifact);
   const artifactAlias = useSymlinkPaths ? symlinkedArtifact : siteArtifactModule;

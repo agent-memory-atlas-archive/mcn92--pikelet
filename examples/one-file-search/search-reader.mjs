@@ -25,8 +25,8 @@ import {
 } from '../../test/fixtures/encoder-conformance/student-embedder.mjs';
 
 const require = createRequire(import.meta.url);
-const Pikelet = require('../../pikelet.js');
-const { buildSketchArtifact } = require('../../pikelet-artifact.js');
+const Pikelet = require('pikelet-wasm');
+const { buildSketchArtifact } = require('pikelet-wasm/artifact');
 
 // Abstention scoring lives in abstention.mjs (shared with the one-file
 // reader); re-exported here for compatibility.

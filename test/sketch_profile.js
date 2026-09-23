@@ -9,7 +9,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 let passed = 0;
 let failed = 0;

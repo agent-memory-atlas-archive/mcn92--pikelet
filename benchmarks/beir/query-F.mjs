@@ -18,8 +18,8 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { buildLexicalSegment } from '../../complete/builder.mjs';
-import { openLexicalIndex } from '../../complete/lexical.mjs';
+import { buildLexicalSegment } from 'pikelet-wasm/complete/builder';
+import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataset = process.argv[2];

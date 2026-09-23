@@ -4,4 +4,4 @@
 //   import { openPikeletFile } from 'pikelet-wasm/complete';
 //
 // (Relative here because the example lives inside the pikelet repo itself.)
-export * from '../../complete/index.mjs';
+export * from 'pikelet-wasm/complete';

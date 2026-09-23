@@ -17,8 +17,8 @@
 // a terminal recorder shows it ticking up during each query, not scrolling
 // text.
 
-import { openPikeletFile } from '../../complete/index.mjs';
-import { httpRangeSource } from '../../complete/sources.mjs';
+import { openPikeletFile } from 'pikelet-wasm/complete';
+import { httpRangeSource } from '../../packages/pikelet-wasm/complete/sources.mjs';
 
 const URL_ = process.env.PIKELET_WIKI_URL
     || 'https://github.com/mcn92/pikelet/releases/download/wikipedia-pack-v1/wikipedia.pikelet';

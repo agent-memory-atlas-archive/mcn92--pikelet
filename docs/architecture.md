@@ -5,7 +5,7 @@ backends, the WASM C ABI, the JavaScript wrapper, the native benchmarking addon,
 serialization, and the Cloudflare Worker reference deployments.
 **Last updated:** 2026-09-22 (symbol names, export inventory, compaction
 ordering; the ground-up read dates from 2026-07-19)
-**Status:** Reflects the current source tree (`src/`, `pikelet-core.js`,
+**Status:** Reflects the current source tree under `packages/pikelet-wasm/` (`engine/`, `src/core/pikelet-core.js`,
 `native/`, `examples/legacy/reference-worker*`). This document was written from a ground-up
 re-read of the code. It covers the engine and its wrappers only; the
 `.pikelet` artifact formats, the inline encoder, and abstention
@@ -79,7 +79,7 @@ the caller's responsibility.
 │            export envelope, buffer management                     │
 ├──────────────────────────────┬────────────────────────────────────┤
 │  C ABI (WASM exports)         │                                    │
-│   src/engine.cpp — handle table, IndexWrapper dispatch            │
+│   engine/engine.cpp — handle table, IndexWrapper dispatch            │
 │   _pikelet_init / _add / _query / _query_filtered / _export / ... │
 ├──────────────────────────────┬────────────────────────────────────┤
 │  Backend Layer (C++ templates-free, runtime dimension)            │
@@ -323,7 +323,7 @@ only throughput differs.
 
 ## 6. The C ABI and Handle Table
 
-`src/engine.cpp` (577 lines) is the boundary between WASM and the C++ backends.
+`engine/engine.cpp` (577 lines) is the boundary between WASM and the C++ backends.
 
 ### 6.1 Handle table
 
@@ -356,7 +356,7 @@ if (quantized) g_handles[h].index = new Uint8FloatHNSWWrapper(dim, u8cfg);
 else           g_handles[h].index = new FloatHNSWWrapper(dim, cfg);
 ```
 
-(`src/engine.cpp` backend dispatch.)
+(`engine/engine.cpp` backend dispatch.)
 
 > **Defaults.** The library defaults are `M=12`, `efConstruction=75`,
 > `efSearch=100`, `maxElements=100000`, and `seed=108`. The JavaScript wrapper
@@ -589,7 +589,7 @@ components are rejected if non-finite (bit-level exponent check, since
 
 ### 10.1 WASM (`scripts/build-engine.mjs`)
 
-Single translation unit (`src/engine.cpp`) compiled with Emscripten.
+Single translation unit (`engine/engine.cpp`) compiled with Emscripten.
 `./build.sh` is a thin shim that execs `node scripts/build-engine.mjs`; the
 flags, export list, and env-var handling all live in the script. Key flags:
 
@@ -620,7 +620,7 @@ SIMD engine above and then re-runs the same compile with `WASM_SIMD=0` to emit
 SIMD. The JS loaders probe `WebAssembly.validate` for SIMD support and pick the
 scalar artifact when it is absent. Both engines compile from the same source, so
 `prepublishOnly` runs `build:all` first to keep the shipped SIMD and scalar
-artifacts in lockstep with the current `src/`.
+artifacts in lockstep with the current `engine/`.
 
 ### 10.2 Native (`native/binding.gyp`)
 
@@ -643,7 +643,7 @@ does not define `PIKELET_ENABLE_AVX512_SIMD` and stays on AVX2/SSE2. Output:
 | Boundary | C ABI + Emscripten heap | N-API |
 | Query result | caller buffers (`uint64` ids) | JS object `{ ids: Uint32Array, distances: Float32Array, count }` |
 | Exported surface | 22 C functions | ~15 N-API functions |
-| Backends | identical (`src/*.hpp`) | identical (`src/*.hpp`) |
+| Backends | identical (`engine/*.hpp`) | identical (`engine/*.hpp`) |
 
 Because the backend code is shared, recall and graph structure are identical;
 the native build exists only to measure the runtime-overhead delta.
@@ -667,7 +667,7 @@ operator controls both the URL and the machine. Keep it that way: a future
 "restore from URL" route on a deployed Worker is the moment scheme
 allowlisting, private/link-local IP rejection, redirect pinning, and
 response size caps become mandatory — the crawler in
-`pikelet/src/ingest.mjs` already implements most of that list
+`packages/pikelet/src/ingest.mjs` already implements most of that list
 and is the model to copy.
 
 ### 11.1 Request lifecycle

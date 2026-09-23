@@ -99,7 +99,7 @@ async function main() {
   const parallelism = Number(arg('parallelism', 6));
   const summaryOut = arg('summary-out', null);
 
-  const Pikelet = require('../pikelet.js');
+  const Pikelet = require('pikelet-wasm');
   const artifact = await Pikelet.openRangeArtifactFile(artifactPath, { loadRouter: false });
   const { dim, count, recordBytes, maxLevel } = artifact;
   const qdataOffset = 4 + 2 + 2 + maxLevel * 2;

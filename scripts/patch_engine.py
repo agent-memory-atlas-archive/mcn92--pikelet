@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Patches dist/engine.js to fix ENVIRONMENT_IS_NODE=false.
+Patches packages/pikelet-wasm/dist/engine.js to fix ENVIRONMENT_IS_NODE=false.
 
 Run from your project root after each build: python3 patch_engine.py
 """
@@ -8,7 +8,7 @@ Run from your project root after each build: python3 patch_engine.py
 import sys
 import re
 
-path = "dist/engine.js"
+path = "packages/pikelet-wasm/dist/engine.js"
 
 with open(path, "r", encoding="utf-8") as f:
     src = f.read()

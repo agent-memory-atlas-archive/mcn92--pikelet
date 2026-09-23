@@ -56,7 +56,7 @@ jobs:
           version: 5.0.0
           actions-cache-folder: emsdk-cache
       - run: npm ci
-      - name: Rebuild both engine variants from src/
+      - name: Rebuild both engine variants from packages/pikelet-wasm/engine
         run: npm run build:all
         env:
           EMCC: emcc
@@ -99,7 +99,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: ISA compile sweep over src/ headers
+      - name: ISA compile sweep over packages/pikelet-wasm/engine headers
         run: |
           printf '#include "uint8_float_hnsw.hpp"\n#include "float_hnsw.hpp"\nint main() { return 0; }\n' > /tmp/isa_check.cpp
           set -e
@@ -108,17 +108,17 @@ jobs:
             "-mavx2 -DPIKELET_ENABLE_AVX2_SIMD -DPIKELET_ENABLE_SSE2_SIMD" \
             "-msse2 -DPIKELET_ENABLE_SSE2_SIMD" \
             ""; do
-            g++ -std=c++17 -O2 -Isrc $FLAGS -fsyntax-only /tmp/isa_check.cpp
+            g++ -std=c++17 -O2 -Ipackages/pikelet-wasm/engine $FLAGS -fsyntax-only /tmp/isa_check.cpp
             echo "compiles: [${FLAGS:-scalar}]"
           done
       - name: Report runner SIMD capability
         run: grep -o 'avx512[a-z]*\|avx2\|sse2' /proc/cpuinfo | sort -u | tr '\n' ' '; echo
       - run: npm ci
-        working-directory: native
+        working-directory: packages/pikelet-wasm/native
       - run: npm run build
-        working-directory: native
+        working-directory: packages/pikelet-wasm/native
       - run: npm test
-        working-directory: native
+        working-directory: packages/pikelet-wasm/native
 
   docs-site-build:
     name: Docusaurus docs site (kind-3 search)

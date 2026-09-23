@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Pikelet from '../../../pikelet.node.mjs';
+import Pikelet from 'pikelet-wasm';
 import { embedTextWithStudent, loadStudentModel } from '../../../test/fixtures/encoder-conformance/student-embedder.mjs';
 
 const __filename = fileURLToPath(import.meta.url);

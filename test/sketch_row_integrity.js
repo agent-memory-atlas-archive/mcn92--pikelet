@@ -7,8 +7,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
-const { PikeletSketchArtifact, exportSketchArtifact } = require('../pikelet-artifact.js');
+const Pikelet = require('pikelet-wasm');
+const { PikeletSketchArtifact, exportSketchArtifact } = require('pikelet-wasm/artifact');
 
 let passed = 0, failed = 0;
 function check(label, cond, detail) {

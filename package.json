@@ -1,0 +1,53 @@
+{
+  "name": "pikelet-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Workspace root for pikelet-wasm (engine + artifact readers/builders) and pikelet (CLI, MCP server, Docusaurus plugin). Not published.",
+  "workspaces": [
+    "packages/pikelet-wasm",
+    "packages/pikelet"
+  ],
+  "scripts": {
+    "build": "node scripts/build-engine.mjs",
+    "build:scalar": "node scripts/build-all.mjs --scalar-only",
+    "build:all": "node scripts/build-all.mjs",
+    "bench": "node benchmarks/engine/run.js",
+    "demo:data": "node scripts/make-demo-vectors.mjs",
+    "demo:veyra": "node examples/one-file-search/web/veyra-corpus/fetch-veyra.mjs",
+    "demo:veyra:reproduce": "npm run demo:veyra && node examples/one-file-search/web/public/reproduce-ablation.mjs",
+    "demo:artifact": "node examples/legacy/range-artifact-demo/demo.js --compact",
+    "demo:sketch": "node examples/legacy/range-artifact-demo/sketch_demo.js --compact",
+    "demo:artifact:browser:build": "vite build examples/legacy/range-artifact-demo/static",
+    "demo:artifact:browser": "vite preview examples/legacy/range-artifact-demo/static --host 127.0.0.1",
+    "build:pages-demo": "node examples/legacy/03-edge-docs-search/pages-ui/build.mjs",
+    "test": "node test/run_tests.js && node test/model_c_loader.js && node test/sketch_profile.js && node test/sketch_staged.js && node test/sketch_row_integrity.js && node test/artifact_hardening.js && node test/complete_profile.mjs && node test/mcp_conformance.mjs && node test/ingestion/run.mjs && npm run test:types",
+    "test:types": "tsc -p test/types/tsconfig.json",
+    "test:browser": "node test/browser_smoke.js",
+    "test:worker-web": "node test/test_worker_web_entry.js",
+    "test:simd": "node test/simd_parity.js",
+    "test:fuzz": "node test/fuzz_import.js",
+    "test:worker-example": "cd examples/legacy/03-edge-docs-search && npx wrangler deploy --dry-run --outdir ../../../.tmp-test-work/student-worker-distilled && cd ../../.. && node examples/legacy/03-edge-docs-search/test_worker.mjs",
+    "test:scaffold": "node scripts/test-scaffold-e2e.mjs",
+    "bench:range-storage": "node scripts/benchmark-range-storage.mjs",
+    "pack:dry-run": "node scripts/pack-dry-run.mjs",
+    "prepublish-checks": "npm run build:all && npm test && npm run test:fuzz && npm run test:simd && npm run test:browser && npm run test:worker-web && npm run test:worker-example && npm run pack:dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "miniflare": "^4.20260409.0",
+    "playwright": "^1.60.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.16",
+    "wrangler": "^4.81.1"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcn92/pikelet.git"
+  },
+  "license": "Apache-2.0"
+}

@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildQueryInterpSegment, buildCorpusSegment, buildLexicalSegment, assemblePikeletFile, PROFILE_V2 } from '../../complete/builder.mjs';
+import { buildQueryInterpSegment, buildCorpusSegment, buildLexicalSegment, assemblePikeletFile, PROFILE_V2 } from 'pikelet-wasm/complete/builder';
 import { inspect } from './compile.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -82,7 +82,7 @@ async function buildInlineQueryInterp(packManifest) {
     // Contract section 4.4 mode 1: embed verification vectors produced by
     // this very kernel+blob, so readers can prove theirs matches.
     const { createInlineTransformerEmbedder, buildInlineTestVectors } =
-        await import('../../complete/inline-transformer.mjs');
+        await import('../../packages/pikelet-wasm/complete/inline-transformer.mjs');
     const createEncoder = (await import('../../complete/encoder-kernels/encoder.node.mjs')).default;
     const embedder = await createInlineTransformerEmbedder({
         declaration: declarationFields,

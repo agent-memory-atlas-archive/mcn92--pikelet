@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openPikeletFile } from '../../../../complete/index.mjs';
+import { openPikeletFile } from 'pikelet-wasm/complete';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const QUESTION = 'What chamber is the Tovash project housed in?';

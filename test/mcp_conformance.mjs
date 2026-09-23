@@ -7,7 +7,7 @@
 // run — no compile, no encoder, no network.
 
 import { PassThrough } from 'node:stream';
-import { runMcpServer } from '../pikelet/src/mcp.mjs';
+import { runMcpServer } from '../packages/pikelet/src/mcp.mjs';
 
 let passed = 0;
 let failed = 0;

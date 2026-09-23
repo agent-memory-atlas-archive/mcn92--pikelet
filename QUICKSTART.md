@@ -40,17 +40,17 @@ npm install          # dev deps for the demos, benchmarks, and tests
 ```
 
 No build step is needed: the checkout ships the prebuilt WASM engine in
-`dist/` (`engine.{js,wasm}` plus the scalar fallback `engine.scalar.{js,wasm}`),
+`packages/pikelet-wasm/dist/` (`engine.{js,wasm}` plus the scalar fallback `engine.scalar.{js,wasm}`),
 and the root entry points use it directly.
 
-Rebuild the engine only if you are changing the C++ under `src/`. That
+Rebuild the engine only if you are changing the C++ under `packages/pikelet-wasm/engine/`. That
 requires an Emscripten toolchain (see the README's "Building from source"):
 
 ```bash
-npm run build:all    # rebuilds dist/engine.* — engine development only
+npm run build:all    # rebuilds packages/pikelet-wasm/dist/engine.* — engine development only
 ```
 
-(`./build.sh` builds only the SIMD pair, `dist/engine.{js,wasm}`; use `build:all` when you also need the scalar fallback.)
+(`./build.sh` builds only the SIMD pair, `packages/pikelet-wasm/dist/engine.{js,wasm}`; use `build:all` when you also need the scalar fallback.)
 
 ## Pick An Ingest Path
 
@@ -60,7 +60,7 @@ Use the path that matches what you already have:
 - Vectors saved as JSON / JSONL: `Pikelet.loadJsonFile(...)` on the Node entrypoints
 - Existing Pikelet snapshot on disk: `Pikelet.loadSnapshotFile(...)` on the Node entrypoints
 
-If you are working from a repo checkout, replace `import Pikelet from 'pikelet-wasm'` with `import Pikelet from './pikelet.node.mjs'` (or `require('./pikelet.js')` from CommonJS code that awaits inside an async function).
+If you are working from a repo checkout, `import Pikelet from 'pikelet-wasm'` already resolves to the in-tree package: the repository is an npm workspace, and `npm install` at the root links `node_modules/pikelet-wasm` to `packages/pikelet-wasm`. The entrypoints themselves live at `packages/pikelet-wasm/src/`.
 
 ## Local Node.js Workflow
 

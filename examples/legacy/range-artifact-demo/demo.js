@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const Pikelet = require('../../../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 // Default to the docs artifact committed to the repo so the demo runs on a
 // fresh clone with no extra data. Point --artifact at a larger .pikelet-range

@@ -4,7 +4,7 @@ const file = process.argv[2];
 const query = process.argv[3];
 
 if (!file || !query) {
-  console.error('usage: node pikelet-query.mjs <file.pikelet> "<query>"');
+  console.error('usage: node scripts/query-pack.mjs <file.pikelet> "<query>"');
   process.exit(1);
 }
 

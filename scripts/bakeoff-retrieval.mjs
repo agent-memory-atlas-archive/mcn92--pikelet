@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { openPikeletFile } = await import(path.join(ROOT, 'complete', 'index.mjs'));
+const { openPikeletFile } = await import(path.join(ROOT, 'packages', 'pikelet-wasm', 'complete', 'index.mjs'));
 
 const [artifactPath, queriesPath] = process.argv.slice(2);
 if (!artifactPath || !queriesPath) {

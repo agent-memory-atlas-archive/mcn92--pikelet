@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();

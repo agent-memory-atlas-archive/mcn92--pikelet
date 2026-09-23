@@ -46,7 +46,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue, resolveSweepValues } = require('./bench_args');
 
 const parsedArgs = parseBenchmarkArgs();
@@ -124,7 +124,7 @@ try {
 
 let native;
 try {
-  native = require('../native');
+  native = require('../../packages/pikelet-wasm/native');
 } catch (e) {
   // optional — will skip pikelet-native configs (addon not built)
 }

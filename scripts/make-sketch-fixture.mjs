@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Pikelet from '../pikelet.node.mjs';
+import Pikelet from 'pikelet-wasm';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const COUNT = 256;

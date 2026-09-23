@@ -16,7 +16,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { createInlineTransformerEmbedder } from '../../complete/inline-transformer.mjs';
+import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/complete/inline-transformer.mjs';
 import createEncoder from '../../complete/encoder-kernels/encoder.node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -1,12 +1,12 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import loadEngine from './dist/engine.js';
-import loadScalarEngine from './dist/engine.scalar.js';
-import createPikeletApi from './pikelet-core.js';
-import errorContract from './pikelet-errors.js';
-import loaderContract from './pikelet-loader.js';
-import artifactContract from './pikelet-artifact.js';
+import loadEngine from '../dist/engine.js';
+import loadScalarEngine from '../dist/engine.scalar.js';
+import createPikeletApi from './core/pikelet-core.js';
+import errorContract from './errors/pikelet-errors.js';
+import loaderContract from './loader/pikelet-loader.js';
+import artifactContract from './artifact/pikelet-artifact.js';
 const { PikeletError, PIKELET_ERROR_CODES, pikeletError } = errorContract;
 const { createCachedModuleLoader } = loaderContract;
 const { PikeletRangeArtifact, PikeletSketchArtifact, createSketchScanner, NodeFileRangeSource, buildRangeArtifact, buildRangeArtifactFile, buildSketchArtifact, buildSketchArtifactBytes, buildSketchArtifactFile } = artifactContract;
@@ -27,7 +27,7 @@ const SUPPORTED_SNAPSHOT_MAGICS = new Set([
 
 function readWasmBinary(fileName) {
   try {
-    const wasmBinary = readFileSync(path.join(__dirname, 'dist', fileName));
+    const wasmBinary = readFileSync(path.join(__dirname, '..', 'dist', fileName));
     return wasmBinary.buffer.slice(
       wasmBinary.byteOffset,
       wasmBinary.byteOffset + wasmBinary.byteLength

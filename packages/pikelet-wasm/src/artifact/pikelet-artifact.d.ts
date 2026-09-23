@@ -13,7 +13,7 @@ import type {
   SketchArtifactBuildOptions,
   SketchScanner,
   SketchScannerOptions,
-} from './pikelet.js';
+} from '../pikelet.js';
 
 /** A parsed uint8 engine snapshot, as returned by {@link parseUint8Snapshot}. */
 export interface Uint8SnapshotGraph {

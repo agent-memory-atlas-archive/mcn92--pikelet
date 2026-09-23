@@ -34,7 +34,7 @@ const search = await openPikeletFile(source, {
     // a load failure just leaves the JS scan serving. Docs-scale artifacts
     // scan in single-digit ms either way; the reader uses whatever arrives.
     sketchScanner: async (sketch) => {
-        const { default: Pikelet } = await import('../../../pikelet.web.mjs');
+        const { default: Pikelet } = await import('pikelet-wasm/web');
         return Pikelet.createSketchScanner(sketch, { maxRerank: 4096 });
     },
 });

@@ -31,7 +31,7 @@ import { performance } from 'node:perf_hooks';
 import os from 'node:os';
 import { embedChunksWithInlineTransformer } from '../../pikelet/src/embed.mjs';
 import { inlineEncoderDeclaration } from '../../pikelet/src/complete-build.mjs';
-import { createInlineTransformerEmbedder } from '../../complete/inline-transformer.mjs';
+import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/complete/inline-transformer.mjs';
 import createEncoder from '../../complete/encoder-kernels/encoder.node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

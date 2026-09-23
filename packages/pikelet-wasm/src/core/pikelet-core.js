@@ -4,7 +4,7 @@ const {
     PikeletError,
     PIKELET_ERROR_CODES,
     pikeletError,
-} = require('./pikelet-errors.js');
+} = require('../errors/pikelet-errors.js');
 
 // Envelope header for validated export/import
 const PIKELET_MAGIC = 0x504E434B; // "PNCK"

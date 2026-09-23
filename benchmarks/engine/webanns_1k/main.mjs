@@ -1,4 +1,4 @@
-import Pikelet from '../../pikelet.web.mjs';
+import Pikelet from 'pikelet-wasm/web';
 
 const DATASET_URL = '/webanns_1k/arxiv_1k.jsonl';
 const TOP_K = 10;

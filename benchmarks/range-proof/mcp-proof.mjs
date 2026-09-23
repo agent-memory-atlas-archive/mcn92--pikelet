@@ -12,7 +12,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDumbServer } from './dumb-server.mjs';
-import { openPikeletFile } from '../../complete/index.mjs';
+import { openPikeletFile } from 'pikelet-wasm/complete';
 import { PikeletMcpClient } from '../../examples/mcp-knowledge-pack/mcp_client.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');

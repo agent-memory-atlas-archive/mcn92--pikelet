@@ -45,12 +45,12 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 const { parseBenchmarkArgs, resolveSingleValue, resolveSweepValues } = require('./bench_args');
 
 // --- Optional libraries (each is independently optional; missing => skipped) ---
 let native;
-try { native = require('../native'); }
+try { native = require('../../packages/pikelet-wasm/native'); }
 catch (e) { console.warn('WARN: pikelet native binding not built (cd native && npm install) — skipping pikelet-native configs.'); }
 
 let usearch;

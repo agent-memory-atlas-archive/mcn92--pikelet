@@ -1,4 +1,4 @@
-import Pikelet from '../../../pikelet.workerd.mjs';
+import Pikelet from 'pikelet-wasm';
 import { embedTextWithStudent, loadStudentModel, scoreQuery } from '../../../test/fixtures/encoder-conformance/student-embedder.mjs';
 import SNAPSHOT_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-index.bin';
 import STUDENT_ASSET from '../../../test/fixtures/encoder-conformance/assets/docs-student.bin';

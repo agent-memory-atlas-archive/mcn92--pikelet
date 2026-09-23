@@ -3,7 +3,7 @@
 // static artifact, coalesced hydration, and calibrated abstention — with the
 // network meter as the page's centerpiece. Headless hooks (__bench, __probes)
 // are load-bearing for CI/measurement and must keep their shapes.
-import Pikelet from '../../../../pikelet.web.mjs';
+import Pikelet from 'pikelet-wasm/web';
 import { pipeline, env } from '@huggingface/transformers';
 import { createAbstentionScorer } from './abstention.js';
 import './style.css';

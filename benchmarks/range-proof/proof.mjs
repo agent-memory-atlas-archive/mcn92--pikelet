@@ -14,7 +14,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startDumbServer } from './dumb-server.mjs';
-import { openPikeletFile, httpRangeSource } from '../../complete/index.mjs';
+import { openPikeletFile, httpRangeSource } from 'pikelet-wasm/complete';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const packPath = path.resolve(process.argv[2] || path.join(ROOT, 'examples/one-file-search/pancake-wiki-inline.pancake'));

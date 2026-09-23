@@ -19,7 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 function arg(name, fallback = null) {
   const idx = process.argv.indexOf('--' + name);
@@ -123,7 +123,7 @@ function loadSketchSidecar(sidecarPath) {
 // WASM-backed scanner: sketches/scales/offsets live in the engine heap; each
 // query calls the SIMD pikelet_sketch_scan kernel.
 async function createWasmScanner(sidecar, maxC) {
-  const factory = require('../dist/engine.js');
+  const factory = require('../../packages/pikelet-wasm/dist/engine.js');
   const Module = await factory({
     wasmBinary: fs.readFileSync(path.join(__dirname, '..', 'dist', 'engine.wasm')),
   });

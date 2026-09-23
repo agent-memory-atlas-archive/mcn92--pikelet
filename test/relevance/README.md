@@ -47,8 +47,8 @@ node scripts/calibration-harness.mjs <pack.pikelet> \
 ```
 
 Not part of `npm test` (needs the local corpora above). Rerun on Veyra and
-one real corpus before and after any change to `pikelet/src/calibrate.mjs`
-or `complete/retrieval-abstention.mjs`.
+one real corpus before and after any change to `packages/pikelet/src/calibrate.mjs`
+or `packages/pikelet-wasm/complete/retrieval-abstention.mjs`.
 
 ## Running
 

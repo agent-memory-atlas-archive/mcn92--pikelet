@@ -5,7 +5,7 @@
       "sources": ["pikelet_napi.cpp"],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
-        "../src"
+        "../engine"
       ],
       "dependencies": [
         "<!(node -p \"require('node-addon-api').gyp\")"

@@ -530,7 +530,7 @@ both as equivalent.
 2. ~~Whether `sampleQueries` belongs in the manifest or the evaluation
    segment (identity implications of moving it).~~ **Resolved: manifest**
    (already the shipped behavior — section 3.2, read at
-   `complete/index.mjs:980`; this entry just records the reasoning).
+   `packages/pikelet-wasm/complete/index.mjs:980`; this entry just records the reasoning).
    Evaluation (kind 4) is required for conformance but a reader MAY
    serve queries without ever reading it (section 3.3) — sampleQueries
    is example-query text a host may want to show before a user has

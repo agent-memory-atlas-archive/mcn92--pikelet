@@ -16,7 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const Pikelet = require('../pikelet.js');
+const Pikelet = require('pikelet-wasm');
 
 const args = process.argv.slice(2);
 function intArg(name, fallback) {

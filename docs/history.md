@@ -12,7 +12,7 @@ the reasoning.
 | --- | --- |
 | 2026-09-02 | Packages renamed: `pancake-wasm` → `pikelet-wasm`, `create-pancake-search` → `pikelet` (one CLI: `create`, `compile`, `doctor`, `mcp`). New compiles default to the `.pikelet` extension. The wire format kept its pancake-era names on purpose. Released as 0.7.0. |
 | 2026-09-03 – 09-05 | Repo-wide rename of directories, entrypoints, error strings, and prose. The GitHub repository moved to `mcn92/pikelet` (the old URL redirects). |
-| 2026-09-12 | The published surface renamed: `Pancake*` API names → `Pikelet*` with the compatibility aliases dropped, the C ABI `pancake_*` → `pikelet_*`, the N-API addon source to `native/pikelet_napi.cpp`, and the manifest profile strings `pancake-complete-v1/v2` → `pikelet-complete-v1/v2`. Readers accept both profile strings for the same format version (`LEGACY_PROFILES` in `complete/index.mjs`). Released as 0.8.0 — see the CHANGELOG for the identity consequence. |
+| 2026-09-12 | The published surface renamed: `Pancake*` API names → `Pikelet*` with the compatibility aliases dropped, the C ABI `pancake_*` → `pikelet_*`, the N-API addon source to `packages/pikelet-wasm/native/pikelet_napi.cpp`, and the manifest profile strings `pancake-complete-v1/v2` → `pikelet-complete-v1/v2`. Readers accept both profile strings for the same format version (`LEGACY_PROFILES` in `packages/pikelet-wasm/complete/index.mjs`). Released as 0.8.0 — see the CHANGELOG for the identity consequence. |
 | 0.8.x | The `PANCAKE_*` environment-variable fallbacks were removed; only `PIKELET_*` names are read. |
 
 ## What still says "pancake", and why it stays
@@ -20,7 +20,7 @@ the reasoning.
 These are not leftovers. Each is either a compatibility guarantee, an
 external identifier, or data.
 
-- **Profile strings on read.** `complete/index.mjs` accepts
+- **Profile strings on read.** `packages/pikelet-wasm/complete/index.mjs` accepts
   `pancake-complete-v1/v2` alongside the `pikelet-` strings. Every pack
   published before 2026-09-12 — including the live wiki, astro-docs and
   rust-book release assets — carries the old string, and its identity is
@@ -48,7 +48,7 @@ external identifier, or data.
   `pancake` as config labels or corpus text. They are records or
   hash-verified inputs; editing them would falsify a measurement or break
   a fixture.
-- **Corpus vocabulary in the student trainer.** `pikelet/tools/train_student.py`
+- **Corpus vocabulary in the student trainer.** `packages/pikelet/tools/train_student.py`
   lists `pancake` among the documentation-corpus tokens it was distilled
   against. Changing the list changes the training procedure.
 - **The test fixture `pancake-wiki.pancake`** named in
