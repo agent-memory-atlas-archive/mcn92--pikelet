@@ -36,6 +36,11 @@ first.
   to `examples/technical-demo.html` (loads `../dist/engine.js`), and
   `docs/SYSTEM_DESIGN.md` is `docs/architecture.md`. The wiki playground's
   built bundle and deployment are unchanged.
+- **README trimmed to the pitch, quickstart, live demo, numbers and
+  links** (577 → ~340 lines). Its long-form sections moved verbatim to
+  `docs/how-a-query-runs.md` (what is inside the file, compression cost,
+  remote execution, integrity), `docs/veyra-ablation.md` and
+  `docs/why-a-file.md`, linked from a new "Deeper dives" section.
 - **Benchmarks consolidated under `benchmarks/`**: `bench/beir` →
   `benchmarks/beir`, `bench/range-proof` → `benchmarks/range-proof`, the
   engine suite (formerly `benchmarks/`) → `benchmarks/engine`, and the

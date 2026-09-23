@@ -147,7 +147,7 @@ That is the product in one demonstration:
 
 > **A model is interrogating a 456,153-record knowledge base whose backend is a static file.**
 
-The model may already contain some of these facts in its pretrained parameters. This test demonstrates the retrieval, synthesis, citation, and deployment path; the Veyra ablation below tests whether support changes when evidence is removed from the pack.
+The model may already contain some of these facts in its pretrained parameters. This test demonstrates the retrieval, synthesis, citation, and deployment path; the [Veyra ablation](docs/veyra-ablation.md) tests whether support changes when evidence is removed from the pack.
 
 **Network cost.** In a single persistent session (one mount, five queries, one repeat):
 
@@ -170,104 +170,6 @@ The headless-Claude test above used a fresh process per question, so each invoca
 
 ---
 
-## What happens if the answer is changed or removed from the file?
-
-This is different from asking whether search returns sensible documents. To test whether Pikelet's retrieval-quality signal could form a useful evidence boundary, a synthetic corpus called **Station Veyra Registry** was built. One version contained the fact:
-
-```text
-The Tovash project is housed in Chamber 17.
-```
-
-A second pack was byte-for-byte identical except that the record containing that fact was removed.
-
-```text
-full pack:     matchQuality: strong    confidence: 0.915   → Chamber 17
-ablated pack:  matchQuality: none      confidence: 0.136   → unsupported
-```
-
-After the model had already seen the answer, it was queried against the ablated pack with prompts like "Confirm Tovash is in Chamber 17" and "Tovash project Chamber 17 location." The retrieval result stayed unsupported and the model declined to confirm the location from the pack. A separate, informal session then probed a fresh isolated agent with neutral prompts, leading prompts, authority pressure, invitations to use general knowledge, cross-record distractors, and repeated pressure — six adversarial framings — and it continued distinguishing supported facts from the removed one in every case; that session wasn't captured as a script, so treat it as a described observation rather than a reproducible result.
-
-This does **not** mean Pikelet can prevent an LLM from hallucinating. It means the artifact can expose an explicit evidence boundary that a consuming model can choose to respect — and removing evidence from the artifact changed what that model was able to support from the mounted source.
-
-A second intervention changed only the Tovash location source record from **Chamber 17** to **Chamber 43**, rebuilt the pack, and repeated the same prompt in a fresh session:
-
-```text
-chamber43 pack: matchQuality: strong    confidence: 0.916   → Chamber 43
-```
-
-The model answered **Chamber 43** and cited the same logical source record. With Veyra not mounted at all, the same prompt produced no chamber number and the model declined to guess. Change the evidence and the grounded answer changes with it; remove the evidence source and the answer disappears.
-
-The test is synthetic and intentionally narrow. The exact packs used for the results above are published as the `veyra-packs-v1` GitHub release assets rather than committed to the repository. Fetch and SHA-256-verify them once, then reproduce the retrieval-side intervention:
-
-```bash
-npm run demo:veyra
-node examples/one-file-search/web/public/reproduce-ablation.mjs
-```
-
-The script reproduces `matchQuality`, confidence, and retrieved evidence for the full, ablated, and Chamber 43 packs. The paired LLM-session results — declining to confirm the removed fact, answering Chamber 43 after the mutation, and declining without Veyra mounted — were run separately and are not scripted here.
-
----
-
-## What does the compression cost?
-
-The artifact architecture is only useful if the compact representation does not quietly destroy retrieval. The retrieval path was decomposed on BEIR rather than evaluated only end-to-end, across four configurations that isolate each transformation:
-
-```text
-A  upstream all-MiniLM-L6-v2, float32 corpus, exhaustive search
-B  Pikelet embedded encoder,  float32 corpus, exhaustive search
-C  Pikelet embedded encoder,  affine-u8 corpus, exhaustive search
-D  Pikelet embedded encoder,  affine-u8 corpus, Pikelet HNSW
-```
-
-Corpus mapping and evaluation config were frozen before the runs. Official BEIR qrels are used; no LLM judges relevance.
-
-| Dataset  | Config                                     |    nDCG@10 |  Recall@10 | Recall@100 | median ms/q | p95 ms/q |
-| -------- | ------------------------------------------ | ---------: | ---------: | ---------: | ----------: | -------: |
-| SciFact  | A — upstream float exhaustive              |     0.6451 |     0.7833 |     0.9250 |         3.6 |      4.0 |
-| SciFact  | B — Pikelet encoder / float exhaustive     |     0.6512 |     0.7942 |     0.9417 |         3.8 |      4.4 |
-| SciFact  | C — Pikelet encoder / affine-u8 exhaustive |     0.6500 |     0.7942 |     0.9417 |         6.9 |      8.7 |
-| SciFact  | D — Pikelet encoder / affine-u8 HNSW       | **0.6500** | **0.7942** | **0.9417** |    **0.15** | **0.24** |
-| NFCorpus | A — upstream float exhaustive              |     0.3159 |     0.1550 |     0.3115 |         2.6 |      3.1 |
-| NFCorpus | B — Pikelet encoder / float exhaustive     |     0.3154 |     0.1511 |     0.3044 |         2.8 |      3.3 |
-| NFCorpus | C — Pikelet encoder / affine-u8 exhaustive |     0.3154 |     0.1511 |     0.3036 |         2.9 |      3.6 |
-| NFCorpus | D — Pikelet encoder / affine-u8 HNSW       | **0.3135** | **0.1482** | **0.3061** |    **0.16** | **0.25** |
-| ArguAna  | A — upstream float exhaustive              |     0.3698 |     0.7653 |     0.9772 |         7.8 |     10.8 |
-| ArguAna  | B — Pikelet encoder / float exhaustive     |     0.3506 |     0.7397 |     0.9801 |         6.1 |      7.3 |
-| ArguAna  | C — Pikelet encoder / affine-u8 exhaustive |     0.3496 |     0.7368 |     0.9801 |         6.4 |      7.5 |
-| ArguAna  | D — Pikelet encoder / affine-u8 HNSW       | **0.3496** | **0.7368** | **0.9808** |    **0.12** | **0.20** |
-
-These results are more useful because they are not uniformly flattering.
-
-**Affine-u8 storage is not the main quality cost** (B→C nDCG@10: SciFact 0.6512→0.6500, NFCorpus 0.3154→0.3154, ArguAna 0.3506→0.3496). **HNSW is similarly close to exhaustive search** at these settings (C→D: SciFact and ArguAna unchanged at reported precision; NFCorpus exposes a small approximation loss, 0.3154→0.3135).
-
-**The largest observed loss is the embedded query encoder on ArguAna**: A→B moves nDCG@10 from 0.3698 to 0.3506, about a 5% relative reduction. Recall@100 actually improves slightly (0.9772→0.9801) — the relevant document is generally still in the candidate set; the degradation is in fine ordering near the top. That limitation isn't hidden: MiniLM is small *because* the goal is to fit the query encoder inside the artifact. It is not state of the art, and the compact implementation is not behaviorally identical to an upstream sentence-transformers runtime on every task.
-
-The benchmark harness, quantization-conformance test, frozen configuration, and raw runs live under `benchmarks/beir/`.
-
----
-
-## Why make knowledge a file?
-
-The conventional retrieval deployment looks something like:
-
-```text
-documents → chunking → embedding service → vector database
-                                          → keyword database
-                                          → retrieval service → application API → agent
-```
-
-That is the correct architecture for many workloads. But it is a lot of machinery when the corpus is fundamentally a release artifact: product documentation, a manual, a source tree, a legal code, a standards corpus, a research collection, a book, a knowledge snapshot, an offline reference set. These datasets often change daily, weekly, monthly, or with releases — not hundreds of times per second.
-
-For those workloads, Pikelet asks a different question:
-
-> **What if retrieval could be compiled ahead of time and distributed with the corpus?**
-
-Then deployment becomes: copy the file, cache it, pin it, put it behind a CDN, mount it by URL. The storage layer does not need to know that the file contains vectors.
-
-It is not a replacement for a mutable vector database. It is an attempt to make **static and slowly changing knowledge deploy like any other artifact**.
-
----
-
 ## Attach a pack to an LLM
 
 `pikelet mcp` exposes one or more packs through the Model Context Protocol:
@@ -284,7 +186,7 @@ A pack mounted with a content hash has a stable identity — `https://example.co
 
 **A mounted pack's content reaches the model as tool output.** `verify_pack` proves the bytes are intact and match their pinned identity; it does not prove the corpus itself is trustworthy. Mounting a pack from a source you don't control is the same trust decision as giving an agent any other untrusted-content tool — treat pack text the way you'd treat search results or fetched web pages, not as instructions.
 
-**Try it with your own questions.** The three Veyra packs from the intervention above are published as pinned GitHub release assets. Fetch and verify them first:
+**Try it with your own questions.** The three Veyra packs from the [ablation](docs/veyra-ablation.md) are published as pinned GitHub release assets. Fetch and verify them first:
 
 ```bash
 npm run demo:veyra
@@ -310,45 +212,6 @@ All three packs derive from the same small synthetic Station Veyra corpus, with 
 
 ---
 
-## How a remote query runs
-
-Over a network, what makes search slow is not bytes; it's sequential round trips. Graph traversal is a chain of dependent reads — fetch node, inspect neighbors, fetch the next node, repeat — and across object storage those dependent round trips dominate. Measured against SIFT1M over real network storage, a resident scan plus one batched candidate-fetch phase beat graph traversal by about 5× at equal recall. So the remote artifact path carries no graph. The HNSW graph still exists — it's the in-memory engine, used when the whole index is local and round trips are free; that's the path BEIR Config D measures.
-
-For the remote path:
-
-1. **Resident tier** — a pooled sketch of every semantic row loads once when the artifact opens and stays in memory. For the 456,153-record Wikipedia pack: 648.5 MiB artifact, 51.7 MiB mount fetch. A SIMD kernel scans all of it in milliseconds.
-2. **Candidate selection** — the scan picks the top `C` candidates against the query vector; the lexical BM25 index can contribute additional candidates into the same set. `C` is the only real knob: the compiler measures recall against brute force on held-out queries at build time and writes the operating point into the file, so readers don't have to guess it.
-3. **Batched byte-range fetch** — full affine-u8 rows for the candidate set are fetched in one parallel round, nearby ranges coalesced, rather than a graph-dependent network walk.
-4. **Full rerank** — fetched rows are scored against the float query and verified against their digest.
-5. **Corpus hydration** — only the records needed for returned results are fetched, each carrying record ID, title, section, source, and artifact identity. The reader returns evidence, not anonymous vector IDs.
-
-That architecture is why a 648.5 MiB pack can answer a fresh query while fetching about 0.5–1.1 MiB after warmup.
-
----
-
-## Integrity is part of the read path
-
-A range-readable artifact cannot hash the entire file on every open without defeating the point of range reads, so integrity is layered: the resident structural portion is verified during open; lazily fetched index rows and corpus records carry independent commitments and are checked when read. Bytes a query never touches don't have to cross the network merely to prove the bytes it *did* use were correct.
-
-One exception: a lexical (BM25) segment above 8 MiB opens lazily and is covered only by the manifest's whole-segment digest, not per-read like index rows and corpus records — the same transitional stance format-1 sketch rows carry. A pack large enough for this to apply can have its lexical candidates altered between open and a full verification pass without failing a query.
-
-The failure-mode suite (`benchmarks/range-proof/failure-modes.mjs`) exercises the important cases:
-
-```text
-correct Range server         → mounts, queries successfully
-server ignores Range         → small files fall back to a bounded download;
-                                large files refuse ("host ignores Range and the
-                                file is 680029254 bytes; refusing full download" —
-                                the cap is currently 64 MiB)
-bytes change under a pinned identity → refused; tampered data is not silently served
-truncated Range response     → fetch fails; no partial result is silently
-                                interpreted as valid data
-```
-
-The point is not that static HTTP is magically reliable. The point is that a static artifact can fail in explicit, testable ways.
-
----
-
 ## Match quality and abstention
 
 A nearest neighbour is not automatically evidence that a corpus answers a question. Pikelet can calibrate retrieval signals at build time (best semantic distance, distance margin, lexical coverage, retrieval agreement). When the corpus supports a reliable classifier, results carry `matchQuality: strong | weak | none`. When calibration can't separate supported from unsupported reliably — a single novel may be semantically homogeneous enough that the fit isn't trustworthy — Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. A `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way.
@@ -357,94 +220,12 @@ A nearest neighbour is not automatically evidence that a corpus answers a questi
 
 ---
 
-## What's inside a `.pikelet`
+## Deeper dives
 
-```text
-manifest        format versions, segment offsets, artifact identity
-semantic index  resident sketch rows, full affine-u8 rows, row commitments
-corpus          source records, offsets, per-record commitments
-query encoder   WordPiece vocabulary, quantized MiniLM weights, encoder declaration
-lexical index   BM25 postings
-calibration     supported / unsupported retrieval model
-evaluation      golden queries / expected behavior
-```
-
-The artifact is immutable. Publish a new corpus by publishing a new artifact; old artifacts retain their identity.
-
-**Encoder profiles.** Self-containment has a cost — the default profile carries ~25 MiB of MiniLM data regardless of corpus size. Three arrangements: **inline** (tokenizer + weights + runtime in the artifact — largest file, no external dependency, used by the Wikipedia demo above), **distilled/compact** (smaller corpus-specific representation, lower footprint, potentially lower quality), **host-supplied** (the artifact declares expected encoder behavior and verifies the host implementation against embedded test vectors — smallest artifact, no longer fully self-contained). The format treats the encoder as a capability, not Pikelet's identity — MiniLM is the current choice, not a permanent requirement.
-
----
-
-## One decision
-
-Most of the implementation follows from how a vector is stored. Each row is 8-bit integers plus two floats:
-
-```text
-x[d] ≈ offset + scale · q[d]        q[d] ∈ 0..255
-```
-
-That's a per-row affine map. It costs 4× less memory than float32, which is the ordinary reason to do it. The reason it runs through the whole project is that every operation search needs — dot products, sums, averages — is linear, and affine terms factor out of linear operations.
-
-**Query against a stored row.** The query stays float32 and is never quantized.
-
-```text
-y·x = offset·Σy + scale·(y·q)
-```
-
-The inner loop multiplies floats by bytes. The two constants come in once at the end. No decompressed copy of the row ever exists.
-
-**Stored row against stored row.** This is what graph construction needs, thousands of times per insert.
-
-```text
-x_i·x_j = D·o_i·o_j + o_i·s_j·Σq_j + o_j·s_i·Σq_i + s_i·s_j·(q_i·q_j)
-```
-
-`D` is the vector's dimensionality (384 for the bundled encoder). `q_i·q_j` is an integer dot over two byte arrays, which maps efficiently onto SIMD. `Σq` is stored per row. The HNSW graph is built and repaired entirely on compressed data.
-
-**Pooling.** Average adjacent groups of `p` bytes and you get a shorter row. Because the mean of `offset + scale·q` over a group equals `offset + scale·mean(q)`, the shorter row keeps the *same two constants*. That's the resident sketch tier; a micro tier is the same thing done twice.
-
-**Weights.** The bundled query encoder is a 6-layer MiniLM whose matrices are stored the same way, one (scale, offset) per 64-column block. Activations stay float32, weights stay bytes, dequantization happens inside the matmul — the same widen-and-multiply trick, a separate kernel, that scores vectors.
-
-The consequence for the file format: a row decodes from its own bytes and its own two floats and nothing else. No codebook, no global statistics. Every row is a fixed-size byte range at a computable offset — locatable by arithmetic, fetchable on its own, hashable on its own, verifiable on the read that fetches it.
-
-**Why not product quantization.** Product quantization would compress harder. It would also need a codebook, a training pass, table lookups in the distance kernel, and rows that mean nothing without the codebook. Four-to-one with no shared state was the better trade for a file meant to be read in pieces.
-
----
-
-## Build once, publish anywhere
-
-```bash
-npx pikelet compile --source ./docs --out docs.pikelet
-```
-
-```js
-import { openPikeletFile } from 'pikelet-wasm/complete';
-
-const pack = await openPikeletFile('https://example.com/docs.pikelet#<sha256>');
-const result = await pack.query('how do workers restore snapshots', { k: 5 });
-
-console.log(result.matchQuality);
-for (const hit of result.results) console.log(hit.title, hit.section);
-
-await pack.close();
-```
-
-The same artifact can also be opened from a local path or any custom source implementing `{ size, read(offset, length) }`.
-
-**Or use the search engine directly**, if you already have vectors and don't need the artifact layer:
-
-```js
-import Pikelet from 'pikelet-wasm';
-
-const index = await Pikelet.create({ dim: 384, maxElements: 100000, metric: 'cosine', quantized: true });
-index.add(vector);
-const results = index.search(query, 10);
-const snapshot = index.export();
-```
-
-float32 HNSW, affine-u8 HNSW, insert/delete, compaction, import/export, deterministic snapshots, WASM with no native addon dependency. Pikelet is usable as a vector engine — that's just no longer the main reason the project exists.
-
----
+- [How a `.pikelet` query runs](docs/how-a-query-runs.md) — what is inside the file, what a query costs on the wire, remote execution, and the integrity checks on the read path.
+- [The Veyra ablation](docs/veyra-ablation.md) — what happens to answers when the supporting record is edited or removed from the pack, with the reproduction commands.
+- [Why make knowledge a file](docs/why-a-file.md) — the reasoning behind the single-artifact design, and what it commits to.
+- [Architecture](docs/architecture.md) — the engine, the C ABI and the JavaScript wrapper; the artifact formats are specified in [`spec/`](spec/).
 
 ## What this is not
 
@@ -455,21 +236,6 @@ float32 HNSW, affine-u8 HNSW, insert/delete, compaction, import/export, determin
 **Not "LLMs can no longer hallucinate."** The artifact exposes retrieved evidence, provenance, integrity, and an explicit support signal. Whether an agent obeys those signals is an agent behavior question.
 
 **Not a new HNSW algorithm.** HNSW is HNSW. HTTP Range is HTTP Range. BM25 is BM25. MiniLM is MiniLM. Affine quantization is not new either. The project is about what becomes possible when those pieces are arranged around one constraint: **the knowledge base itself must be distributable as a file and remain useful without dedicated retrieval infrastructure.**
-
----
-
-## Why the file format matters
-
-A retrieval service is identified by an endpoint. A Pikelet is identified by its contents.
-
-- **Reproducibility** — pack hash + record ID identifies the exact evidence a model retrieved.
-- **Versioning** — different releases are different artifacts (`docs-v1.pikelet`, `docs-v2.pikelet`); no silent mutation.
-- **Distribution** — a pack can be mirrored by infrastructure that knows nothing about semantic search.
-- **Offline use** — once local, no network or embedding service needed.
-- **Customer-controlled knowledge** — hand someone the artifact instead of granting access to internal retrieval infrastructure.
-- **Agent knowledge environments** — run a task against a frozen snapshot, reproduce it later against the same bytes.
-
-> **Can knowledge become a first-class software artifact rather than something that always has to live behind a service?**
 
 ---
 
@@ -516,6 +282,9 @@ complete/, pikelet-artifact.js    Readers and builders for the complete
                                    range-readable artifact
 pikelet/                          CLI, compiler, MCP server, encoder
                                    integration, higher-level tooling
+docs/                             Deeper dives (how a query runs, the Veyra
+                                   ablation, why a file), architecture notes,
+                                   rename history, measurement reports
 spec/                             Byte-level artifact contracts
 benchmarks/beir/                       Frozen BEIR ablation harness (encoder,
                                    quantization, HNSW quality)
@@ -562,14 +331,6 @@ Pikelet is early. The implementation is real; the format is not frozen. One prim
 Previously known as **Pancake** (renamed September 2026); artifacts, profile strings and files from before the rename remain readable — see [`docs/history.md`](docs/history.md) for what kept the old name and why. Pikelet is unrelated to the pre-existing Pikelet programming language.
 
 ---
-
-## The experiment
-
-> **For static and slowly changing corpora, useful semantic retrieval can be compiled into the artifact being distributed instead of operated as a separate service.**
-
-The implementation currently demonstrates: one file, 456,153 records, 648.5 MiB, embedded query encoder, semantic + lexical retrieval, content identity, per-record integrity, MCP mounting, static HTTP hosting, ~0.5–1.1 MiB fresh-query range traffic after warmup, real multi-record LLM synthesis, no retrieval backend.
-
-There are many reasons a database remains the right answer. Pikelet exists for the cases where the knowledge itself should be something you can **build, hash, copy, cache, publish, mount, query, and keep.**
 
 ## License
 
