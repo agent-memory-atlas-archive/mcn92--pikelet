@@ -18,7 +18,7 @@ has only config A so far; TREC-COVID has not been run):
 - **B** Pikelet encoder + float32 exhaustive
 - **C** Pikelet encoder + affine-u8 exhaustive
 - **D** Pikelet encoder + affine-u8 sketch artifact (dense only — the real
-  `PancakeSketchArtifact`/HNSW-equivalent search, but vector-only)
+  `PikeletSketchArtifact`/HNSW-equivalent search, but vector-only)
 - **E** Pikelet encoder + affine-u8 sketch artifact + BM25, hybrid RRF — **the
   production default**, same fusion math as `complete/index.mjs` exactly
   (RRF_K=60, BM25 candidates within a factor of 1.5 of the top lexical score
@@ -54,7 +54,7 @@ benchmarks/beir/
   query-D.mjs              config D: Pikelet-encoder vectors + real sketch artifact search (dense only)
   query-E.mjs              config E: sketch artifact + BM25, hybrid RRF (production default) — builds an
                            in-memory lexical index (complete/builder.mjs buildLexicalSegment) and a real
-                           PancakeSketchArtifact from index.export(), fuses exactly as complete/index.mjs does
+                           PikeletSketchArtifact from index.export(), fuses exactly as complete/index.mjs does
   query-F.mjs              config F: BM25 lexical only (retrieval: 'lexical')
   encode-pikelet-arctic.mjs   Arctic-XS (Snowflake/snowflake-arctic-embed-xs) through the same production
                               embedChunksWithInlineTransformer/createInlineTransformerEmbedder paths as

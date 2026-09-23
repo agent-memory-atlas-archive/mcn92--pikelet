@@ -1,11 +1,11 @@
 float:
   any:
     - base_args: ['@metric', true]
-      constructor: Pancake
+      constructor: Pikelet
       disabled: false
-      docker_tag: ann-benchmarks-pancake
+      docker_tag: ann-benchmarks-pikelet
       module: ann_benchmarks.algorithms.pikelet
-      name: pancake-u8
+      name: pikelet-u8
       run_groups:
         M-8:
           arg_groups: [{M: 8, efConstruction: 500}]
@@ -20,11 +20,11 @@ float:
           args: {}
           query_args: [[10, 20, 40, 80, 120, 200, 400, 600, 800]]
     - base_args: ['@metric', false]
-      constructor: Pancake
+      constructor: Pikelet
       disabled: false
-      docker_tag: ann-benchmarks-pancake
+      docker_tag: ann-benchmarks-pikelet
       module: ann_benchmarks.algorithms.pikelet
-      name: pancake-fp32
+      name: pikelet-fp32
       run_groups:
         M-8:
           arg_groups: [{M: 8, efConstruction: 500}]

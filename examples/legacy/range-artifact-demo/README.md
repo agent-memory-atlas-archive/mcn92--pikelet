@@ -100,11 +100,11 @@ For HTTP or R2, provide a range source instead of a local file. See
 HTTP range source:
 
 ```js
-const { PancakeRangeArtifact } = require('pikelet-wasm/artifact');
+const { PikeletRangeArtifact } = require('pikelet-wasm/artifact');
 const { createHttpRangeSource } = require('./range_sources.js');
 
 const source = createHttpRangeSource('https://example.com/index.pikelet-range');
-const artifact = await PancakeRangeArtifact.open(source);
+const artifact = await PikeletRangeArtifact.open(source);
 ```
 
 R2 range source:

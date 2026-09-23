@@ -121,7 +121,7 @@ function loadSketchSidecar(sidecarPath) {
 }
 
 // WASM-backed scanner: sketches/scales/offsets live in the engine heap; each
-// query calls the SIMD pancake_sketch_scan kernel.
+// query calls the SIMD pikelet_sketch_scan kernel.
 async function createWasmScanner(sidecar, maxC) {
   const factory = require('../dist/engine.js');
   const Module = await factory({

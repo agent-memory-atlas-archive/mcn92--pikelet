@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install Pancake's adapter and native binding into an ANN-Benchmarks checkout."""
+"""Install Pikelet's adapter and native binding into an ANN-Benchmarks checkout."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import sysconfig
 
 
 HERE = pathlib.Path(__file__).resolve().parent
-PANCAKE_ROOT = HERE.parent.parent
+PIKELET_ROOT = HERE.parent.parent.parent
 
 
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
@@ -65,17 +65,17 @@ def main() -> None:
     if not (checkout / "ann_benchmarks" / "algorithms" / "base" / "module.py").is_file():
         raise SystemExit(f"Not an ANN-Benchmarks checkout: {checkout}")
 
-    target = checkout / "ann_benchmarks" / "algorithms" / "pancake"
+    target = checkout / "ann_benchmarks" / "algorithms" / "pikelet"
     target.mkdir(parents=True, exist_ok=True)
     for name in ("module.py", "config.yml", "Dockerfile"):
-        shutil.copy2(HERE / "pancake" / name, target / name)
+        shutil.copy2(HERE / "pikelet" / name, target / name)
     patch_angular_distance(checkout)
 
     includes = shlex.split(
         subprocess.check_output([sys.executable, "-m", "pybind11", "--includes"], text=True).strip()
     )
     extension = sysconfig.get_config_var("EXT_SUFFIX")
-    output = checkout / f"pancake_py{extension}"
+    output = checkout / f"pikelet_py{extension}"
     command = [
         args.cxx,
         "-O3",
@@ -83,21 +83,21 @@ def main() -> None:
         "-std=c++17",
         "-shared",
         "-fPIC",
-        "-DPANCAKE_ENABLE_AVX2_SIMD",
+        "-DPIKELET_ENABLE_AVX2_SIMD",
         "-mavx2",
         "-mfma",
         *includes,
-        f"-I{PANCAKE_ROOT / 'src'}",
-        str(PANCAKE_ROOT / "benchmarks" / "vibe" / "pancake_py.cpp"),
+        f"-I{PIKELET_ROOT / 'src'}",
+        str(PIKELET_ROOT / "benchmarks" / "engine" / "vibe" / "pikelet_py.cpp"),
         "-o",
         str(output),
     ]
     run(command)
 
     check = (
-        "import pancake_py; "
-        "assert hasattr(pancake_py, 'PancakeIndex'); "
-        "print('Pancake binding:', pancake_py.__file__)"
+        "import pikelet_py; "
+        "assert hasattr(pikelet_py, 'PikeletIndex'); "
+        "print('Pikelet binding:', pikelet_py.__file__)"
     )
     run([sys.executable, "-c", check], cwd=checkout)
     print(f"Installed adapter at {target}")

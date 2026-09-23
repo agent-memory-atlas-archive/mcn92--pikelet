@@ -13,7 +13,7 @@
  *
  * Configs:
  *   pikelet-wasm   u8 / fp32   (Pikelet.create, setEfSearch per ef)
- *   pikelet-native u8 / fp32   (native.pancake_*, native.pancake_set_ef per ef)
+ *   pikelet-native u8 / fp32   (native.pikelet_*, native.pikelet_set_ef per ef)
  *   usearch-native i8 / f16 / f32 (build-once-save-view per ef —
  *                                  expansion_search is fixed at construction)
  *   usearch-wasm   i8 / f32      (C ABI directly against the WASM artifact;
@@ -710,7 +710,7 @@ function buildPikeletNative({ train, dim, dtype }) {
   const quantized = dtype === 'u8' ? 1 : 0;
   log(`  [${dtype} native] build (M=${M}, ef_c=${EF_CONSTRUCTION}, metric=${METRIC})...`);
   const rssBefore = measureRssBytes();
-  const h = native.pancake_init(dim, train.length, quantized, nativeMetricValue(), M, EF_CONSTRUCTION, EF_SEARCH_VALUES[0], 108);
+  const h = native.pikelet_init(dim, train.length, quantized, nativeMetricValue(), M, EF_CONSTRUCTION, EF_SEARCH_VALUES[0], 108);
   if (h === 0xFFFFFFFF) throw new Error('Failed to init native index');
   const t0 = performance.now();
   const flat = new Float32Array(train.length * dim);
@@ -718,22 +718,22 @@ function buildPikeletNative({ train, dim, dtype }) {
   const batchSize = 10000;
   for (let start = 0; start < train.length; start += batchSize) {
     const end = Math.min(start + batchSize, train.length);
-    native.pancake_bulk_insert(h, flat.subarray(start * dim, end * dim), end - start);
+    native.pikelet_bulk_insert(h, flat.subarray(start * dim, end * dim), end - start);
   }
   const buildMs = performance.now() - t0;
-  const memBytes = native.pancake_memory(h);
+  const memBytes = native.pikelet_memory(h);
   const rssDelta = rssDeltaBytes(rssBefore, measureRssBytes());
   log(`  [${dtype} native] build: ${(buildMs / 1000).toFixed(1)}s, logical index: ${formatMB(memBytes)} (rss +${formatMB(rssDelta)})`);
   return { handle: h, buildMs, memBytes, memorySource: 'logical_index', rssDeltaBytes: rssDelta };
 }
 function queryPikeletNative(built, test, gt, ef) {
-  native.pancake_set_ef(built.handle, ef);
-  for (let i = 0; i < WARMUP_QUERIES && i < test.length; i++) native.pancake_query(built.handle, test[i], K);
+  native.pikelet_set_ef(built.handle, ef);
+  for (let i = 0; i < WARMUP_QUERIES && i < test.length; i++) native.pikelet_query(built.handle, test[i], K);
   const latencies = new Array(test.length);
   let totalRecall = 0;
   for (let i = 0; i < test.length; i++) {
     const st = performance.now();
-    const result = native.pancake_query(built.handle, test[i], K);
+    const result = native.pikelet_query(built.handle, test[i], K);
     latencies[i] = performance.now() - st;
     totalRecall += recall(Array.from(result.ids), gt[i]);
   }
@@ -1170,7 +1170,7 @@ function query(config, built, dataset, ef) {
   }
 }
 function cleanup(config, built) {
-  if (config.library === 'pikelet' && config.runtime === 'native') native.pancake_dispose(built.handle);
+  if (config.library === 'pikelet' && config.runtime === 'native') native.pikelet_dispose(built.handle);
   else if (config.library === 'usearch-wasm' && built.runtime) {
     const sp = built.runtime.stackSave();
     try {

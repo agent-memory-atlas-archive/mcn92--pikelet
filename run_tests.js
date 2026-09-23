@@ -419,7 +419,7 @@ async function testCreation() {
     // Capacity guard: configurations whose eager arena allocation cannot fit
     // the wasm32 heap must be rejected with a coded error at create(), before
     // the engine is even loaded — an uncaught std::bad_alloc inside
-    // pancake_init would otherwise abort the whole WASM instance.
+    // pikelet_init would otherwise abort the whole WASM instance.
     {
         const big = { dim: 4096, maxElements: 50_000_000, metric: 'l2', M: 12 };
         let err = null;

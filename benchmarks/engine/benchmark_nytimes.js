@@ -446,7 +446,7 @@ function queryPikelet(index, test, groundTruth, efSearch) {
 function buildPikeletNative({ train, dim, dtype }) {
   const quantized = dtype === 'u8' ? 1 : 0;
   log(`  [pikelet-${dtype}-native] building index (M=${M}, ef_c=${EF_CONSTRUCTION})...`);
-  const h = native.pancake_init(dim, train.length, quantized, 1 /* 1=cosine */, M, EF_CONSTRUCTION, EF_SEARCH_VALUES[0], 108);
+  const h = native.pikelet_init(dim, train.length, quantized, 1 /* 1=cosine */, M, EF_CONSTRUCTION, EF_SEARCH_VALUES[0], 108);
   if (h === 0xFFFFFFFF) throw new Error('Failed to init native pikelet index');
 
   const t0 = performance.now();
@@ -455,25 +455,25 @@ function buildPikeletNative({ train, dim, dtype }) {
   const batchSize = 10000;
   for (let start = 0; start < train.length; start += batchSize) {
     const end = Math.min(start + batchSize, train.length);
-    native.pancake_bulk_insert(h, flat.subarray(start * dim, end * dim), end - start);
+    native.pikelet_bulk_insert(h, flat.subarray(start * dim, end * dim), end - start);
   }
   const buildMs = performance.now() - t0;
-  const memMB = native.pancake_memory(h) / 1024 / 1024;
+  const memMB = native.pikelet_memory(h) / 1024 / 1024;
   log(`  [pikelet-${dtype}-native] build: ${(buildMs / 1000).toFixed(1)}s, memory: ${memMB.toFixed(0)} MB`);
   return { handle: h, buildMs, memoryMB: memMB };
 }
 
 function queryPikeletNative(built, test, groundTruth, efSearch) {
-  native.pancake_set_ef(built.handle, efSearch);
+  native.pikelet_set_ef(built.handle, efSearch);
   for (let i = 0; i < WARMUP_QUERIES && i < test.length; i++) {
-    native.pancake_query(built.handle, test[i], K);
+    native.pikelet_query(built.handle, test[i], K);
   }
 
   const latencies = new Float64Array(test.length);
   let totalRecall = 0;
   for (let i = 0; i < test.length; i++) {
     const st = performance.now();
-    const result = native.pancake_query(built.handle, test[i], K);
+    const result = native.pikelet_query(built.handle, test[i], K);
     latencies[i] = performance.now() - st;
     let hits = 0;
     const truth = groundTruth[i];
@@ -615,7 +615,7 @@ async function sweepOne(config, dataset) {
   }
 
   if (config.library === 'pikelet-native') {
-    native.pancake_dispose(built.handle);
+    native.pikelet_dispose(built.handle);
   } else if (index && typeof index.dispose === 'function') {
     index.dispose();
   }

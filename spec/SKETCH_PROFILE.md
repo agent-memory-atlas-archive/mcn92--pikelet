@@ -223,7 +223,7 @@ C=300 → ~96%, C=400 → ~97% recall@10.
 ### 4.4 Scan cost
 
 The resident scan is O(count x sketchDims). Reference: 1M x 64D in ~17 ms
-through the engine's `pancake_sketch_scan` SIMD kernel, ~85 ms in plain
+through the engine's `pikelet_sketch_scan` SIMD kernel, ~85 ms in plain
 JS. At corpus sizes where the linear scan dominates, an in-memory index
 over the sketch tier is the intended escalation path; it does not change
 this profile's on-disk format.

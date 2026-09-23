@@ -6,7 +6,7 @@ no vector DB, no retrieval backend.
 Serves a real `.pikelet` pack from a deliberately dumb static HTTP server
 (`fs.createReadStream` + `Range` support, nothing else — no index, no query
 parsing, no knowledge of what a `.pikelet` is), mounts it remotely through
-Pikelet's real `httpRangeSource`/`openPancakeFile`, runs several queries,
+Pikelet's real `httpRangeSource`/`openPikeletFile`, runs several queries,
 and reports exactly how many bytes and HTTP range requests each step cost.
 
 ## Run it

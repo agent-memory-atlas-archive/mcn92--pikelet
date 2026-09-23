@@ -870,7 +870,7 @@ function createPikeletApi(loadEngineImpl) {
             throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT,
                 "opts.metric must be 'cosine' or 'l2'", { argument: 'metric', value: opts.metric });
         }
-        // Upper bound matches the engine ABI: pancake_init takes max_elem as a
+        // Upper bound matches the engine ABI: pikelet_init takes max_elem as a
         // C int, so anything above 2^31-1 would truncate or go negative.
         if (opts.maxElements !== undefined && (!Number.isInteger(opts.maxElements) || opts.maxElements <= 0 || opts.maxElements > 0x7fffffff)) {
             throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT,
@@ -904,7 +904,7 @@ function createPikeletApi(loadEngineImpl) {
 
         // Capacity guard: the backend allocates its arena eagerly at
         // construction, and a request the wasm32 heap cannot satisfy throws
-        // std::bad_alloc inside pancake_init — reject it here with the
+        // std::bad_alloc inside pikelet_init — reject it here with the
         // estimate instead. Per-element cost mirrors the constructor
         // allocations (uint8_float_hnsw.hpp / float_hnsw.hpp): quantized rows
         // cost dim bytes plus 16*M edge bytes plus ~39 bytes of bookkeeping;

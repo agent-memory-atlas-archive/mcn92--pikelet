@@ -225,7 +225,7 @@ function queryWasm(index, test, groundTruth, efSearch) {
 function buildNative({ train, dim, dtype }) {
   const quantized = dtype === 'u8' ? 1 : 0;
   log(`  [native-${dtype}] building index (M=${M}, ef_c=${EF_CONSTRUCTION})...`);
-  const h = native.pancake_init(dim, train.length, quantized, 0 /* L2 */, M, EF_CONSTRUCTION, EF_SEARCH_VALUES[0], 108);
+  const h = native.pikelet_init(dim, train.length, quantized, 0 /* L2 */, M, EF_CONSTRUCTION, EF_SEARCH_VALUES[0], 108);
   if (h === 0xFFFFFFFF) throw new Error('Failed to init native index');
 
   const t0 = performance.now();
@@ -238,23 +238,23 @@ function buildNative({ train, dim, dtype }) {
   for (let start = 0; start < train.length; start += batchSize) {
     const end = Math.min(start + batchSize, train.length);
     const batch = flat.subarray(start * dim, end * dim);
-    inserted += native.pancake_bulk_insert(h, batch, end - start);
+    inserted += native.pikelet_bulk_insert(h, batch, end - start);
     if (end % 10000 === 0) log(`    ${end.toLocaleString()}/${train.length.toLocaleString()}`);
   }
   const buildMs = performance.now() - t0;
-  const memBytes = native.pancake_memory(h);
+  const memBytes = native.pikelet_memory(h);
   log(`  [native-${dtype}] build: ${(buildMs / 1000).toFixed(1)}s, memory: ${(memBytes / 1024 / 1024).toFixed(1)} MB`);
   return { handle: h, buildMs, memBytes };
 }
 
 function queryNative(handle, test, groundTruth, efSearch) {
-  native.pancake_set_ef(handle, efSearch);
-  for (let i = 0; i < WARMUP_QUERIES && i < test.length; i++) native.pancake_query(handle, test[i], K);
+  native.pikelet_set_ef(handle, efSearch);
+  for (let i = 0; i < WARMUP_QUERIES && i < test.length; i++) native.pikelet_query(handle, test[i], K);
   const latencies = new Array(test.length);
   let totalRecall = 0;
   for (let i = 0; i < test.length; i++) {
     const st = performance.now();
-    const result = native.pancake_query(handle, test[i], K);
+    const result = native.pikelet_query(handle, test[i], K);
     latencies[i] = performance.now() - st;
     totalRecall += recall(Array.from(result.ids), groundTruth[i]);
   }
@@ -321,7 +321,7 @@ async function sweepOne(config, dataset) {
   if (config.runtime === 'wasm') {
     if (typeof built.index.dispose === 'function') built.index.dispose();
   } else {
-    native.pancake_dispose(built.handle);
+    native.pikelet_dispose(built.handle);
   }
 
   return {

@@ -205,7 +205,7 @@ function stddev(arr) {
 async function benchPikelet(train, queries, groundTruth, dim, quantized, runtimeLabel) {
   if (runtimeLabel === 'native') {
     const label = quantized ? 'pikelet-u8-native' : 'pikelet-f32-native';
-    const h = native.pancake_init(dim, train.length, quantized ? 1 : 0, 0, M, EF_CONSTRUCTION, EF_SEARCH, 108);
+    const h = native.pikelet_init(dim, train.length, quantized ? 1 : 0, 0, M, EF_CONSTRUCTION, EF_SEARCH, 108);
     if (h === 0xFFFFFFFF) throw new Error(`Failed to init ${label}`);
     const flat = new Float32Array(train.length * dim);
     for (let i = 0; i < train.length; i++) flat.set(train[i], i * dim);
@@ -214,24 +214,24 @@ async function benchPikelet(train, queries, groundTruth, dim, quantized, runtime
     for (let start = 0; start < train.length; start += batchSize) {
       const end = Math.min(start + batchSize, train.length);
       const batch = flat.subarray(start * dim, end * dim);
-      native.pancake_bulk_insert(h, batch, end - start);
+      native.pikelet_bulk_insert(h, batch, end - start);
       if (end % 10000 === 0) log(`    ${end.toLocaleString()}/${train.length.toLocaleString()}`);
     }
     const buildMs = performance.now() - t0;
-    const memBytes = native.pancake_memory(h);
-    for (let i = 0; i < WARMUP_QUERIES && i < queries.length; i++) native.pancake_query(h, queries[i], K);
+    const memBytes = native.pikelet_memory(h);
+    for (let i = 0; i < WARMUP_QUERIES && i < queries.length; i++) native.pikelet_query(h, queries[i], K);
     const latencies = [];
     let totalRecall = 0;
     for (let rep = 0; rep < REPETITIONS; rep++) {
       for (let i = 0; i < queries.length; i++) {
         const st = performance.now();
-        const result = native.pancake_query(h, queries[i], K);
+        const result = native.pikelet_query(h, queries[i], K);
         latencies.push(performance.now() - st);
         if (rep === 0) totalRecall += recall(Array.from(result.ids), groundTruth[i]);
       }
     }
     latencies.sort((a, b) => a - b);
-    native.pancake_dispose(h);
+    native.pikelet_dispose(h);
     return {
       label,
       buildMs,

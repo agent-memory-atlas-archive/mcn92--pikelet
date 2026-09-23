@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize Pancake HDF5 files produced by the official ANN-Benchmarks runner."""
+"""Summarize Pikelet HDF5 files produced by the official ANN-Benchmarks runner."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def main() -> None:
     parser.add_argument("checkout", type=pathlib.Path)
     parser.add_argument("--dataset", default="sift-128-euclidean")
     parser.add_argument("--count", type=int, default=10)
-    parser.add_argument("--algorithm", default="pancake-u8")
+    parser.add_argument("--algorithm", default="pikelet-u8")
     parser.add_argument("--output", type=pathlib.Path)
     parser.add_argument("--copy-hdf5", action="store_true")
     args = parser.parse_args()

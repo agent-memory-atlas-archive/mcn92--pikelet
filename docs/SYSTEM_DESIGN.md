@@ -100,7 +100,7 @@ it uses the WASM engine only optionally (the sketch scan kernel). Its
 behavioral contract is `spec/SEARCH_ARTIFACT_CONTRACT.md`, its sketch byte
 layout `spec/SKETCH_PROFILE.md`, and every entrypoint bundles it
 (`Pikelet.RangeArtifact` / `Pikelet.SketchArtifact`, backed by the
-frozen `PancakeRangeArtifact` / `PancakeSketchArtifact` classes). This document covers
+frozen `PikeletRangeArtifact` / `PikeletSketchArtifact` classes). This document covers
 the engine below that line; the artifact layer is specified in `spec/`.
 
 The native addon (`native/pikelet_napi.cpp`) replaces the *C ABI* layer with an

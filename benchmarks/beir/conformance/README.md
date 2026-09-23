@@ -1,7 +1,7 @@
 # Quantization conformance test
 
 `benchmarks/beir/quantize.mjs` reimplements Pikelet's row-wise affine u8
-quantization in JS because `PancakeIndex` has no readback API for stored
+quantization in JS because `PikeletIndex` has no readback API for stored
 vectors (see `benchmarks/beir/README.md`). This directory proves that
 reimplementation is exact, not just plausible.
 

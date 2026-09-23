@@ -463,7 +463,7 @@ export default function pikeletDocusaurusPlugin(context, rawOptions = {}) {
         module: {
           rules: [
             {
-              test: /pancake-(artifact|errors)\.js$/,
+              test: /pikelet-(artifact|errors)\.js$/,
               type: 'javascript/auto',
             },
           ],

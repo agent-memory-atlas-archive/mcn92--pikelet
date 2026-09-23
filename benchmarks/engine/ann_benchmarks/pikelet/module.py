@@ -1,16 +1,16 @@
 import numpy as np
 
-import pancake_py
+import pikelet_py
 
 from ..base.module import BaseANN
 
 
-class Pancake(BaseANN):
-    """ANN-Benchmarks adapter for Pancake's native C++ engine."""
+class Pikelet(BaseANN):
+    """ANN-Benchmarks adapter for Pikelet's native C++ engine."""
 
     def __init__(self, metric, quantized, method_param):
         if metric not in ("angular", "euclidean"):
-            raise ValueError(f"Pancake does not support ANN-Benchmarks metric {metric!r}")
+            raise ValueError(f"Pikelet does not support ANN-Benchmarks metric {metric!r}")
         self.metric = "cosine" if metric == "angular" else "l2"
         self.quantized = bool(quantized)
         self.method_param = dict(method_param)
@@ -26,7 +26,7 @@ class Pancake(BaseANN):
         storage = "uint8" if self.quantized else "fp32"
         suffix = f", efSearch={self.ef_search}" if self.ef_search is not None else ""
         return (
-            f"Pancake {storage} "
+            f"Pikelet {storage} "
             f"(M={self.method_param['M']}, efConstruction={self.method_param['efConstruction']}{suffix})"
         )
 
@@ -37,17 +37,17 @@ class Pancake(BaseANN):
         if self.metric == "cosine":
             finite = np.isfinite(data).all(axis=1)
             if not np.all(finite):
-                raise ValueError("Pancake does not support non-finite angular vectors")
+                raise ValueError("Pikelet does not support non-finite angular vectors")
             norm_sq = np.einsum("ij,ij->i", data, data)
             if not np.isfinite(norm_sq).all():
-                raise ValueError("Pancake does not support angular vectors with non-finite norms")
+                raise ValueError("Pikelet does not support angular vectors with non-finite norms")
             keep = norm_sq > 0.0
             self.zero_ids = np.flatnonzero(~keep).astype(np.int64)
             self.retained_zero_vectors = int(self.zero_ids.size)
             self.filtered_base_vectors = 0
             if self.retained_zero_vectors:
                 print(
-                    f"Pancake adapter: retaining {self.retained_zero_vectors} "
+                    f"Pikelet adapter: retaining {self.retained_zero_vectors} "
                     "zero-norm angular base vector(s) outside the HNSW graph"
                 )
                 data = np.ascontiguousarray(data[keep], dtype=np.float32)
@@ -63,7 +63,7 @@ class Pancake(BaseANN):
             self.index = None
             return
         else:
-            self.index = pancake_py.PancakeIndex(
+            self.index = pikelet_py.PikeletIndex(
                 data.shape[1],
                 data.shape[0],
                 self.quantized,

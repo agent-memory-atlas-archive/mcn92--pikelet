@@ -21,7 +21,7 @@ def main() -> None:
     args = parser.parse_args()
     sys.path.insert(0, str(args.checkout.resolve()))
 
-    from ann_benchmarks.algorithms.pancake.module import Pancake
+    from ann_benchmarks.algorithms.pikelet.module import Pikelet
 
     rng = np.random.default_rng(20260712)
     dimensions = 32
@@ -37,7 +37,7 @@ def main() -> None:
         metric_data = normalize(data) if metric == "angular" else data
         metric_queries = normalize(queries) if metric == "angular" else queries
         for quantized in (True, False):
-            adapter = Pancake(metric, quantized, {"M": 8, "efConstruction": 100})
+            adapter = Pikelet(metric, quantized, {"M": 8, "efConstruction": 100})
             adapter.fit(metric_data)
             adapter.set_query_arguments(200)
             recalls = []
@@ -61,7 +61,7 @@ def main() -> None:
     metric_data[211] = 0
     metric_queries = normalize(queries)
     metric_queries[3] = 0
-    adapter = Pancake("angular", True, {"M": 8, "efConstruction": 100})
+    adapter = Pikelet("angular", True, {"M": 8, "efConstruction": 100})
     adapter.fit(metric_data)
     adapter.set_query_arguments(200)
     if adapter.get_additional()["filtered_base_vectors"] != 0:
