@@ -131,29 +131,29 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | Dataset | Config | nDCG@10 | Recall@10 | Recall@100 | median ms/query |
 |---|---|---|---|---|---|
 | SciFact (300q) | A upstream float exhaustive | 0.6451 | 0.7833 | 0.9250 | 3.6 |
-| SciFact | B Pikelet encoder / float exhaustive | 0.6512 | 0.7942 | 0.9417 | 3.8 |
-| SciFact | C Pikelet encoder / affine-u8 exhaustive | 0.6500 | 0.7942 | 0.9417 | 6.9 |
-| SciFact | D Pikelet encoder / affine-u8, dense only | 0.6500 | 0.7942 | 0.9417 | 0.1 |
-| SciFact | **E MiniLM / hybrid (production default)** | **0.6986** | 0.8532 | 0.9427 | 8.1 |
-| SciFact | F BM25 lexical only | 0.6590 | 0.7816 | 0.8726 | 0.6 |
+| SciFact | B Pikelet encoder / float exhaustive | 0.6535 | 0.7997 | 0.9317 | 3.6 |
+| SciFact | C Pikelet encoder / affine-u8 exhaustive | 0.6576 | 0.8031 | 0.9317 | 3.6 |
+| SciFact | D Pikelet encoder / affine-u8, dense only | 0.6580 | 0.8031 | 0.9317 | 0.2 |
+| SciFact | **E MiniLM / hybrid (production default)** | **0.7028** | **0.8431** | 0.9450 | 7.4 |
+| SciFact | F BM25 lexical only | 0.6591 | 0.7816 | 0.8726 | 0.6 |
 | SciFact | G Arctic-XS / dense only | 0.6427 | 0.7700 | 0.8620 | 7.8 |
 | SciFact | G-noprefix (Arctic-XS, no query prefix) | 0.4791 | 0.6154 | 0.7363 | 7.7 |
 | SciFact | H Arctic-XS / hybrid | 0.6879 | 0.8077 | 0.9103 | 8.4 |
 | NFCorpus (323q) | A upstream float exhaustive | 0.3159 | 0.1550 | 0.3115 | 2.6 |
-| NFCorpus | B Pikelet encoder / float exhaustive | 0.3154 | 0.1511 | 0.3044 | 2.8 |
-| NFCorpus | C Pikelet encoder / affine-u8 exhaustive | 0.3154 | 0.1511 | 0.3036 | 2.9 |
-| NFCorpus | D Pikelet encoder / affine-u8, dense only | 0.3135 | 0.1482 | 0.3061 | 0.2 |
-| NFCorpus | **E MiniLM / hybrid (production default)** | **0.3359** | 0.1613 | 0.3085 | 4.7 |
-| NFCorpus | F BM25 lexical only | 0.3050 | 0.1432 | 0.2329 | 0.1 |
+| NFCorpus | B Pikelet encoder / float exhaustive | 0.3103 | 0.1548 | 0.3057 | 2.9 |
+| NFCorpus | C Pikelet encoder / affine-u8 exhaustive | 0.3104 | 0.1551 | 0.3055 | 3.0 |
+| NFCorpus | D Pikelet encoder / affine-u8, dense only | 0.3049 | 0.1511 | 0.3034 | 0.2 |
+| NFCorpus | **E MiniLM / hybrid (production default)** | **0.3328** | 0.1618 | 0.3163 | 5.0 |
+| NFCorpus | F BM25 lexical only | 0.3063 | 0.1435 | 0.2337 | 0.1 |
 | NFCorpus | G Arctic-XS / dense only | 0.3085 | 0.1462 | 0.2607 | 5.9 |
 | NFCorpus | G-noprefix (Arctic-XS, no query prefix) | 0.1546 | 0.0777 | 0.1818 | 5.5 |
 | NFCorpus | H Arctic-XS / hybrid | 0.3283 | 0.1558 | 0.2729 | 5.6 |
 | ArguAna (1406q) | A upstream float exhaustive | 0.3698 | 0.7653 | 0.9772 | 7.8 |
-| ArguAna | B Pikelet encoder / float exhaustive | 0.3506 | 0.7397 | 0.9801 | 6.1 |
-| ArguAna | C Pikelet encoder / affine-u8 exhaustive | 0.3496 | 0.7368 | 0.9801 | 6.4 |
-| ArguAna | D Pikelet encoder / affine-u8, dense only | 0.3496 | 0.7368 | 0.9808 | 0.1 |
-| ArguAna | **E MiniLM / hybrid (production default)** | 0.3494 | 0.7368 | 0.9780 | 16.9 |
-| ArguAna | F BM25 lexical only | 0.3246 | 0.6871 | 0.9289 | 6.5 |
+| ArguAna | B Pikelet encoder / float exhaustive | 0.3582 | 0.7461 | 0.9737 | 5.9 |
+| ArguAna | C Pikelet encoder / affine-u8 exhaustive | 0.3578 | 0.7454 | 0.9737 | 6.0 |
+| ArguAna | D Pikelet encoder / affine-u8, dense only | 0.3578 | 0.7454 | 0.9737 | 0.1 |
+| ArguAna | **E MiniLM / hybrid (production default)** | **0.3577** | 0.7454 | 0.9737 | 16.9 |
+| ArguAna | F BM25 lexical only | 0.3273 | 0.6920 | 0.9324 | 6.1 |
 | ArguAna | **G Arctic-XS / dense only** | **0.3788** | 0.7681 | 0.9566 | 10.5 |
 | ArguAna | G-noprefix (Arctic-XS, no query prefix) | 0.3795 | 0.7639 | 0.9381 | 10.4 |
 | ArguAna | **H Arctic-XS / hybrid** | **0.3788** | 0.7681 | 0.9566 | 17.5 |
@@ -176,6 +176,17 @@ fusion defaults (`FUSION_DEFAULTS` in `pikelet-wasm/complete`: lexical rank
 weight 0.5, vector-margin guard 0.05); under the previous equal-weight RRF
 the fused-rank numbers were SciFact 0.6941 / 0.8267, NFCorpus 0.3345 /
 0.1565, ArguAna 0.3494 / 0.7368. The H rows are re-measured the same way.
+
+`encode-pikelet.mjs` declared `maxTokens: 128` until 2026-09-24, so every
+B-F row measured before then was encoded with 128-token windows and
+windowed mean pooling, while the CLI has shipped a 512-token window since
+2026-09-11. The SciFact, NFCorpus and ArguAna B-F rows above are re-encoded
+at 512 (the H rows and the FiQA rows are still the 128-window vectors).
+128 -> 512 moved nDCG@10 by +0.008 on ArguAna and +0.002..+0.008 on SciFact
+(long passages, previously 2-3 windows each), and -0.005 on NFCorpus (short
+abstracts; inside the noise of 323 graded queries); recall@100 dipped
+0.6-1.0 points on the two long-document sets while recall@10 rose. Corpus
+encoding costs 5-15% more (one long pass instead of several short ones).
 FiQA was encoded after the change and is the one dataset the rule was never
 tuned or re-scored against: `E-oldrule` replays the same vectors and BM25
 hits under the previous rule (`node benchmarks/beir/query-E.mjs fiqa

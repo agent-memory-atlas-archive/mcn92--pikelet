@@ -38,6 +38,14 @@ import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/com
 import createEncoder from '../../packages/pikelet-wasm/complete/encoder-kernels/encoder.node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// --max-tokens N (default 512, the CLI's window) re-encodes with a different
+// kernel window for ablations; the kernel windows past it and mean-pools.
+const maxTokensArg = process.argv.indexOf('--max-tokens');
+const MAX_TOKENS = maxTokensArg === -1 ? 512 : Number.parseInt(process.argv[maxTokensArg + 1], 10);
+if (!Number.isInteger(MAX_TOKENS) || MAX_TOKENS < 16 || MAX_TOKENS > 512) {
+  console.error('--max-tokens must be an integer between 16 and 512');
+  process.exit(1);
+}
 const dataset = process.argv[2];
 if (!dataset) {
   console.error('usage: node benchmarks/beir/encode-pikelet.mjs <dataset>');
@@ -80,6 +88,11 @@ const config = {
     inlineEncoder: {
       vocabPath: path.join(encoderDir, 'vocab.txt'),
       weightsPath: path.join(encoderDir, 'encoder-weights.bin'),
+      // The corpus worker pool builds its declaration from this config
+      // (inlineEncoderDeclaration), not from the query-side declaration
+      // below; both must carry the same window or corpus and queries are
+      // encoded differently.
+      maxTokens: MAX_TOKENS,
     },
   },
 };
@@ -111,7 +124,11 @@ const declaration = {
   dim: 384,
   pooling: 'mean',
   normalized: true,
-  maxTokens: 128,
+  // The shipped CLI declares min(encoder.maxTokens || 512, 512)
+  // (packages/pikelet/src/complete-build.mjs); the kernel windows past this
+  // and mean-pools the windows. Runs before 2026-09-24 declared 128 here,
+  // so their B-F rows were encoded with 128-token windows.
+  maxTokens: MAX_TOKENS,
   longInputs: 'windowed-mean-pool',
   layout: { V: 30522, P: 512, T: 2, D: 384, F: 1536, L: 6, B: 64, H: 12 },
 };
