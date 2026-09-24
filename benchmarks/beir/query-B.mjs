@@ -29,10 +29,23 @@ if (!dataset) {
 const workDir = path.join(__dirname, 'work', dataset);
 const cacheDir = path.join(__dirname, 'cache', dataset);
 
-const corpusVecPath = path.join(workDir, 'vectors-corpus-pikelet.f32');
+// --vectors <name> selects which encoder's vectors to score (default
+// "pikelet", the inline MiniLM). "workersai" scores the vectors
+// encode-workers-ai.mjs writes, so the CLI's default embedding.mode gets a
+// row on this ladder; the run is written to run-<cfg>-<name>.json so it
+// never overwrites the MiniLM baseline.
+const variantArg = process.argv.indexOf('--vectors');
+const VARIANT = variantArg === -1 ? 'pikelet' : process.argv[variantArg + 1];
+if (!/^[a-z0-9-]+$/.test(VARIANT || '')) {
+  console.error('--vectors must be a lowercase slug, e.g. pikelet or workersai');
+  process.exit(1);
+}
+const runLabel = VARIANT === 'pikelet' ? 'B' : `B-${VARIANT}`;
+
+const corpusVecPath = path.join(workDir, `vectors-corpus-${VARIANT}.f32`);
 const corpusIdsPath = path.join(workDir, 'vectors-corpus-float32.ids.json'); // corpus row order/ids are shared across A/B/C (records.jsonl order)
-const queryVecPath = path.join(workDir, 'vectors-queries-pikelet.f32');
-const queryIdsPath = path.join(workDir, 'vectors-queries-pikelet.ids.json');
+const queryVecPath = path.join(workDir, `vectors-queries-${VARIANT}.f32`);
+const queryIdsPath = path.join(workDir, `vectors-queries-${VARIANT}.ids.json`);
 
 for (const p of [corpusVecPath, corpusIdsPath, queryVecPath, queryIdsPath]) {
   if (!existsSync(p)) {
@@ -134,5 +147,5 @@ const out = {
   results,
 };
 
-writeFileSync(path.join(workDir, 'run-B.json'), JSON.stringify(out));
-console.log(`${dataset} B: ${latencies.length} queries, median ${median.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms -> ${path.join(workDir, 'run-B.json')}`);
+writeFileSync(path.join(workDir, `run-${runLabel}.json`), JSON.stringify(out));
+console.log(`${dataset} ${runLabel}: ${latencies.length} queries, median ${median.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms -> ${path.join(workDir, `run-${runLabel}.json`)}`);

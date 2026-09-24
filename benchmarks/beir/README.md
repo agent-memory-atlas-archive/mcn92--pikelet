@@ -31,6 +31,12 @@ has only config A so far; TREC-COVID has not been run):
 - **H** Arctic-XS encoder + affine-u8 sketch artifact + BM25, hybrid RRF —
   parallel to E, so an encoder decision is checked against what actually
   ships (hybrid), not dense-only in isolation
+- **I** BGE-small-en-v1.5 (`Xenova/bge-small-en-v1.5` via transformers.js) —
+  the encoder `embedding.mode: "workers-ai"` uses at build time, which is the
+  CLI's **default** mode. Scored through query-B/C/D/E with
+  `--vectors workersai`, so the retrieval logic is identical to B-E and only
+  the encoder changes. **This measures the model, not the Workers AI call**;
+  see the note below.
 
 See `config.json` for the frozen dataset list committed ahead of any
 results.
@@ -56,6 +62,11 @@ benchmarks/beir/
                            in-memory lexical index (complete/builder.mjs buildLexicalSegment) and a real
                            PikeletSketchArtifact from index.export(), fuses exactly as complete/index.mjs does
   query-F.mjs              config F: BM25 lexical only (retrieval: 'lexical')
+  encode-workers-ai.mjs    config I: BGE-small-en-v1.5 via transformers.js — the encoder
+                           `embedding.mode: "workers-ai"` (the CLI's DEFAULT mode) uses at build
+                           time -> vectors-{corpus,queries}-workersai.f32. Queries carry the
+                           asymmetric BGE prefix, passages do not. Measures the MODEL only, never
+                           a live Workers AI call (see the config I note below)
   encode-pikelet-arctic.mjs   Arctic-XS (Snowflake/snowflake-arctic-embed-xs) through the same production
                               embedChunksWithInlineTransformer/createInlineTransformerEmbedder paths as
                               encode-pikelet.mjs, driven by inlineEncoderDeclaration (cls pooling, query
@@ -113,6 +124,18 @@ python3.11 benchmarks/beir/score.py <dataset> E-oldrule
 node benchmarks/beir/query-F.mjs <dataset>
 python3.11 benchmarks/beir/score.py <dataset> F
 
+# I: the CLI's default embedding.mode (workers-ai / BGE-small), on the same
+# retrieval logic as B-D. --vectors workersai writes run-<cfg>-workersai.json,
+# so the MiniLM baseline rows are never overwritten.
+node benchmarks/beir/encode-workers-ai.mjs <dataset>
+node benchmarks/beir/encode-workers-ai.mjs <dataset> --no-prefix   # query-prefix ablation
+node benchmarks/beir/query-B.mjs <dataset> --vectors workersai
+node benchmarks/beir/query-C.mjs <dataset> --vectors workersai
+node benchmarks/beir/query-D.mjs <dataset> --vectors workersai
+python3.11 benchmarks/beir/score.py <dataset> B-workersai
+python3.11 benchmarks/beir/score.py <dataset> C-workersai
+python3.11 benchmarks/beir/score.py <dataset> D-workersai
+
 # G, H: the encoder question, on identical retrieval logic to D/E.
 node benchmarks/beir/encode-pikelet-arctic.mjs <dataset>              # corpus + queries, WITH the query prefix
 node benchmarks/beir/ablate-query-prefix.mjs <dataset>                # queries only, WITHOUT the prefix (ablation)
@@ -139,6 +162,10 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | SciFact | G Arctic-XS / dense only | 0.6427 | 0.7700 | 0.8620 | 7.8 |
 | SciFact | G-noprefix (Arctic-XS, no query prefix) | 0.4791 | 0.6154 | 0.7363 | 7.7 |
 | SciFact | H Arctic-XS / hybrid | 0.6879 | 0.8077 | 0.9103 | 8.4 |
+| SciFact | I BGE-small / float exhaustive | 0.7040 | 0.8229 | 0.9467 | 3.8 |
+| SciFact | I BGE-small / affine-u8 exhaustive | 0.7051 | 0.8262 | 0.9467 | 3.7 |
+| SciFact | I BGE-small / affine-u8, dense only | 0.7044 | 0.8246 | 0.9400 | 0.2 |
+| SciFact | **I BGE-small / hybrid** | **0.7298** | **0.8496** | 0.9417 | 8.2 |
 | NFCorpus (323q) | A upstream float exhaustive | 0.3159 | 0.1550 | 0.3115 | 2.6 |
 | NFCorpus | B Pikelet encoder / float exhaustive | 0.3103 | 0.1548 | 0.3057 | 2.9 |
 | NFCorpus | C Pikelet encoder / affine-u8 exhaustive | 0.3104 | 0.1551 | 0.3055 | 3.0 |

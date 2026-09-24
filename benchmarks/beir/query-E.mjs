@@ -37,7 +37,7 @@ import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.m
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataset = process.argv[2];
 if (!dataset) {
-  console.error('usage: node benchmarks/beir/query-E.mjs <dataset> [--fusion <json>] [--label <suffix>]');
+  console.error('usage: node benchmarks/beir/query-E.mjs <dataset> [--fusion <json>] [--label <suffix>] [--vectors <name>]');
   process.exit(1);
 }
 // --fusion '{"lexicalWeight":1,"guardMargin":0}' overrides FUSION_DEFAULTS for
@@ -45,7 +45,19 @@ if (!dataset) {
 // score it as configuration E-<suffix> beside the default E.
 const argAfter = (flag) => { const i = process.argv.indexOf(flag); return i === -1 ? null : process.argv[i + 1]; };
 const fusionOverride = argAfter('--fusion') ? JSON.parse(argAfter('--fusion')) : null;
-const runLabel = argAfter('--label') ? `E-${argAfter('--label')}` : 'E';
+// --vectors <name> selects the encoder's vectors (default "pikelet", the
+// inline MiniLM); "workersai" scores what encode-workers-ai.mjs wrote. It
+// composes with --label, so a fusion ablation on a non-default encoder is
+// run-E-workersai-<label>.json. The lexical (BM25) side is encoder-
+// independent: it is built from records.jsonl either way, so E-workersai
+// isolates the encoder change with the fusion rule held fixed.
+const VARIANT = argAfter('--vectors') || 'pikelet';
+if (!/^[a-z0-9-]+$/.test(VARIANT)) {
+  console.error('--vectors must be a lowercase slug, e.g. pikelet or workersai');
+  process.exit(1);
+}
+const variantTag = VARIANT === 'pikelet' ? '' : `-${VARIANT}`;
+const runLabel = argAfter('--label') ? `E${variantTag}-${argAfter('--label')}` : `E${variantTag}`;
 
 const workDir = path.join(__dirname, 'work', dataset);
 const cacheDir = path.join(__dirname, 'cache', dataset);
@@ -57,15 +69,15 @@ const RRF_K = FUSION_DEFAULTS.rrfK; // reported in the run metadata; the rule it
 const LEXICAL_CUTOFF = 1.5;
 const LEXICAL_CANDIDATES = 24;
 
-const corpusVecPath = path.join(workDir, 'vectors-corpus-pikelet.f32');
+const corpusVecPath = path.join(workDir, `vectors-corpus-${VARIANT}.f32`);
 const corpusIdsPath = path.join(workDir, 'vectors-corpus-float32.ids.json');
-const queryVecPath = path.join(workDir, 'vectors-queries-pikelet.f32');
-const queryIdsPath = path.join(workDir, 'vectors-queries-pikelet.ids.json');
+const queryVecPath = path.join(workDir, `vectors-queries-${VARIANT}.f32`);
+const queryIdsPath = path.join(workDir, `vectors-queries-${VARIANT}.ids.json`);
 const recordsPath = path.join(workDir, 'records.jsonl');
 
 for (const p of [corpusVecPath, corpusIdsPath, queryVecPath, queryIdsPath, recordsPath]) {
   if (!existsSync(p)) {
-    console.error(`missing ${p} — run: node benchmarks/beir/encode-pikelet.mjs ${dataset} first`);
+    console.error(`missing ${p} — run: node benchmarks/beir/${VARIANT === 'workersai' ? 'encode-workers-ai.mjs' : 'encode-pikelet.mjs'} ${dataset} first`);
     process.exit(1);
   }
 }
