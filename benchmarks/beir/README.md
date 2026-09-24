@@ -108,6 +108,8 @@ python3.11 benchmarks/beir/score.py <dataset> D
 # already produced above, plus records.jsonl for BM25 text — no re-encoding.
 node benchmarks/beir/query-E.mjs <dataset>
 python3.11 benchmarks/beir/score.py <dataset> E
+node benchmarks/beir/query-E.mjs <dataset> --fusion '{"lexicalWeight":1,"guardMargin":0}' --label oldrule   # fusion ablation -> run-E-oldrule.json
+python3.11 benchmarks/beir/score.py <dataset> E-oldrule
 node benchmarks/beir/query-F.mjs <dataset>
 python3.11 benchmarks/beir/score.py <dataset> F
 
@@ -155,7 +157,15 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | ArguAna | **G Arctic-XS / dense only** | **0.3788** | 0.7681 | 0.9566 | 10.5 |
 | ArguAna | G-noprefix (Arctic-XS, no query prefix) | 0.3795 | 0.7639 | 0.9381 | 10.4 |
 | ArguAna | **H Arctic-XS / hybrid** | **0.3788** | 0.7681 | 0.9566 | 17.5 |
-| FiQA (648q) | in progress | — | — | — | — |
+| FiQA (648q) | A upstream float exhaustive | 0.3687 | 0.4413 | 0.7061 | 55.1 |
+| FiQA | B Pikelet encoder / float exhaustive | 0.3608 | 0.4313 | 0.7067 | 40.0 |
+| FiQA | C Pikelet encoder / affine-u8 exhaustive | 0.3618 | 0.4329 | 0.7073 | 40.1 |
+| FiQA | D Pikelet encoder / affine-u8, dense only | 0.3569 | 0.4268 | 0.6993 | 0.4 |
+| FiQA | **E MiniLM / hybrid (production default)** | **0.3737** | **0.4482** | 0.7105 | 88.9 |
+| FiQA | E-oldrule (equal-weight RRF, no guard — the rule before 2026-09-23) | 0.3102 | 0.3554 | 0.7105 | 79.3 |
+| FiQA | F BM25 lexical only | 0.2319 | 0.2905 | 0.5201 | 9.5 |
+| FiQA | G / H Arctic-XS | — | not encoded | | |
+| TREC-COVID | not run | — | — | — | — |
 
 Until 2026-09-23 the E and H rows were scored in vector-distance order:
 `score.py` ranks by the run's `score` field, and `query-E.mjs`/`query-H.mjs`
@@ -166,6 +176,14 @@ fusion defaults (`FUSION_DEFAULTS` in `pikelet-wasm/complete`: lexical rank
 weight 0.5, vector-margin guard 0.05); under the previous equal-weight RRF
 the fused-rank numbers were SciFact 0.6941 / 0.8267, NFCorpus 0.3345 /
 0.1565, ArguAna 0.3494 / 0.7368. The H rows are re-measured the same way.
+FiQA was encoded after the change and is the one dataset the rule was never
+tuned or re-scored against: `E-oldrule` replays the same vectors and BM25
+hits under the previous rule (`node benchmarks/beir/query-E.mjs fiqa
+--fusion '{"lexicalWeight":1,"guardMargin":0}' --label oldrule`), where
+hybrid scored below dense-only D; the shipped rule is 6.3 nDCG points above
+it and 1.7 above D. FiQA's E latency is the raw sketch reader's JS scan over
+57,638 rows plus BM25 over 80,910 terms; the complete reader stages the WASM
+scanner for sketches this size, which the ladder does not exercise.
 
 All three completed datasets independently validate the pipeline against
 published literature: SciFact nDCG@10 ~0.64-0.65, NFCorpus ~0.31-0.32,

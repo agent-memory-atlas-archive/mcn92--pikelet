@@ -73,7 +73,7 @@ const queries = await readJsonl(path.join(cacheDir, 'queries.jsonl'));
 const testIds = testQueryIds();
 const testQueries = queries.filter((q) => testIds.has(q._id));
 
-const encoderDir = path.join(repoRoot, 'pikelet', 'src', 'inline-encoder');
+const encoderDir = path.join(repoRoot, 'packages', 'pikelet', 'src', 'inline-encoder');
 const config = {
   embedding: { dims: 384, mode: 'inline-transformer', pooling: 'mean', normalize: true },
   runtime: {

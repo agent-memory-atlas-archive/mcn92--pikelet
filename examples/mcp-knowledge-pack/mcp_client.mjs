@@ -7,7 +7,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 export class PikeletMcpClient {
   constructor({ packs, timeoutMs = 60_000 }) {
-    const bin = path.join(REPO_ROOT, 'pikelet', 'bin', 'pikelet.mjs');
+    const bin = path.join(REPO_ROOT, 'packages', 'pikelet', 'bin', 'pikelet.mjs');
     const args = ['mcp', ...packs.flatMap((p) => ['--pack', p])];
     this.timeoutMs = timeoutMs;
     this.nextId = 1;

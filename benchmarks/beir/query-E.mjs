@@ -37,9 +37,15 @@ import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.m
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataset = process.argv[2];
 if (!dataset) {
-  console.error('usage: node benchmarks/beir/query-E.mjs <dataset>');
+  console.error('usage: node benchmarks/beir/query-E.mjs <dataset> [--fusion <json>] [--label <suffix>]');
   process.exit(1);
 }
+// --fusion '{"lexicalWeight":1,"guardMargin":0}' overrides FUSION_DEFAULTS for
+// an ablation; --label <suffix> writes run-E-<suffix>.json so score.py can
+// score it as configuration E-<suffix> beside the default E.
+const argAfter = (flag) => { const i = process.argv.indexOf(flag); return i === -1 ? null : process.argv[i + 1]; };
+const fusionOverride = argAfter('--fusion') ? JSON.parse(argAfter('--fusion')) : null;
+const runLabel = argAfter('--label') ? `E-${argAfter('--label')}` : 'E';
 
 const workDir = path.join(__dirname, 'work', dataset);
 const cacheDir = path.join(__dirname, 'cache', dataset);
@@ -179,7 +185,7 @@ for (let qi = 0; qi < queries.count; qi++) {
 
   // The reader's own fusion function (complete/fusion.mjs), so the ladder
   // scores exactly the ranking the reader serves.
-  const fused = fuseCandidates(searched, lexicalHits.map((h) => h.id));
+  const fused = fuseCandidates(searched, lexicalHits.map((h) => h.id), fusionOverride || {});
   latencies.push(performance.now() - t0);
 
   // pytrec_eval ranks by score, so the score must encode the FUSED rank:
@@ -199,13 +205,16 @@ const p95 = latencies[Math.floor(latencies.length * 0.95)];
 const out = {
   benchmark: 'BEIR',
   dataset,
-  configuration: 'E',
-  description: 'Pikelet encoder / affine-u8 sketch artifact + BM25 (hybrid RRF, production default)',
+  configuration: runLabel,
+  description: fusionOverride
+    ? `Pikelet encoder / affine-u8 sketch artifact + BM25 (hybrid, fusion override ${JSON.stringify(fusionOverride)})`
+    : 'Pikelet encoder / affine-u8 sketch artifact + BM25 (hybrid, production default)',
   system: {
     node: process.version,
     platform: process.platform,
     build_ms: buildMs,
     rerank: config.candidateCount,
+    fusion: { ...FUSION_DEFAULTS, ...(fusionOverride || {}) },
     rrf_k: RRF_K,
     lexical_cutoff: LEXICAL_CUTOFF,
     median_ms: median,
@@ -215,5 +224,6 @@ const out = {
   results,
 };
 
-writeFileSync(path.join(workDir, 'run-E.json'), JSON.stringify(out));
-console.log(`${dataset} E: ${latencies.length} queries, median ${median.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms -> ${path.join(workDir, 'run-E.json')}`);
+const runPath = path.join(workDir, `run-${runLabel}.json`);
+writeFileSync(runPath, JSON.stringify(out));
+console.log(`${dataset} ${runLabel}: ${latencies.length} queries, median ${median.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms -> ${runPath}`);
