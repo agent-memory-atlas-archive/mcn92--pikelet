@@ -244,13 +244,18 @@ export declare function openPikeletFile(
 ): Promise<CompleteSearch>;
 
 /** Header formatVersion -> manifest profile accepted by this reader. */
+export declare const SUPPORTED_PROFILES: Readonly<Record<number, string>>;
+
 /** Rank-fusion parameters shared by the reader, the calibrator and the BEIR ladder. */
 export interface FusionOptions {
   /** Reciprocal-rank-fusion constant (default 60). */
   rrfK?: number;
-  /** Weight of the lexical (BM25) rank term relative to the vector term (default 1). */
+  /** Weight of the lexical (BM25) rank term relative to the vector term (default 0.5). */
   lexicalWeight?: number;
-  /** Relative distance margin (top-2 minus top-1, over top-1) at or above which the vector top-1 keeps rank 1 (default 0: off). */
+  /**
+   * Relative distance margin (top-2 minus top-1, over top-1) at or above which
+   * the vector top-1 keeps rank 1 (default 0.05; 0 disables the guard).
+   */
   guardMargin?: number;
 }
 export declare const FUSION_DEFAULTS: Readonly<Required<FusionOptions>>;
@@ -263,7 +268,6 @@ export declare function fuseCandidates<T extends { id: number; distance: number 
   lexicalIds: number[],
   options?: FusionOptions,
 ): T[];
-export declare const SUPPORTED_PROFILES: Readonly<Record<number, string>>;
 export declare const CORPUS_LAYOUT_V2: 'records-v2';
 /**
  * Check a host encoder against a kind-2 declaration's verification vectors
