@@ -528,9 +528,21 @@ class PikeletSketchArtifact {
     }
 
     _adoptResident(residentCopy, count, sketchRowBytes, microRowBytes, microOffset) {
-        this.scales = new Float32Array(residentCopy.buffer, 0, count);
-        this.offsets = new Float32Array(residentCopy.buffer, count * 4, count);
-        assertFiniteAffine(this.scales, this.offsets);
+        // Validate into locals BEFORE touching a single member. Assigning
+        // this.scales/this.offsets first and validating after left a rejected
+        // stage-2 adopt half-applied: this.sketches still null, this.tier
+        // still 'micro', this.microSketches still pointing at the STAGE-1
+        // buffer -- while scales/offsets had already moved to stage-2. The
+        // staged path swallows the rejection (see fullyResident.catch above),
+        // so the artifact stayed open and kept serving micro-tier queries
+        // that paired stage-1 sketches against stage-2 affine parameters:
+        // silently wrong ranking, which is worse than the non-finite
+        // distances this check exists to reject.
+        const scales = new Float32Array(residentCopy.buffer, 0, count);
+        const offsets = new Float32Array(residentCopy.buffer, count * 4, count);
+        assertFiniteAffine(scales, offsets);
+        this.scales = scales;
+        this.offsets = offsets;
         this.sketches = new Uint8Array(residentCopy.buffer, count * 8, count * sketchRowBytes);
         if (this.microDims) {
             this.microSketches = new Uint8Array(residentCopy.buffer, microOffset - SKETCH_HEADER_BYTES, count * microRowBytes);

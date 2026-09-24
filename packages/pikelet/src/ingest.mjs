@@ -36,7 +36,10 @@ async function ingestFolder(root, source, log) {
   return docs;
 }
 
-async function walk(root, log, dir = root) {
+// log defaults to a no-op: walk(root) is the documented one-argument form and
+// the symlink branch below calls log() unconditionally, so an external caller
+// using it would crash on the first link encountered.
+async function walk(root, log = () => {}, dir = root) {
   const out = [];
   let entries;
   try {

@@ -1200,6 +1200,17 @@ console.log('\nD. lexical segment and hybrid retrieval');
     check('guard leaves the fused order intact below it', JSON.stringify(ids(fuseCandidates(pool, [13], { lexicalWeight: 1, guardMargin: 0.05 })).slice(1, 3)) === JSON.stringify([13, 11]));
     check('guard does not fire when the margin is below the threshold', ids(fuseCandidates(pool, [13], { lexicalWeight: 1, guardMargin: 0.60 }))[0] === 13);
     check('guard does not fire on a single-hit pool', ids(fuseCandidates([pool[0]], [10], { guardMargin: 0.05 }))[0] === 10);
+    // distance === 0 is the strongest possible top-1, not a degenerate case:
+    // cosine distance is 1 - dot, so a query matching passage text verbatim
+    // scores exactly 0. Gating the guard on `first.distance > 0` disabled it
+    // for precisely that hit, so a perfect match was buried by a term match
+    // while a worse one (0.001) was protected.
+    const exact = [{ id: 10, distance: 0 }, { id: 11, distance: 0.9 }, { id: 12, distance: 0.95 }, { id: 13, distance: 0.97 }];
+    check('guard protects a distance-0 top-1', ids(fuseCandidates(exact, [13]))[0] === 10);
+    check('guard protects a near-zero top-1 the same way', ids(fuseCandidates([{ id: 10, distance: 0.001 }, ...exact.slice(1)], [13]))[0] === 10);
+    // Two hits both at distance 0 are a genuine tie, not a lead: nothing to protect.
+    const tied = [{ id: 10, distance: 0 }, { id: 11, distance: 0 }, { id: 12, distance: 0.9 }, { id: 13, distance: 0.95 }];
+    check('guard does not fire when the top two are tied at 0', ids(fuseCandidates(tied, [13]))[0] === 13);
     let threw = false;
     try { fuseCandidates(pool, [13], { rrfK: 0 }); } catch { threw = true; }
     check('invalid fusion options are rejected', threw);

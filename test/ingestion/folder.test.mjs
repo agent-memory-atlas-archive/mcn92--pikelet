@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, section } from './harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { ingestFolder } = await import(pathToFileURL(path.resolve(here, '..', '..', 'packages', 'pikelet', 'src', 'ingest.mjs')).href);
+const { ingestFolder, walk } = await import(pathToFileURL(path.resolve(here, '..', '..', 'packages', 'pikelet', 'src', 'ingest.mjs')).href);
 
 section('ingestFolder: skipped entries are reported');
 {
@@ -31,6 +31,15 @@ section('ingestFolder: skipped entries are reported');
     check('a file over the per-file limit is skipped with a warning naming it and the limit',
       logs.some((l) => l.includes('skipped docs/huge.md') && l.includes('per-file limit')), JSON.stringify(logs));
     check('no other warnings are emitted', logs.length === 3, JSON.stringify(logs));
+
+    // walk() is exported and documented as walk(root); the symlink branch
+    // calls log() unconditionally, so without a default the one-argument
+    // form crashed on the first link it met. ingestFolder always passes a
+    // log, which is why only the exported surface regressed.
+    let walkThrew = null;
+    try { await walk(root); } catch (error) { walkThrew = error; }
+    check('walk(root) survives a symlink without a log argument', walkThrew === null,
+      walkThrew ? `${walkThrew.constructor.name}: ${walkThrew.message}` : '');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

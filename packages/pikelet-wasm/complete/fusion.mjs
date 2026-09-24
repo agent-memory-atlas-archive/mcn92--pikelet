@@ -51,7 +51,20 @@ export function fuseCandidates(vectorOrder, lexicalIds, options = {}) {
         .map((entry) => entry.hit);
     if (guardMargin > 0 && vectorOrder.length > 1) {
         const [first, second] = vectorOrder;
-        if (first.distance > 0 && (second.distance - first.distance) / first.distance >= guardMargin && fused[0] !== first) {
+        // The margin is relative to the top-1's own distance, which needs a
+        // positive denominator. first.distance === 0 is not a degenerate case
+        // to skip but the STRONGEST possible top-1 -- cosine distance is
+        // 1 - dot, so a query matching passage text verbatim scores exactly 0
+        // -- and gating on `first.distance > 0` disabled the guard for exactly
+        // the hit it exists to protect (a worse top-1 at 0.001 was guarded, a
+        // perfect one at 0 was not). Any second distance strictly greater than
+        // a zero first is an infinite relative lead, so the guard fires.
+        // Distances are non-negative here (cosine/L2 as returned by the
+        // rerank); a metric admitting negatives would need an absolute margin.
+        const lead = first.distance > 0
+            ? (second.distance - first.distance) / first.distance
+            : (second.distance > 0 ? Infinity : 0);
+        if (lead >= guardMargin && fused[0] !== first) {
             fused = [first, ...fused.filter((hit) => hit !== first)];
         }
     }
