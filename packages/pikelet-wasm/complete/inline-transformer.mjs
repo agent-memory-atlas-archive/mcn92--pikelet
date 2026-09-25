@@ -8,6 +8,10 @@ const decoder = new TextDecoder();
 // here, host-side, before the first forward.
 export const KERNEL_LAYOUT = { V: 30522, P: 512, T: 2, D: 384, F: 1536, L: 6, B: 64, H: 12 };
 const KERNEL_MAX_SEQ = 512;
+// Smallest window that still frames interior tokens between [CLS] and [SEP]
+// with room to make progress; see the maxTokens check in
+// parseInlineTransformerEncoder().
+const MIN_DECLARED_MAX_TOKENS = 8;
 
 // Byte size the kernel's fill_layout() will consume for a given layout:
 // each quantized matrix is rows*cols u8 plus per-block f32 scales and
@@ -43,6 +47,22 @@ export function parseInlineTransformerEncoder(encoderBytes) {
   if (declaration.dim !== KERNEL_LAYOUT.D) {
     throw new Error(`.pikelet inline-encoder declares dim ${declaration.dim}; the kernel emits ${KERNEL_LAYOUT.D}`);
   }
+  // maxTokens sizes the kernel's ids/hidden heap buffers, and the windowing
+  // arithmetic (windowLen = maxSeq - 2) assumes it leaves room for [CLS] and
+  // [SEP] plus interior tokens. A pack declaring 1 makes windowLen negative,
+  // so interior.slice(w * windowLen, (w + 1) * windowLen) returns nearly the
+  // whole sequence and the forward pass writes far past both allocations; 2
+  // makes windowLen 0, so the window count is Infinity. Reject the whole
+  // range here, at parse, so nothing is allocated from an unusable value.
+  // The floor is well under any value the toolchain emits (the builder
+  // declares 512; the BEIR encoder's own --max-tokens floor is 16).
+  if (declaration.maxTokens !== undefined && declaration.maxTokens !== null) {
+    const declared = declaration.maxTokens;
+    if (!Number.isInteger(declared) || declared < MIN_DECLARED_MAX_TOKENS || declared > KERNEL_MAX_SEQ) {
+      throw new Error(`.pikelet inline-encoder declares maxTokens ${declared}; `
+        + `must be an integer in [${MIN_DECLARED_MAX_TOKENS}, ${KERNEL_MAX_SEQ}]`);
+    }
+  }
   const expected = expectedBlobBytes(layout);
   if (blob.length !== expected) {
     throw new Error(`.pikelet inline-encoder blob is ${blob.length} bytes but its declared layout implies ${expected}`);
@@ -63,7 +83,14 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
   const tokenizer = createWordPiece(vocabText);
   const EM = await createEncoder();
   const dim = declaration.dim;
-  const maxSeq = Math.min(declaration.maxTokens || KERNEL_MAX_SEQ, KERNEL_MAX_SEQ);
+  // Clamped on BOTH sides: parseInlineTransformerEncoder() rejects an
+  // out-of-range declaration, but this function is also called directly (the
+  // BEIR ladder, encoder ablations), so the buffer sizing must not depend on
+  // that check having run.
+  const maxSeq = Math.min(
+    Math.max(MIN_DECLARED_MAX_TOKENS, Math.trunc(declaration.maxTokens) || KERNEL_MAX_SEQ),
+    KERNEL_MAX_SEQ,
+  );
   const blobPtr = EM._malloc(blob.length);
   EM.HEAPU8.set(blob, blobPtr);
   const idsPtr = EM._malloc(maxSeq * 4);
@@ -88,6 +115,11 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
     const windowsToEncode = usesClsPooling ? 1 : windows;
     for (let w = 0; w < windowsToEncode; w++) {
       const tokenIds = [allIds[0], ...interior.slice(w * windowLen, (w + 1) * windowLen), allIds[allIds.length - 1]];
+      // The windowing above must never produce more tokens than the buffers
+      // were sized for; fail closed instead of writing past them.
+      if (tokenIds.length > maxSeq) {
+        throw new Error(`inline encoder window is ${tokenIds.length} tokens for a ${maxSeq}-token buffer`);
+      }
       new Int32Array(EM.HEAP32.buffer, idsPtr, tokenIds.length).set(tokenIds);
       const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0);
       if (rc !== tokenIds.length) throw new Error(`inline encoder failed: ${rc}`);
@@ -143,6 +175,11 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
       const idSlice = interior.slice(w * windowLen, (w + 1) * windowLen);
       const wordOfSlice = interiorWordOf.slice(w * windowLen, (w + 1) * windowLen);
       const tokenIds = [allIds[0], ...idSlice, allIds[allIds.length - 1]];
+      // The windowing above must never produce more tokens than the buffers
+      // were sized for; fail closed instead of writing past them.
+      if (tokenIds.length > maxSeq) {
+        throw new Error(`inline encoder window is ${tokenIds.length} tokens for a ${maxSeq}-token buffer`);
+      }
       new Int32Array(EM.HEAP32.buffer, idsPtr, tokenIds.length).set(tokenIds);
       const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0);
       if (rc !== tokenIds.length) throw new Error(`inline encoder failed: ${rc}`);

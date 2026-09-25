@@ -1216,6 +1216,56 @@ console.log('\nD. lexical segment and hybrid retrieval');
     check('invalid fusion options are rejected', threw);
 }
 
+// ---------------------------------------------------------------------------
+// maxTokens bounds in the inline-encoder declaration
+// ---------------------------------------------------------------------------
+console.log('inline encoder: a pack cannot declare an out-of-range maxTokens');
+{
+    const { parseInlineTransformerEncoder, KERNEL_LAYOUT, expectedBlobBytes } =
+        await import('../packages/pikelet-wasm/complete/inline-transformer.mjs');
+
+    // maxTokens sizes the kernel's ids/hidden heap buffers and drives
+    // windowLen = maxSeq - 2. Before this was bounded, `Math.min(x, 512)`
+    // clamped only the top: a pack declaring 1 made windowLen -1, so
+    // interior.slice(0, -1) returned nearly the whole token sequence and the
+    // forward pass wrote ~92 KB into a 1536-byte allocation. It fired at
+    // mount, before any query, because the declaration's own testVectors are
+    // embedded and verified after the buffers are allocated.
+    const vocabText = '[PAD]\n[UNK]\n[CLS]\n[SEP]\nhello\n';
+    const blob = new Uint8Array(expectedBlobBytes(KERNEL_LAYOUT));
+    const pack = (maxTokens) => {
+        const decl = { dim: KERNEL_LAYOUT.D, layout: KERNEL_LAYOUT, pooling: 'mean' };
+        if (maxTokens !== 'omit') decl.maxTokens = maxTokens;
+        const declBytes = new TextEncoder().encode(JSON.stringify(decl));
+        const vocabBytes = new TextEncoder().encode(vocabText);
+        const out = new Uint8Array(12 + declBytes.length + vocabBytes.length + blob.length);
+        const view = new DataView(out.buffer);
+        view.setUint32(0, declBytes.length, true);
+        view.setUint32(4, vocabBytes.length, true);
+        view.setUint32(8, blob.length, true);
+        out.set(declBytes, 12);
+        out.set(vocabBytes, 12 + declBytes.length);
+        out.set(blob, 12 + declBytes.length + vocabBytes.length);
+        return out;
+    };
+
+    // The overflow range, and the shapes that dodge an integer check.
+    for (const bad of [1, 2, 7, 0.5, -1, '512', 513, 1e9]) {
+        await rejects(`maxTokens ${JSON.stringify(bad)} is refused at parse`,
+            async () => parseInlineTransformerEncoder(pack(bad)), /maxTokens/);
+    }
+    // Values the toolchain actually emits, plus the absent/null fallbacks.
+    for (const good of [8, 16, 512, 'omit', null]) {
+        let ok = true;
+        let detail = '';
+        try {
+            const parsed = parseInlineTransformerEncoder(pack(good === 'omit' ? 'omit' : good));
+            ok = parsed.declaration.dim === KERNEL_LAYOUT.D;
+        } catch (err) { ok = false; detail = String(err && err.message).slice(0, 120); }
+        check(`maxTokens ${good === 'omit' ? '(absent)' : JSON.stringify(good)} still parses`, ok, detail);
+    }
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nComplete-profile reader conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
