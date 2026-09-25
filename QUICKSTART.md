@@ -1,37 +1,155 @@
 # Pikelet Quick Start
 
-Practical getting-started paths for building a Pikelet index from your own embeddings, searching it locally, and running the Cloudflare Worker example.
-
-## What This Guide Covers
-
-This guide focuses on the current supported flows:
-
-- Node.js indexing from vectors already in memory
-- Node.js indexing from JSON / JSONL / NDJSON files
-- Snapshot export / restore in Node.js
-- Running the reference Cloudflare Worker example from a repository checkout
-
-This guide covers the engine layer, where you bring your own embedding model
-or pipeline and feed the resulting vectors into Pikelet. If you want to go
-straight from documents to working search — embedding included — use the
-compile command instead (`npx pikelet compile --source ./docs
---out search.pikelet`, documented in
-[pikelet/README.md](pikelet/README.md)); it emits
-one `.pikelet` file answering natural-language queries via
-`pikelet-wasm/complete`. Pikelet is not a hosted search service either way.
+Compile a corpus into one `.pikelet` file, query it from any JavaScript
+runtime, and serve it to an LLM over MCP. The last section covers the engine
+layer underneath, for when you already have vectors and want the index alone.
 
 ## Install
 
-### Published package
-
 ```bash
-npm install pikelet-wasm
+npm install -g pikelet          # the CLI: compile, mcp, doctor, create
+npm install pikelet-wasm        # the library: readers and the engine
 ```
 
-This guide documents the current Pikelet contract; it requires
-`pikelet-wasm@0.7.0` or later.
+`compile` and `mcp` do not need the CLI's optional `@xenova/transformers`
+dependency; skip its install with `npm install -g pikelet --omit=optional`
+unless you also want the `create` scaffold path.
 
-### Repository checkout
+The CLI needs Node 20+. `pikelet-wasm` runs on Node 18+ (CI tests 18, 20 and
+22), browsers, and Cloudflare Workers; this guide assumes `pikelet-wasm@0.8.0`
+or later.
+
+## Compile a pack
+
+Point `compile` at a folder or a live site:
+
+```bash
+npx pikelet compile --source ./docs --out docs.pikelet
+# or crawl a site:
+npx pikelet compile --source https://docs.example.com --out docs.pikelet
+```
+
+```text
+Ingested 3 docs -> 3 chunks
+Embedded 3/3 chunks with inline transformer
+Validated self-recall@1 on 3 sampled chunks
+Built lexical index: 90 terms over 3 records (2 KiB)
+Calibrated abstention: 42 answerable / 40 ablation + 0 entity-swap + 12 held-out-doc
+  hard negatives / 81 off-domain / 24 gibberish, 5-fold CV AUC 1 vs hard negatives
+Measured rerank operating point: C=3 (recall@3 1 over 3 corpus-embeddings queries)
+Golden replay against the assembled artifact: 24/24 reproduce
+Compiled docs.pikelet
+  24.54 MB, 3 records, identity 223d1ec6...
+```
+
+The file carries the corpus records, the semantic index, a BM25 lexical
+index, the inline MiniLM query encoder, integrity commitments, the
+calibrated abstention threshold, and the evaluation fixtures. There is no
+service, no model host and no vector database behind it.
+
+Every pack is at least ~24 MB regardless of corpus size, because the query
+encoder ships inside it. The first `compile` fetches that encoder (~25 MiB)
+from a GitHub release and caches it; later runs are offline.
+
+Useful flags: `--force` overwrites the output, `--max-pages` caps a crawl,
+`--include`/`--exclude` filter a folder, and `--calibration-queries` supplies
+real corpus-author questions used to validate the abstention fit and as the
+pack's embedded golden queries. `pikelet compile --help` lists the rest,
+including the `--encoder-*` flags for swapping the packaged MiniLM.
+
+## Query it from code
+
+```js
+import { openPikeletFile } from 'pikelet-wasm/complete';
+
+const pack = await openPikeletFile('docs.pikelet');
+
+const out = await pack.query('how do workers restore snapshots', { k: 3 });
+console.log(out.matchQuality, out.confidence, out.results[0].title);
+// 'strong' 0.9999898531465357 'Snapshot restore'
+
+await pack.close();
+```
+
+`query()` returns `matchQuality` — `'strong' | 'weak' | 'none' |
+'unscored'` — alongside the results. An off-domain query abstains instead of
+answering:
+
+```js
+const miss = await pack.query('what is the best pizza in Chicago', { k: 3 });
+console.log(miss.matchQuality, miss.results.length);
+// 'none' 0
+```
+
+That threshold was fit from the corpus at build time and stored in the file,
+so the refusal behavior travels with the pack rather than living in your
+application code.
+
+### Mount a pack over HTTP
+
+`openPikeletFile` also takes a URL. The reader fetches byte ranges instead of
+downloading the artifact, so a static host that answers 206 is a complete
+backend:
+
+```js
+const pack = await openPikeletFile('https://example.com/docs.pikelet');
+```
+
+Pin the publisher's identity when you mount someone else's pack; a mismatch
+refuses to open:
+
+```js
+const pack = await openPikeletFile('https://example.com/docs.pikelet', {
+  expectedIdentity: '223d1ec67145ec94e1237d284cdfdb4cecd6de91c5c0454f54d59674d6910a13',
+});
+```
+
+Use `npx pikelet doctor <url>` to check whether a host serves ranges well
+before you rely on it — it probes 206 support, cache-key ranges, HTTP/2,
+ETags and RTT.
+
+## Serve a pack to an LLM
+
+`mcp` exposes packs over the Model Context Protocol on stdio, so an MCP
+client can attach them as a retrieval tool:
+
+```bash
+npx pikelet mcp install --client claude-code --pack ./docs.pikelet
+```
+
+```text
+Wrote MCP server "knowledge-packs" to ./.mcp.json
+Claude Code picks it up on the next session in this project.
+```
+
+Any other MCP client can run `npx pikelet mcp --pack ./docs.pikelet`
+directly, with no install step. The server offers four tools: `search`
+(per-pack results with provenance and calibrated abstention), `list_packs`
+(names and immutable identities, for citation pinning), `get_record`, and
+`verify_pack` (replays the golden queries and abstention probes stored inside
+the pack).
+
+`--pack` takes a local file or an HTTP(S) URL, repeats for several packs, and
+accepts `#<sha256>` to pin the manifest identity. `--shelf` mounts every pack
+on a static `packs.json` listing.
+
+## The engine layer
+
+Everything above is the artifact layer. Underneath it is the HNSW engine,
+which you can use directly when you already have vectors and want an index
+rather than a queryable pack. At this layer you supply the embedding model,
+the query vectors, and the metadata hydration yourself; `matchQuality`,
+abstention, the lexical index and the corpus records are all artifact-layer
+features that do not exist here.
+
+Reach for it when you are embedding with your own model and only need
+approximate nearest neighbors. If you have documents and want search, use
+`compile` above instead.
+
+`loadJsonFile()` and `loadSnapshotFile()` are Node-only; the rest of the
+engine API also runs in browsers and Workers.
+
+### From a repository checkout
 
 ```bash
 git clone https://github.com/mcn92/pikelet.git
@@ -52,7 +170,7 @@ npm run build:all    # rebuilds packages/pikelet-wasm/dist/engine.* — engine d
 
 (`./build.sh` builds only the SIMD pair, `packages/pikelet-wasm/dist/engine.{js,wasm}`; use `build:all` when you also need the scalar fallback.)
 
-## Pick An Ingest Path
+### Pick an ingest path
 
 Use the path that matches what you already have:
 
@@ -62,9 +180,9 @@ Use the path that matches what you already have:
 
 If you are working from a repo checkout, `import Pikelet from 'pikelet-wasm'` already resolves to the in-tree package: the repository is an npm workspace, and `npm install` at the root links `node_modules/pikelet-wasm` to `packages/pikelet-wasm`. The entrypoints themselves live at `packages/pikelet-wasm/src/`.
 
-## Local Node.js Workflow
+### Local Node workflow
 
-### 1. Build An Index From In-Memory Vectors
+#### 1. Build an index from in-memory vectors
 
 ```js
 import Pikelet from 'pikelet-wasm';
@@ -87,7 +205,7 @@ console.log(idMap.get(results[0].id)); // -> 'doc-1'
 
 Use this path when your embedder already returns arrays or `Float32Array`s in the current process.
 
-### 2. Build An Index From JSON Or JSONL
+#### 2. Build an index from JSON or JSONL
 
 On the Node.js entrypoints, Pikelet can load vectors directly from disk:
 
@@ -121,7 +239,7 @@ Accepted row shapes:
 
 If your embedding pipeline already writes JSONL, this is the simplest file-based path.
 
-### 3. Export And Restore A Snapshot
+#### 3. Export and restore a snapshot
 
 If you want to reuse a built index later, export a snapshot:
 
@@ -157,7 +275,7 @@ Snapshot notes:
 - `loadSnapshotFile()` is Node-only
 - `loadSnapshotFile()` restores Pikelet snapshots from disk, not arbitrary ANN binary formats
 
-## Embedding Your Own Documents
+### Embedding your own documents
 
 Pikelet does not care which embedder you use, as long as you end up with vectors.
 
@@ -172,9 +290,17 @@ Typical workflow:
 
 If you already have parquet, numpy, or another upstream format, convert it into JSONL or feed the vectors into `fromVectors()` directly from your application code.
 
-## Worker Example
+### Reference Worker example
 
-The reference Worker example is repo-based. It loads the checked-in WASM engine artifacts and exposes Pikelet over HTTP. Treat it as a deployment pattern you run in your own Cloudflare account, not as a centrally hosted Pikelet service.
+This example predates the `.pikelet` artifact and lives under
+`examples/legacy/`; a pack mounted over HTTP Range needs no Worker at all. It
+is still the reference for exposing the raw engine over HTTP, and the
+`/export`/`/import` contract below is still current, so it is documented here
+rather than removed.
+
+It is repo-based, loads the checked-in WASM engine artifacts, and exposes
+Pikelet over HTTP. Treat it as a deployment pattern you run in your own
+Cloudflare account, not as a centrally hosted Pikelet service.
 
 When you run or deploy this example, it runs in your own Cloudflare environment:
 
@@ -182,7 +308,7 @@ When you run or deploy this example, it runs in your own Cloudflare environment:
 - `wrangler deploy` publishes the Worker into the Cloudflare account authenticated in your local Wrangler setup
 - any R2 bucket, auth settings, and rate limits belong to your own deployment, not to this repository
 
-### Run The Worker Locally
+#### Run the Worker locally
 
 ```bash
 cd examples/legacy/reference-worker
@@ -191,7 +317,7 @@ npx wrangler dev --port 8787 --var ALLOW_INSECURE_ADMIN:1
 
 `ALLOW_INSECURE_ADMIN=1` is a local-only opt-in: without it (or an `API_KEY`), admin routes such as `/init`, `/add`, and `/import` return 403, so the curl examples below would be rejected.
 
-### Deploy The Worker To Your Own Cloudflare Account
+#### Deploy the Worker to your own Cloudflare account
 
 ```bash
 cd examples/legacy/reference-worker
@@ -199,7 +325,7 @@ wrangler r2 bucket create pikelet-indexes
 wrangler deploy
 ```
 
-### Initialize A Small Index Over HTTP
+#### Initialize a small index over HTTP
 
 In another terminal:
 
@@ -232,7 +358,7 @@ curl http://localhost:8787/health
 curl http://localhost:8787/stats
 ```
 
-### Worker Import / Export Contract
+#### Worker import / export contract
 
 The Worker has its own binary envelope for `/export` and `/import`.
 
@@ -241,7 +367,7 @@ The Worker has its own binary envelope for `/export` and `/import`.
 
 Do not assume that a Node.js `index.export()` snapshot is interchangeable with the Worker `/import` format. The Worker wraps the engine snapshot with additional metadata for its own restore path.
 
-### Worker Integration Test
+#### Worker integration test
 
 ```bash
 node test/test_worker_features.js
@@ -249,7 +375,7 @@ node test/test_worker_features.js
 
 Starts a local `wrangler dev` instance against `examples/legacy/reference-worker` and runs a synthetic 1536D Worker/API integration test against it.
 
-## Sizing And Tuning
+### Sizing and tuning
 
 | Parameter | Typical range | Effect |
 |-----------|---------------|--------|
@@ -284,8 +410,10 @@ Use one of these instead:
 
 The Worker `/import` route expects the Worker export format, not a raw local package snapshot. Use the Worker's own `/export` output when testing `/import`.
 
-## Next Steps
+## Next steps
 
-- [README.md](README.md) for the full package API surface
+- [README.md](README.md) for what a `.pikelet` is and the engine API surface
+- [packages/pikelet/README.md](packages/pikelet/README.md) for the full CLI reference: `compile`, `mcp`, `create`, `doctor`
+- [spec/COMPLETE_PROFILE.md](spec/COMPLETE_PROFILE.md) for the artifact format
 - [examples/legacy/reference-worker/README.md](examples/legacy/reference-worker/README.md) for the reference Worker deployment model
-- [docs/architecture.md](docs/architecture.md) for the deeper system design document
+- [docs/architecture.md](docs/architecture.md) for the system design document
