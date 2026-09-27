@@ -8,6 +8,35 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## 0.8.2 — `pikelet`
+
+### Fixed
+
+- **`pikelet mcp` answers `initialize` without waiting for its packs to
+  mount.** The server mounted every pack before replying to the MCP
+  handshake, and a URL mount fetches the pack's resident prefix first: about
+  5.6 s for the rust-book pack and 9.2 s for the 649 MiB Simple English
+  Wikipedia one. The published three-pack shelf took **10.2 s** to answer
+  `initialize`, past the point most MCP clients give up — so the documented
+  `mcp --shelf` command timed out for a new user.
+
+  Mounting now runs concurrently with the protocol loop. `initialize` returns
+  in about **0.6 s**; `tools/call` and `tools/list` await the mounts, so a
+  client gets a fast handshake and pays the mount cost on its first real call.
+  `tools/list` waits deliberately: it advertises the mounted pack names, and
+  answering early would name fewer packs than the server goes on to serve.
+
+### Documentation
+
+- The install instructions lead with `npm install -g pikelet --omit=optional`.
+  Measured on a clean project, that is 2 packages / 1.8 MB / "found 0
+  vulnerabilities" against 82 packages / 257 MB / "6 vulnerabilities (5 high,
+  1 critical)" — every advisory is inside `@xenova/transformers`, which only
+  the `create` scaffold path loads. The previous README put the flag in a
+  mid-paragraph aside and estimated its cost at "~140 MB".
+- README carries an upgrade note for the `pikelet-wasm@0.8.1` heap-overflow
+  fix, which shipped without one.
+
 ## 0.8.1 — `pikelet-wasm`
 
 Security release, cut from `main` ahead of the rest of the unreleased

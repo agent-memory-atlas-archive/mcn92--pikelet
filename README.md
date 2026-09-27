@@ -10,9 +10,25 @@ A `.pikelet` can carry the source text, semantic index, keyword index, query enc
 
 The `pikelet` CLI requires Node 20+; the `pikelet-wasm` library runs on Node 18+ (CI tests 18, 20, 22), browsers, and Cloudflare Workers.
 
+> **Upgrade to `pikelet-wasm@0.8.1` if you mount packs you did not compile.**
+> 0.8.0 and earlier sized the inline encoder's WASM buffers from the
+> artifact's own `maxTokens` with an upper bound only, so a pack declaring an
+> out-of-range value could overflow them — at mount, before any query, and
+> with every integrity check passing, because the pack's author is the one who
+> signed it. 0.8.1 validates the bound. Packs the toolchain produces were
+> never affected. `pikelet@0.8.1` picks the fix up through its dependency
+> range; see the CHANGELOG for the detail.
+
 ```bash
 npx pikelet compile --source ./docs --out docs.pikelet
 ```
+
+Installing rather than using `npx`? Use `npm install -g pikelet
+--omit=optional`. The optional dependency is `@xenova/transformers`, which
+only the `create` scaffold path uses. Measured on a clean project, omitting it
+takes the install from **82 packages / 257 MB / "6 vulnerabilities (5 high, 1
+critical)"** to **2 packages / 1.8 MB / "found 0 vulnerabilities"** — the
+advisories are all inside a dependency `compile` and `mcp` never load.
 
 ```text
 Ingested 3 docs -> 3 chunks
@@ -47,7 +63,7 @@ console.log(out.matchQuality, out.results[0]?.title);
 // 'strong' 'Snapshot restore'
 ```
 
-That's the whole loop. `compile` also takes a live URL (`--source https://docs.example.com`) instead of a directory. If you want a deployed search app — a Worker + UI, not a file — use `npx pikelet create` instead; see [`packages/pikelet/README.md`](packages/pikelet/README.md) for the full CLI reference and the tradeoffs between the two. `compile` never needs the scaffold path's `@xenova/transformers` dependency; skip its ~140 MB install with `npm install -g pikelet --omit=optional` if you only need `compile`/`mcp`.
+That's the whole loop. `compile` also takes a live URL (`--source https://docs.example.com`) instead of a directory. If you want a deployed search app — a Worker + UI, not a file — use `npx pikelet create` instead; see [`packages/pikelet/README.md`](packages/pikelet/README.md) for the full CLI reference and the tradeoffs between the two. `create` is the one path that needs the optional `@xenova/transformers` dependency, which is why the install above omits it by default.
 
 Under the hood, the file is one container for everything a reader needs:
 

@@ -7,17 +7,32 @@ layer underneath, for when you already have vectors and want the index alone.
 ## Install
 
 ```bash
-npm install -g pikelet          # the CLI: compile, mcp, doctor, create
-npm install pikelet-wasm        # the library: readers and the engine
+npm install -g pikelet --omit=optional   # the CLI: compile, mcp, doctor
+npm install pikelet-wasm                 # the library: readers and the engine
 ```
 
-`compile` and `mcp` do not need the CLI's optional `@xenova/transformers`
-dependency; skip its install with `npm install -g pikelet --omit=optional`
-unless you also want the `create` scaffold path.
+`--omit=optional` skips `@xenova/transformers`, which only the `create`
+scaffold path uses. Measured on a clean project:
+
+| | packages | size | `npm audit` |
+| --- | ---: | ---: | --- |
+| plain install | 82 | 257 MB | 6 vulnerabilities (5 high, 1 critical) |
+| `--omit=optional` | 2 | 1.8 MB | found 0 vulnerabilities |
+
+Every advisory is inside that one dependency, and `npm audit` reports "No fix
+available" for the critical one. `compile` and `mcp` never load it. Drop the
+flag if you want `pikelet create`, which embeds its corpus locally and then
+serves queries from Cloudflare Workers AI.
 
 The CLI needs Node 20+. `pikelet-wasm` runs on Node 18+ (CI tests 18, 20 and
-22), browsers, and Cloudflare Workers; this guide assumes `pikelet-wasm@0.8.0`
+22), browsers, and Cloudflare Workers; this guide assumes `pikelet-wasm@0.8.1`
 or later.
+
+Upgrade from 0.8.0 if you mount `.pikelet` files you did not compile yourself.
+0.8.0 sized the inline encoder's WASM buffers from the artifact's own
+declaration with an upper bound only, so a pack declaring an out-of-range
+`maxTokens` could overflow them at mount, before any query. 0.8.1 bounds it.
+See the CHANGELOG.
 
 ## Compile a pack
 
