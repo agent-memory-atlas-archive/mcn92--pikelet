@@ -71,6 +71,33 @@
       "types": "./complete/builder.d.ts",
       "default": "./complete/builder.mjs"
     },
+    "./complete/tombstones.mjs": {
+      "default": "./complete/tombstones.mjs"
+    },
+    "./complete/layer-manifest.mjs": {
+      "default": "./complete/layer-manifest.mjs"
+    },
+    "./complete/layer-encoder.mjs": {
+      "default": "./complete/layer-encoder.mjs"
+    },
+    "./complete/layer-locator.mjs": {
+      "default": "./complete/layer-locator.mjs"
+    },
+    "./complete/layer-chain.mjs": {
+      "default": "./complete/layer-chain.mjs"
+    },
+    "./complete/layer-reader.mjs": {
+      "default": "./complete/layer-reader.mjs"
+    },
+    "./complete/layer-append.mjs": {
+      "default": "./complete/layer-append.mjs"
+    },
+    "./complete/layer-rebase.mjs": {
+      "default": "./complete/layer-rebase.mjs"
+    },
+    "./complete/layer-compact.mjs": {
+      "default": "./complete/layer-compact.mjs"
+    },
     "./engine.wasm": "./dist/engine.wasm"
   },
   "files": [

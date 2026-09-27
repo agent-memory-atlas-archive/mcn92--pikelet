@@ -436,6 +436,10 @@ export async function openPikeletFile(input, options = {}) {
     // Kind-3 lazy encoder: the pending fetch+init promise. close() settles
     // it before disposing so an in-flight prefetch cannot leak its kernel.
     let encoderPending = null;
+    // Set by the kind-3 branch below. Hoisted because `append` needs the base's
+    // own encoder through the __chainTier seam (6.1), and the branch's own
+    // ensureEmbedder is scoped to that branch.
+    let resolveEmbedder = null;
     const settleEncoder = async () => {
         if (encoderPending) { try { await encoderPending; } catch { /* surfaced to queries */ } }
     };
@@ -767,10 +771,16 @@ export async function openPikeletFile(input, options = {}) {
                     const nl = String(text || '').indexOf('\n');
                     return nl === -1 ? { heading: text, body: '' } : { heading: text.slice(0, nl), body: text.slice(nl + 1) };
                 };
-                const topTexts = scorer.usesPassage && passageSource.length
-                    ? (await Promise.all(passageSource.slice(0, scorer.passagesNeeded || 1)
-                        .map((hit) => hydrate(hit.id)))).map((record) => splitHeadingBody(record?.text))
-                    : [];
+                // A chain supplies the passages itself (context.passages): its
+                // ids are GLOBAL, and this hydrate only knows this member's
+                // local ids, so letting it fetch them would throw on any id a
+                // layer owns. Single-file callers pass none and it hydrates.
+                const topTexts = Array.isArray(context.passages)
+                    ? context.passages.slice(0, scorer.passagesNeeded || 1).map(splitHeadingBody)
+                    : scorer.usesPassage && passageSource.length
+                        ? (await Promise.all(passageSource.slice(0, scorer.passagesNeeded || 1)
+                            .map((hit) => hydrate(hit.id)))).map((record) => splitHeadingBody(record?.text))
+                        : [];
                 const scored = await scorer.score(context.text, hits, topTexts);
                 return { match_quality: VERDICTS[scored.verdict] || scored.verdict, confidence: scored.p, grounding: scored.grounding || null };
             };
@@ -867,6 +877,7 @@ export async function openPikeletFile(input, options = {}) {
                 return { embedder, declaration };
             };
             const ensureEmbedder = () => (encoderPending ??= loadEmbedder());
+            resolveEmbedder = ensureEmbedder;
             // Until the encoder arrives, info() serves the identity-verified
             // manifest declaration; encoderVerified stays null (unknown, not
             // unverified) and flips once test vectors have run.
@@ -1367,6 +1378,56 @@ export async function openPikeletFile(input, options = {}) {
                     hydrate,
                     encoderInfo,
                     segments,
+                    // The query-interpretation kind, verbatim from the
+                    // segment header. `append` needs it to decide
+                    // appendability (6.1), and reverse-mapping it from
+                    // encoderInfo.kind loses kind 2, whose encoderInfo is
+                    // shaped by the host declaration rather than a fixed name.
+                    qiKind,
+                    // The tier's staged WASM scan kernel, or null before
+                    // background staging resolves. A chain queries
+                    // sketch.search directly, so without passing this through
+                    // every tier fell back to the JS scan: on the 456k-record
+                    // wiki base that is ~450 ms a query against ~50 ms with
+                    // the kernel. A getter, not a captured value, because
+                    // staging completes after open() returns.
+                    get scanner() { return scanner; },
+                    // The base's OWN encoder, for `append` (6.1): "a kind-3
+                    // base carries the teacher, and append loads it from the
+                    // base's own query-interp segment — no model download, no
+                    // external dependency: a pack is sufficient to compile its
+                    // own successors." Resolving it here rather than letting a
+                    // producer construct one is what makes substituting a
+                    // different encoder impossible.
+                    //
+                    // Returns null for kinds that cannot embed passages: kind 1
+                    // carries a query encoder only (6.1 refuses it), and kind 4
+                    // is a layer, which inherits.
+                    async passageEmbedder() {
+                        assertOpen();
+                        if (qiKind !== 3 || !resolveEmbedder) return null;
+                        const { embedder, declaration } = await resolveEmbedder();
+                        return {
+                            declaration,
+                            // The passage prefix is part of the contract the
+                            // base was built with; applying the wrong one (or
+                            // none) silently produces vectors in a different
+                            // space from the base's.
+                            embed: async (text) => {
+                                const prefix = declaration.prefixPolicy?.passage || '';
+                                const { vector } = await embedder.embed(`${prefix}${text}`);
+                                return vector;
+                            },
+                        };
+                    },
+                    // The base's own abstention scorer, for a chain serving
+                    // under `inherited` (5.5): "the base's
+                    // retrieval-signals-v1 scorer runs unchanged over the
+                    // merged searched window and fused passages, with the union
+                    // bloom of 4.5". Null when the base carries no fit, which
+                    // is what makes a chain report `none` rather than silently
+                    // omitting the verdict.
+                    scoreQuality: typeof scoreQuality === 'function' ? scoreQuality : null,
                     // The base's fit, for a chain's calibration status (5.5).
                     // It lives in the query-interp segment's calibration
                     // region, not in the manifest — `asset` present means the

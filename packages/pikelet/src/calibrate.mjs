@@ -662,6 +662,40 @@ function fnv1a(str, seed, bits) {
   return (h >>> 0) % bits;
 }
 
+/**
+ * Build a vocabulary bloom over a LAYER's records with a base's geometry —
+ * LAYERED_PROFILE.md 4.5, 6.1 step 4.
+ *
+ * A layer's bloom must use the base's `bits`, hashes and `minCount` so the
+ * chain's union is an exact bitwise OR rather than an approximation. Exported
+ * (rather than reimplemented in the append path) so the two can never drift:
+ * the same fnv1a, the same seeds, the same tokenizer.
+ */
+export function buildLayerVocabBloom(chunks, { bits, minCount }) {
+  if (!Number.isInteger(bits) || bits <= 0 || bits % 8 !== 0) {
+    throw new Error(`buildLayerVocabBloom: bits must be a positive multiple of 8, got ${bits}`);
+  }
+  const counts = new Map();
+  for (const chunk of chunks) {
+    for (const w of tokenize(chunk.text)) counts.set(w, (counts.get(w) || 0) + 1);
+  }
+  const floor = Number.isInteger(minCount) && minCount > 0 ? minCount : 1;
+  const bloom = new Uint8Array(bits / 8);
+  let kept = 0;
+  for (const [w, c] of counts) {
+    if (c < floor) continue;
+    kept += 1;
+    for (const seed of BLOOM_SEEDS) {
+      const bit = fnv1a(w, seed, bits);
+      bloom[bit >> 3] |= 1 << (bit & 7);
+    }
+  }
+  return { bloom, bits, minCount: floor, keptWords: kept, uniqueWords: counts.size };
+}
+
+/** The hash names a layer's bloom declares (4.5), matching BLOOM_SEEDS. */
+export const BLOOM_HASH_NAMES = Object.freeze(['fnv1a:0', 'fnv1a:0x9e3779b9']);
+
 function buildVocabBloom(chunks) {
   const counts = new Map();
   for (const chunk of chunks) {

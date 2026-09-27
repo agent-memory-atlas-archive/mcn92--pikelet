@@ -150,6 +150,11 @@ export async function openPikeletChain(members, options = {}) {
             chainMembers.push({
                 depth: rel.depth, identity: tier.identity,
                 rowBase: rel.rowBase, records: rel.records,
+                // Retained per member, not just the head's: `rebase` needs a
+                // layer's OWN bitset and its parent's to compute the delta it
+                // replays, and 6.2 refuses rather than guessing without them.
+                bitset: tomb.bitset,
+                supersessions: tomb.supersessions,
             });
         }
 
@@ -163,6 +168,9 @@ export async function openPikeletChain(members, options = {}) {
             }
         }
         const masks = projectMasks(table, headBitset);
+        // Per-tier popcount, so a query can tell an empty mask (skip it, keep
+        // the WASM scan) from one that actually excludes something.
+        const maskCounts = masks.map((m) => countBits(m));
         const supersessions = buildSupersessionMap(perLayerTombstones);
         const ancestry = buildAncestry(chainMembers);
         const headTombstoneCount = countBits(headBitset);
@@ -220,6 +228,10 @@ export async function openPikeletChain(members, options = {}) {
                     producerEnvelope: calibration.producerEnvelope,
                     readerLimit: calibration.readerLimit,
                     lexical: { ...lexStats },
+                    // 4.1: sampleQueries may appear on any member and applies
+                    // to that member. A chain surfaces the base's, which are
+                    // the ones fit against the corpus the encoder saw.
+                    sampleQueries: Array.isArray(base.manifest.sampleQueries) ? base.manifest.sampleQueries : [],
                     members: chainMembers.map((m) => ({ depth: m.depth, identity: m.identity, records: m.records })),
                 };
             },
@@ -233,9 +245,23 @@ export async function openPikeletChain(members, options = {}) {
                 assertOpen();
                 const retrieval = queryOptions.retrieval ?? 'hybrid';
                 const perTier = await Promise.all(searchTiers.map(async (t, j) => {
+                    // An all-zero mask is equivalent to no mask, and passing one
+                    // is expensive: a mask disables the WASM scan kernel (it
+                    // cannot honour an exclusion set), forcing a JS scan over
+                    // every row of the tier. On a 456k-record base with three
+                    // tombstones that was a 9x slowdown to skip three rows, so
+                    // the mask is omitted entirely when the tier has no live
+                    // deletion. maskCounts is computed once at mount.
                     const out = await t.reader.sketch.search(vector, Math.min(k * 4, t.records), {
                         rerank: queryOptions.rerank,
-                        exclude: masks[j],
+                        ...(maskCounts[j] > 0 ? { exclude: masks[j] } : {}),
+                        // The tier's own staged scan kernel. Read per query, not
+                        // captured at mount: staging finishes in the background
+                        // after the member's open returns. With a mask present
+                        // the sketch reader over-fetches and filters, so the
+                        // kernel stays usable (5.3's no-post-truncation rule is
+                        // kept by construction, not by skipping the kernel).
+                        ...(t.reader.scanner ? { scanner: t.reader.scanner } : {}),
                     });
                     return out.results.map((r) => ({
                         id: t.rowBase + r.id, localId: r.id, tier: j,
@@ -251,7 +277,11 @@ export async function openPikeletChain(members, options = {}) {
                     for (let j = 0; j < searchTiers.length; j++) {
                         const lex = searchTiers[j].reader.lexicalIndex;
                         if (!lex) continue;
-                        for (const h of lex.search(queryOptions.text, 24)) {
+                        // openLexicalIndex's search is sync; the LAZY opener
+                        // used for a large segment (the wiki pack's is 69 MB)
+                        // returns a promise. Awaiting covers both.
+                        const hits = await lex.search(queryOptions.text, 24);
+                        for (const h of hits) {
                             // A tombstoned row must not occupy a lexical slot
                             // before the cap (5.3), so skip as postings score.
                             if (bitAt(masks[j], h.id)) continue;
@@ -275,10 +305,49 @@ export async function openPikeletChain(members, options = {}) {
                     const record = await tier.reader.hydrate(owner.localId);
                     return { ...record, id: hit.id, distance: hit.distance, layer: tier.depth };
                 }));
+                // 5.5: under `inherited` the base's scorer runs unchanged over
+                // the merged window. Under `drift-exceeded` matchQuality is
+                // `unscored`, confidence is omitted, results still ship, and the
+                // response says which input bound it — so a consumer can tell
+                // "no fit" from "fit outgrown". A reader MUST NOT apply an
+                // outgrown fit silently, and MUST NOT omit the verdict either:
+                // omitting it makes "the fit said no" indistinguishable from
+                // "nothing scored", which is exactly the confusion 5.5 exists
+                // to prevent.
+                let matchQuality = 'unscored';
+                let confidence;
+                if (calibration.status === 'inherited' && base.scoreQuality) {
+                    const passages = await Promise.all(top.slice(0, 3).map(async (hit) => {
+                        const owner = ownerOf(table, hit.id);
+                        const rec = await searchTiers[owner.tier.tier].reader.hydrate(owner.localId);
+                        return rec?.text ?? '';
+                    }));
+                    const scored = await base.scoreQuality(searched, { text: queryOptions.text ?? '', vector, passages }, fused);
+                    if (scored && scored.match_quality) {
+                        matchQuality = scored.match_quality;
+                        if (Number.isFinite(scored.confidence)) confidence = scored.confidence;
+                    }
+                } else if (calibration.status === 'none') {
+                    matchQuality = 'unscored';
+                }
+                // A 'none' verdict withholds results, exactly as the
+                // single-file reader does: the calibrated abstention signal is
+                // doing its job, and a chain must not be a way to get results
+                // the base would have refused. showAbstained is the same
+                // explicit opt-out, and never changes matchQuality.
+                const withheld = matchQuality === 'none' && !queryOptions.showAbstained;
                 return {
-                    results,
+                    matchQuality,
+                    ...(confidence === undefined ? {} : { confidence }),
+                    results: withheld ? [] : results,
                     identity: chainMembers[chainMembers.length - 1].identity,
-                    calibration: { status: calibration.status, drift: calibration.drift, effectiveLimit: calibration.effectiveLimit },
+                    calibration: {
+                        status: calibration.status,
+                        drift: calibration.drift,
+                        effectiveLimit: calibration.effectiveLimit,
+                        producerEnvelope: calibration.producerEnvelope,
+                        readerLimit: calibration.readerLimit,
+                    },
                 };
             },
 
@@ -304,6 +373,76 @@ export async function openPikeletChain(members, options = {}) {
             },
 
             chainBloom() { assertOpen(); return chainBloom; },
+
+            /**
+             * The chain's members with each layer's own bitset and edges, which
+             * is what `rebase` replays (6.2) and what `compact` reads to
+             * enumerate live ids and rebuild the lineage segment (6.3).
+             */
+            get __members() {
+                assertOpen();
+                return chainMembers.map((m) => ({ ...m }));
+            },
+
+            /**
+             * Everything `append` needs about the head to plan a new layer
+             * (6.1). Internal, like __chainTier: a producer is part of this
+             * package, and the names carry no compatibility promise.
+             */
+            get __head() {
+                assertOpen();
+                const last = chainMembers[chainMembers.length - 1];
+                const baseMember = chainMembers[0];
+                return {
+                    identity: last.identity,
+                    depth: last.depth,
+                    // The head's own rowBase and record count, which together
+                    // give the next layer's rowBase (3.3).
+                    rowBase: last.depth === 0 ? 0 : last.rowBase,
+                    records: last.records,
+                    bitset: headBitset,
+                    baseIdentity: base.identity,
+                    baseRecords: baseMember.records,
+                    // Sum of every layer's records, for the drift numerator.
+                    appendedBefore: chainMembers.slice(1).reduce((n, m) => n + m.records, 0),
+                    // 6.1 needs the base's kind to decide appendability, its
+                    // ingestion declaration to enforce granularity, and its
+                    // chunking so new records are cut the same way. The kind
+                    // comes from the segment header verbatim, not from
+                    // encoderInfo: kind 2's encoderInfo is shaped by the host
+                    // declaration and carries no fixed name to match on.
+                    qiKind: base.qiKind ?? null,
+                    // The base's own encoder, resolved by the base's open.
+                    passageEmbedder: () => base.passageEmbedder(),
+                    // The base's query-interp segment bytes. `compact` copies
+                    // them verbatim: compaction MUST NOT change the encoder,
+                    // dim, metric, ingestion or tokenization (6.3), and the
+                    // surest way not to is to carry the same bytes.
+                    // The base's bloom geometry, which every layer's bloom
+                    // MUST match so the chain's union is an exact bitwise OR
+                    // (4.5). Null when the base carries no fit.
+                    baseBloomGeometry: baseCal?.asset?.vocabBloom
+                        ? {
+                            bits: baseCal.asset.vocabBloom.bits,
+                            hashes: baseCal.asset.vocabBloom.hashes,
+                            minCount: baseCal.asset.vocabBloom.minCount ?? null,
+                        }
+                        : null,
+                    readBaseQueryInterp: () => {
+                        const seg = base.segments.get('query-interp');
+                        if (!seg) return null;
+                        return base.readSegmentBytes(seg);
+                    },
+                    corpusIngest: base.manifest.corpus?.ingest ?? null,
+                    chunking: base.manifest.corpus?.ingest?.chunking
+                        ?? base.manifest.corpus?.ingest
+                        ?? null,
+                    baseQueryInterpSha256: base.manifest.segments.find((sg) => sg.kind === 'query-interp')?.sha256 ?? null,
+                    dim: base.dim,
+                    metric: base.manifest.metric,
+                    encoder: base.manifest.encoder,
+                };
+            },
 
             async close() {
                 if (closed) return;
