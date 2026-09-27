@@ -456,16 +456,29 @@ function selfQueriesFromSnapshot(graph, maxQueries) {
 // explicitly instead of misreading the corpus tables.
 export const PROFILE_V1 = 'pikelet-complete-v1';
 export const PROFILE_V2 = 'pikelet-complete-v2';
-export const FORMAT_VERSIONS = { [PROFILE_V1]: 1, [PROFILE_V2]: 2 };
+// A layer is a complete-profile container under formatVersion 2 with its own
+// manifest profile string (LAYERED_PROFILE.md 4.1). A reader that predates the
+// layered profile sees the string under formatVersion 2 and refuses with its
+// existing "unsupported profile" error, which is the intended behavior: a layer
+// opened alone would silently serve a fraction of a corpus.
+export const PROFILE_LAYER = 'pikelet-layer-v1';
+export const FORMAT_VERSIONS = { [PROFILE_V1]: 1, [PROFILE_V2]: 2, [PROFILE_LAYER]: 2 };
 
 export function assemblePikeletFile(manifestFields, segments, outPath) {
   const formatVersion = FORMAT_VERSIONS[manifestFields.profile];
   if (!formatVersion) {
     throw new Error(`manifest.profile must be ${PROFILE_V1} or ${PROFILE_V2}, got ${manifestFields.profile}`);
   }
+  const isLayer = manifestFields.profile === PROFILE_LAYER;
   const layout = manifestFields.corpus?.layout;
-  if (formatVersion === 2 && layout !== CORPUS_LAYOUT_V2) {
-    throw new Error(`${PROFILE_V2} requires manifest.corpus from buildCorpusSegment() (layout ${CORPUS_LAYOUT_V2})`);
+  // A tombstone-only layer (4.1) carries a corpus object with records 0 and
+  // MUST omit the layout fields, because it has no corpus segment to describe.
+  const tombstoneOnlyLayer = isLayer && manifestFields.corpus?.records === 0;
+  if (formatVersion === 2 && !tombstoneOnlyLayer && layout !== CORPUS_LAYOUT_V2) {
+    throw new Error(`${manifestFields.profile} requires manifest.corpus from buildCorpusSegment() (layout ${CORPUS_LAYOUT_V2})`);
+  }
+  if (tombstoneOnlyLayer && layout !== undefined) {
+    throw new Error('a tombstone-only layer must omit corpus.layout');
   }
   if (formatVersion === 1 && layout !== undefined) {
     throw new Error(`${PROFILE_V1} carries corpus layout v1 (buildCorpusSegmentFromBuffers); got layout ${layout}`);
@@ -479,7 +492,7 @@ export function assemblePikeletFile(manifestFields, segments, outPath) {
   // sketch's own integrity chain to the complete identity without forcing a
   // whole-segment read at open (the index segment stays lazy).
   let indexCommitment;
-  if (formatVersion >= 2) {
+  if (formatVersion >= 2 && !tombstoneOnlyLayer) {
     const index = segments.find((s) => s.kind === 'index');
     if (!index || index.bytes.length < 256) {
       throw new Error('index segment must carry a 256-byte sketch header');

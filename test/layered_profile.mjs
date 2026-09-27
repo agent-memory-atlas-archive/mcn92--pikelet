@@ -27,6 +27,10 @@ import {
     validateLocatorShape, resolveLocatorUrl, assertConfined,
     resolveLocatorPath, resolveParentLocation,
 } from '../packages/pikelet-wasm/complete/layer-locator.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
     buildIntervalTable, ownerOf, projectMasks, liveCount,
     buildSupersessionMap, resolveSupersession, calibrationDrift,
@@ -855,6 +859,1096 @@ console.log('ancestry and citation scoping (5.6)');
     check('a fork not on this ancestry is answered as such',
         resolveCitation(anc, id64(9), 5).reason === 'not-on-this-history');
     check('a negative id is invalid', resolveCitation(anc, id64(1), -1).reason === 'invalid-id');
+}
+
+// ---------------------------------------------------------------------------
+// Masked sketch search (5.3) — against a real PikeletSketchArtifact
+// ---------------------------------------------------------------------------
+const require_ = createRequire(import.meta.url);
+const Pikelet = require_('pikelet-wasm');
+const { exportSketchArtifact } = require_('pikelet-wasm/artifact');
+const maskTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-layered-'));
+
+// A deterministic 1-D-ish geometry: record i sits at distance ~i from the
+// query, so the nearest rows are 0, 1, 2, ... That makes "the C nearest are
+// all masked" constructible exactly.
+const MDIM = 16;
+const MCOUNT = 64;
+function ladderVector(i) {
+    const v = new Float32Array(MDIM);
+    v[0] = 1;
+    v[1] = i / MCOUNT;          // grows with i, so cosine distance grows with i
+    let n = 0;
+    for (let d = 0; d < MDIM; d++) n += v[d] * v[d];
+    n = Math.sqrt(n);
+    for (let d = 0; d < MDIM; d++) v[d] /= n;
+    return v;
+}
+function buildLadderSketch(recommendedRerank) {
+    const qdata = new Uint8Array(MCOUNT * MDIM);
+    const scales = new Float32Array(MCOUNT);
+    const offsets = new Float32Array(MCOUNT);
+    for (let i = 0; i < MCOUNT; i++) {
+        const v = ladderVector(i);
+        let mn = Infinity; let mx = -Infinity;
+        for (let d = 0; d < MDIM; d++) { if (v[d] < mn) mn = v[d]; if (v[d] > mx) mx = v[d]; }
+        const sc = (mx - mn) / 255 || 1e-12;
+        scales[i] = sc; offsets[i] = mn;
+        for (let d = 0; d < MDIM; d++) {
+            const b = Math.round((v[d] - mn) / sc);
+            qdata[i * MDIM + d] = b < 0 ? 0 : b > 255 ? 255 : b;
+        }
+    }
+    const p = path.join(maskTmp, `ladder-${recommendedRerank}.pikelet-sketch`);
+    exportSketchArtifact({ dim: MDIM, count: MCOUNT, metric: 1, qdata, scales, offsets }, p,
+        { sketchDims: MDIM, sketchBits: 8, recommendedRerank });
+    return p;
+}
+const maskOf = (rows) => { const b = new Uint8Array(Math.ceil(MCOUNT / 8)); for (const r of rows) b[r >> 3] |= 1 << (r & 7); return b; };
+
+console.log('masked search: a masked row never enters the result (5.3)');
+{
+    const art = await Pikelet.openSketchArtifactFile(buildLadderSketch(40));
+    const q = ladderVector(0);
+
+    const plain = await art.search(q, 5);
+    const order = plain.results.map((r) => r.id);
+    check('unmasked search returns the nearest rows in order',
+        order[0] === 0 && order[1] === 1, JSON.stringify(order));
+
+    const masked = await art.search(q, 5, { exclude: maskOf([0, 1, 2]) });
+    const mids = masked.results.map((r) => r.id);
+    check('masked rows are absent from the results', !mids.some((id) => [0, 1, 2].includes(id)), JSON.stringify(mids));
+    check('the next live rows take their place', mids[0] === 3, JSON.stringify(mids));
+    check('k results are still returned', mids.length === 5);
+
+    // THE masking case of section 10 fixture (A): the C nearest rows are all
+    // masked and the nearest live row is the C+1-th. A post-hoc mask would
+    // return nothing here; masking before truncation returns the live row.
+    const small = await Pikelet.openSketchArtifactFile(buildLadderSketch(4));
+    const allNearestMasked = await small.search(q, 1, { rerank: 4, exclude: maskOf([0, 1, 2, 3]) });
+    check('with the C nearest rows all masked, the C+1-th live row is still found',
+        allNearestMasked.results.length === 1 && allNearestMasked.results[0].id === 4,
+        JSON.stringify(allNearestMasked.results.map((r) => r.id)));
+
+    const everything = await art.search(q, 5, { exclude: maskOf(Array.from({ length: MCOUNT }, (_, i) => i)) });
+    check('a fully masked tier returns no results, not an error', everything.results.length === 0);
+
+    const noneMasked = await art.search(q, 5, { exclude: new Uint8Array(Math.ceil(MCOUNT / 8)) });
+    check('an all-zero mask is identical to no mask',
+        JSON.stringify(noneMasked.results.map((r) => r.id)) === JSON.stringify(order));
+
+    // C counts unmasked rows, so a heavily masked tier still offers a full pool.
+    const heavy = await art.search(q, 3, { rerank: 8, exclude: maskOf(Array.from({ length: 50 }, (_, i) => i)) });
+    check('C counts unmasked rows: a heavily masked tier still fills k',
+        heavy.results.length === 3 && heavy.results[0].id === 50,
+        JSON.stringify(heavy.results.map((r) => r.id)));
+
+    // search() is async, so its validation surfaces as a rejected promise.
+    await rejectsAsync('a non-Uint8Array mask is refused',
+        () => art.search(q, 5, { exclude: [1, 2, 3] }), /must be a Uint8Array/);
+    await rejectsAsync('a mask too short for the artifact is refused',
+        () => art.search(q, 5, { exclude: new Uint8Array(2) }), /too short/);
+
+    await art.close();
+    await small.close();
+}
+
+console.log('masked search: the WASM scanner cannot honour a mask (5.3)');
+{
+    // A scan kernel scores every resident row and knows nothing about a mask,
+    // so a masked query must fall back to the JS scan rather than mask the
+    // kernel's already-truncated output.
+    const art = await Pikelet.openSketchArtifactFile(buildLadderSketch(40));
+    const q = ladderVector(0);
+    let scannerCalls = 0;
+    const fakeScanner = {
+        metric: 1, sketchDims: MDIM, maxRerank: 1024,
+        scan() { scannerCalls++; return [0, 1, 2, 3, 4]; },
+    };
+    await art.search(q, 5, { scanner: fakeScanner });
+    check('an unmasked query does use the scanner', scannerCalls === 1);
+    const masked = await art.search(q, 5, { scanner: fakeScanner, exclude: maskOf([0, 1, 2]) });
+    check('a masked query bypasses the scanner', scannerCalls === 1);
+    check('and still returns correct live rows',
+        !masked.results.map((r) => r.id).some((id) => [0, 1, 2].includes(id)));
+    await art.close();
+}
+
+// ---------------------------------------------------------------------------
+// Real chain files: a base plus two layers, assembled and re-read (4.1-4.5)
+// ---------------------------------------------------------------------------
+const {
+    assemblePikeletFile, buildCorpusSegment, buildQueryInterpSegment,
+    buildLexicalSegment: buildLexSeg, PROFILE_LAYER, PROFILE_V2,
+} = await import('../packages/pikelet-wasm/complete/builder.mjs');
+const crypto = await import('node:crypto');
+const sha256hexOf = (b) => crypto.createHash('sha256').update(b).digest('hex');
+
+console.log('chain files: a base and two layers assemble and re-read');
+{
+    const CDIM = 16;
+    const recBytes = (i) => Buffer.from(JSON.stringify({ title: `rec ${i}`, text: `record ${i} body text` }));
+    const sketchFor = (ids) => {
+        const n = ids.length;
+        const qdata = new Uint8Array(n * CDIM);
+        const scales = new Float32Array(n);
+        const offsets = new Float32Array(n);
+        for (let r = 0; r < n; r++) {
+            const v = ladderVector(ids[r] % MCOUNT);
+            let mn = Infinity; let mx = -Infinity;
+            for (let d = 0; d < CDIM; d++) { if (v[d] < mn) mn = v[d]; if (v[d] > mx) mx = v[d]; }
+            const sc = (mx - mn) / 255 || 1e-12;
+            scales[r] = sc; offsets[r] = mn;
+            for (let d = 0; d < CDIM; d++) {
+                const b = Math.round((v[d] - mn) / sc);
+                qdata[r * CDIM + d] = b < 0 ? 0 : b > 255 ? 255 : b;
+            }
+        }
+        const sp = path.join(chainTmp, `sk-${ids[0]}-${n}.pikelet-sketch`);
+        exportSketchArtifact({ dim: CDIM, count: n, metric: 1, qdata, scales, offsets }, sp,
+            { sketchDims: CDIM, sketchBits: 8, recommendedRerank: 20 });
+        return fs.readFileSync(sp);
+    };
+    const chainTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-chain-'));
+    const INGEST2 = { chunker: 'v1', targetTokens: 256 };
+    const ENC2 = { kind: 'host-encoder-v1', model: 'test' };
+
+    // --- base: 20 records ---
+    const baseIds = Array.from({ length: 20 }, (_, i) => i);
+    const baseCorpus = buildCorpusSegment(baseIds.map(recBytes));
+    const baseQi = buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' })));
+    const baseLex = buildLexSeg(baseIds.map((i) => `record ${i} body text`));
+    const basePath = path.join(chainTmp, 'base.pikelet');
+    const baseBuilt = assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...baseCorpus.corpus, ingest: INGEST2 }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(baseIds) },
+        { kind: 'corpus', bytes: baseCorpus.bytes },
+        { kind: 'query-interp', bytes: baseQi },
+        { kind: 'lexical', bytes: baseLex.bytes },
+    ], basePath);
+    const baseIdentity = baseBuilt.identity;
+        check('the base assembles and yields an identity', /^[0-9a-f]{64}$/.test(baseIdentity));
+
+    const baseQiSha = baseBuilt.manifest.segments.find((x) => x.kind === 'query-interp').sha256;
+    check('the base manifest carries a query-interp digest to inherit', /^[0-9a-f]{64}$/.test(baseQiSha));
+
+    // --- layer 1: +5 records, tombstones base ids 3 and 4 ---
+    const l1Ids = [20, 21, 22, 23, 24];
+    const l1Corpus = buildCorpusSegment(l1Ids.map(recBytes));
+    const l1Tomb = buildTombstoneSegment({ rowBase: 20, tombstonedIds: [3, 4], records: 5, supersessions: [[3, 20]] });
+    const l1Qi = buildInheritedQuerySegment({ baseIdentity: baseIdentity, queryInterpSha256: baseQiSha });
+    const l1Lex = buildLexSeg(l1Ids.map((i) => `record ${i} body text`));
+    const l1Path = path.join(chainTmp, 'l1.pikelet');
+    const l1Built = assemblePikeletFile({
+        profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        layer: {
+            parent: { identity: baseIdentity, locator: 'base.pikelet' },
+            baseIdentity: baseIdentity, depth: 1, rowBase: 20, records: 5,
+            tombstones: 2, supersessions: 1, ingest: INGEST2,
+        },
+        corpus: l1Corpus.corpus, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(l1Ids) },
+        { kind: 'corpus', bytes: l1Corpus.bytes },
+        { kind: 'query-interp', bytes: l1Qi },
+        { kind: 'lexical', bytes: l1Lex.bytes },
+        { kind: 'tombstones', bytes: l1Tomb },
+    ], l1Path);
+    const l1Identity = l1Built.identity;
+        check('a layer assembles with a tombstones segment', /^[0-9a-f]{64}$/.test(l1Identity));
+
+    // --- layer 2: tombstone-only, hides base id 7 and keeps l1's bits ---
+    const l2Tomb = buildTombstoneSegment({ rowBase: 25, tombstonedIds: [3, 4, 7], records: 0 });
+    const l2Qi = buildInheritedQuerySegment({ baseIdentity: baseIdentity, queryInterpSha256: baseQiSha });
+    const l2Path = path.join(chainTmp, 'l2.pikelet');
+    const l2Built = assemblePikeletFile({
+        profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        layer: {
+            parent: { identity: l1Identity, locator: 'l1.pikelet' },
+            baseIdentity: baseIdentity, depth: 2, rowBase: 25, records: 0,
+            tombstones: 3, supersessions: 0, ingest: INGEST2,
+        },
+        corpus: { records: 0 },
+    }, [
+        { kind: 'query-interp', bytes: l2Qi },
+        { kind: 'tombstones', bytes: l2Tomb },
+    ], l2Path);
+    const l2Identity = l2Built.identity;
+        check('a tombstone-only layer assembles with no index or corpus segment',
+        /^[0-9a-f]{64}$/.test(l2Identity));
+
+    // --- read the chain back and validate every relation ---
+    const readManifest = (p) => {
+        const buf = fs.readFileSync(p);
+        const mlen = new DataView(buf.buffer, buf.byteOffset, 64).getUint32(8, true);
+        return JSON.parse(buf.subarray(64, 64 + mlen).toString('utf8'));
+    };
+    const bm = readManifest(basePath);
+    const l1m = readManifest(l1Path);
+    const l2m = readManifest(l2Path);
+
+    check('the layer profile string is what a pre-layered reader would refuse',
+        l1m.profile === 'pikelet-layer-v1');
+    const v1 = validateAgainstParent(l1m, { manifest: bm, identity: baseIdentity, isBase: true });
+    check('layer 1 validates against the real base', v1.rowBase === 20 && v1.depth === 1);
+    const v2 = validateAgainstParent(l2m, { manifest: l1m, identity: l1Identity, isBase: false });
+    check('layer 2 validates against the real layer 1', v2.rowBase === 25 && v2.tombstoneOnly === true);
+
+    const decl = chainIngestDeclaration(bm, l1m);
+    check('the chain ingestion declaration comes from the base', decl.source === 'base');
+    check('both layers match it',
+        validateIngestAgainstChain(l1m, decl) && validateIngestAgainstChain(l2m, decl));
+
+    // The kind-4 commitment, checked against the base actually read.
+    const l1QiSeg = (() => {
+        const buf = fs.readFileSync(l1Path);
+        const idx = l1m.segments.findIndex((x) => x.kind === 'query-interp');
+        const mlen = new DataView(buf.buffer, buf.byteOffset, 64).getUint32(8, true);
+        const tableAt = 64 + mlen;
+        const off = Number(new DataView(buf.buffer, buf.byteOffset).getBigUint64(tableAt + idx * 48 + 8, true));
+        const len = Number(new DataView(buf.buffer, buf.byteOffset).getBigUint64(tableAt + idx * 48 + 16, true));
+        return new Uint8Array(buf.subarray(off, off + len));
+    })();
+    const inh = parseInheritedQuerySegment(l1QiSeg, {
+        layerBaseIdentity: baseIdentity, baseQueryInterpSha256: baseQiSha,
+    });
+    check('the layer inherits the base\'s encoder by digest', inh.inheritFrom === baseIdentity);
+    check('every segment digest in the manifest matches its bytes', (() => {
+        for (const p of [basePath, l1Path, l2Path]) {
+            const buf = fs.readFileSync(p);
+            const m = readManifest(p);
+            const mlen = new DataView(buf.buffer, buf.byteOffset, 64).getUint32(8, true);
+            const tableAt = 64 + mlen;
+            for (let i = 0; i < m.segments.length; i++) {
+                const dv = new DataView(buf.buffer, buf.byteOffset);
+                const off = Number(dv.getBigUint64(tableAt + i * 48 + 8, true));
+                const len = Number(dv.getBigUint64(tableAt + i * 48 + 16, true));
+                if (sha256hexOf(buf.subarray(off, off + len)) !== m.segments[i].sha256) return false;
+            }
+        }
+        return true;
+    })());
+
+    // Chain state over the real members.
+    const members = [
+        { depth: 0, identity: baseIdentity, rowBase: 0, records: 20 },
+        { depth: 1, identity: l1Identity, rowBase: 20, records: 5 },
+        { depth: 2, identity: l2Identity, rowBase: 25, records: 0 },
+    ];
+    const table = buildIntervalTable(members);
+    const headTomb = parseTombstoneSegment(l2Tomb, { rowBase: 25, tombstones: 3, supersessions: 0 });
+    check('the chain has two search tiers and 25 ids', table.tiers.length === 2 && table.rowTotal === 25);
+    check('live count is 22 after three tombstones', liveCount(table, headTomb.tombstoneCount) === 22);
+    const masks = projectMasks(table, headTomb.bitset);
+    check('the head mask projects onto the base tier',
+        testBit(masks[0], 3) && testBit(masks[0], 4) && testBit(masks[0], 7) && popcountBytes(masks[0]) === 3);
+    check('layer 1\'s tier is unmasked', popcountBytes(masks[1]) === 0);
+
+    // The cumulative rule across the real segments.
+    const l1Mask = parseTombstoneSegment(l1Tomb).bitset;
+    check('layer 2\'s mask is a superset of layer 1\'s',
+        firstSupersetViolation(headTomb.bitset, l1Mask, 25) === -1);
+    check('layer 2\'s own delta is just base id 7',
+        JSON.stringify(tombstoneDelta(headTomb.bitset, l1Mask, 25)) === JSON.stringify([7]));
+
+    // A masked search over the base tier's real sketch: the tombstoned rows
+    // must not come back.
+    const baseSketchBytes = sketchFor(baseIds);
+    const bsPath = path.join(chainTmp, 'basesketch.pikelet-sketch');
+    fs.writeFileSync(bsPath, baseSketchBytes);
+    const baseArt = await Pikelet.openSketchArtifactFile(bsPath);
+    const res = await baseArt.search(ladderVector(3), 5, { exclude: masks[0] });
+    const got = res.results.map((r) => r.id);
+    check('a masked search over the real base tier omits every tombstoned row',
+        !got.some((id) => [3, 4, 7].includes(id)), JSON.stringify(got));
+    await baseArt.close();
+
+    // Supersession over the real segments: base id 3 was replaced by id 20.
+    const supMap = buildSupersessionMap([
+        { depth: 1, supersessions: parseTombstoneSegment(l1Tomb).supersessions },
+        { depth: 2, supersessions: headTomb.supersessions },
+    ]);
+    check('the union supersession map resolves the recorded edge',
+        resolveSupersession(supMap, 3).current === 20);
+
+    // Global lexical statistics over both search tiers.
+    const stats = globalLexicalStats([
+        { docCount: baseLex.meta.docCount, totalTokens: openLexicalIndexFor(baseLex.bytes).totalTokens },
+        { docCount: l1Lex.meta.docCount, totalTokens: openLexicalIndexFor(l1Lex.bytes).totalTokens },
+    ]);
+    check('N is the sum over search tiers, tombstoned records included', stats.N === 25);
+    check('the reader reports that stats include tombstoned records', stats.statsIncludeTombstoned === true);
+
+    // ------------------------------------------------------------------
+    // Mount the chain and serve it (5.1, 5.3, 5.6)
+    // ------------------------------------------------------------------
+    const { openPikeletChain } = await import('../packages/pikelet-wasm/complete/layer-reader.mjs');
+    const chain = await openPikeletChain([basePath, l1Path, l2Path]);
+    const ci = chain.info();
+    check('the chain mounts every member', ci.layers === 3 && ci.searchTiers === 2);
+    check('it reports the head identity, not a member\'s', ci.identity === l2Identity);
+    check('and the base identity separately', ci.baseIdentity === baseIdentity);
+    check('record counts are chain-wide', ci.records === 25 && ci.liveRecords === 22 && ci.tombstones === 3);
+    check('global lexical stats count tombstoned records (5.4)',
+        ci.lexical.N === 25 && ci.lexical.statsIncludeTombstoned === true);
+
+    const qres = await chain.query(ladderVector(3), 5, { text: 'record 3 body text' });
+    const qids = qres.results.map((r) => r.id);
+    check('a query returns no tombstoned id', !qids.some((id) => [3, 4, 7].includes(id)), JSON.stringify(qids));
+    check('results carry the owning layer depth', qres.results.every((r) => Number.isInteger(r.layer)));
+    check('the response carries the head identity for citation (5.3)', qres.identity === l2Identity);
+
+    // A query whose nearest rows are all tombstoned still finds live ones.
+    const nearDeleted = await chain.query(ladderVector(4), 3, {});
+    check('a query nearest a deleted record returns live neighbours',
+        !nearDeleted.results.map((r) => r.id).some((id) => [3, 4, 7].includes(id)));
+
+    // record() over global ids, across the tier boundary.
+    const rBase = await chain.record(2);
+    check('record() resolves a base id', rBase.id === 2 && rBase.layer === 0 && rBase.tombstoned === false);
+    const rLayer = await chain.record(22);
+    check('record() resolves an id owned by a layer', rLayer.id === 22 && rLayer.layer === 1);
+    const rTomb = await chain.record(3);
+    check('record() reports a tombstoned record with its supersession (5.6)',
+        rTomb.tombstoned === true && rTomb.supersededBy === 20 && rTomb.currentSuccessor === 20);
+    await rejectsAsync('an id past the chain is refused', () => chain.record(25), /outside every search tier/);
+
+    // Citations resolve only along the mounted ancestry (5.6).
+    check('a citation against the base resolves', chain.citation(baseIdentity, 5).ok === true);
+    check('a citation against the head resolves', chain.citation(l2Identity, 24).ok === true);
+    check('an id that postdates the cited head is invalid',
+        chain.citation(baseIdentity, 22).reason === 'id-postdates-that-head');
+    check('a fork not on this ancestry is answered as such',
+        chain.citation('9'.repeat(64), 1).reason === 'not-on-this-history');
+
+    // 5.5: this base carries no fit, so the chain is `none`, and drift is
+    // still computed and reported.
+    check('a base with no fit yields calibrationStatus none', ci.calibrationStatus === 'none');
+    check('drift is reported even when unscored', Math.abs(ci.calibrationDrift - 0.4) < 1e-9);
+    check('the effective limit is the reader\'s finite default', ci.driftLimit === 0.2);
+    await chain.close();
+
+    // 4.1: a layer opened alone must still be refused — it would serve a
+    // fraction of a corpus.
+    const { openPikeletFile: openOne } = await import('../packages/pikelet-wasm/complete/index.mjs');
+    await rejectsAsync('a layer opened alone is refused',
+        () => openOne(l1Path), /unsupported profile pikelet-layer-v1/);
+    await rejectsAsync('a chain whose first member is a layer is refused',
+        () => openPikeletChain([l1Path, l2Path]), /unsupported profile|first chain member is a layer/);
+
+    // 3.2: a chain member that does not link is refused at mount.
+    const strayPath = path.join(chainTmp, 'stray.pikelet');
+    const strayCorpus = buildCorpusSegment([recBytes(99)]);
+    assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...strayCorpus.corpus, ingest: INGEST2 }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor([99]) },
+        { kind: 'corpus', bytes: strayCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+    ], strayPath);
+    await rejectsAsync('a layer mounted on a base it does not commit to is refused',
+        () => openPikeletChain([strayPath, l1Path]), /but the opened parent is/);
+
+    fs.rmSync(chainTmp, { recursive: true, force: true });
+}
+function openLexicalIndexFor(bytes) {
+    const { openLexicalIndex } = require_('pikelet-wasm/complete');
+    return openLexicalIndex(bytes);
+}
+
+fs.rmSync(maskTmp, { recursive: true, force: true });
+
+// ---------------------------------------------------------------------------
+// Calibration status with a real fit in the base (5.5)
+// ---------------------------------------------------------------------------
+console.log('chain calibration: inherited and drift-exceeded with a real fit');
+{
+    const CDIM = 16;
+    const calTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-cal-'));
+    const recBytes = (i) => Buffer.from(JSON.stringify({ title: `rec ${i}`, text: `record ${i} body text` }));
+    const sketchFor = (ids, tag) => {
+        const n = ids.length;
+        const qdata = new Uint8Array(n * CDIM);
+        const scales = new Float32Array(n);
+        const offsets = new Float32Array(n);
+        for (let r = 0; r < n; r++) {
+            const v = ladderVector(ids[r] % MCOUNT);
+            let mn = Infinity; let mx = -Infinity;
+            for (let d = 0; d < CDIM; d++) { if (v[d] < mn) mn = v[d]; if (v[d] > mx) mx = v[d]; }
+            const sc = (mx - mn) / 255 || 1e-12;
+            scales[r] = sc; offsets[r] = mn;
+            for (let d = 0; d < CDIM; d++) {
+                const b = Math.round((v[d] - mn) / sc);
+                qdata[r * CDIM + d] = b < 0 ? 0 : b > 255 ? 255 : b;
+            }
+        }
+        const sp = path.join(calTmp, `sk-${tag}.pikelet-sketch`);
+        exportSketchArtifact({ dim: CDIM, count: n, metric: 1, qdata, scales, offsets }, sp,
+            { sketchDims: CDIM, sketchBits: 8, recommendedRerank: 20 });
+        return fs.readFileSync(sp);
+    };
+    const ING = { chunker: 'v1' };
+    const ENC = { kind: 'host-encoder-v1' };
+    const BLOOM_BITS = 2048;
+    const bloomB64 = (setBits) => {
+        const b = new Uint8Array(BLOOM_BITS / 8);
+        for (const i of setBits) b[i >> 3] |= 1 << (i & 7);
+        return Buffer.from(b).toString('base64');
+    };
+
+    // A base whose calibration region carries a real `asset` — that is what
+    // 5.5 means by "the base carries a fit". driftLimit on the asset is the
+    // producer's declared validity envelope.
+    function buildBase(driftLimit) {
+        const ids = Array.from({ length: 100 }, (_, i) => i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const cal = {
+            kind: 'retrieval-signals-v1',
+            asset: {
+                features: ['d0'], weights: [1], bias: 0,
+                standardize: { mean: { d0: 0.5 }, std: { d0: 0.1 } },
+                thresholds: { hard: 0.4, weak: 0.6 },
+                // The scorer reads the bloom geometry from asset.vocabBloom
+                // (retrieval-abstention.mjs), not from the region root.
+                vocabBloom: { bits: BLOOM_BITS, hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'] },
+                ...(driftLimit === undefined ? {} : { driftLimit }),
+            },
+            vocabBloomBase64: bloomB64([1, 2, 3]),
+        };
+        const p = path.join(calTmp, `base-${driftLimit ?? 'none'}.pikelet`);
+        return assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC,
+            corpus: { ...corpus.corpus, ingest: ING }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, `b${driftLimit ?? 'n'}`) },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify(cal))) },
+        ], p);
+    }
+
+    // A layer appending `n` records on top, shipping its own bloom at the
+    // base's geometry so the union of 4.5 stays exact.
+    function buildLayer(built, n, tag, withBloom = true) {
+        const qiSha = built.manifest.segments.find((x) => x.kind === 'query-interp').sha256;
+        const ids = Array.from({ length: n }, (_, i) => 100 + i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const p = path.join(calTmp, `layer-${tag}.pikelet`);
+        return assemblePikeletFile({
+            profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC,
+            layer: {
+                parent: { identity: built.identity }, baseIdentity: built.identity,
+                depth: 1, rowBase: 100, records: n, tombstones: 0, supersessions: 0, ingest: ING,
+            },
+            corpus: corpus.corpus, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, `l${tag}`) },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+                baseIdentity: built.identity, queryInterpSha256: qiSha,
+                ...(withBloom ? {
+                    vocabBloom: { bits: BLOOM_BITS, hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'] },
+                    vocabBloomBytes: Uint8Array.from(Buffer.from(bloomB64([4, 5]), 'base64')),
+                } : {}),
+            }) },
+            { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 100, tombstonedIds: [], records: n }) },
+        ], p);
+    }
+
+    const { openPikeletChain } = await import('../packages/pikelet-wasm/complete/layer-reader.mjs');
+
+    // 10 appended over a 100-record base = 0.10 drift, inside the 0.20 default.
+    const b1 = buildBase(undefined);
+    const l1 = buildLayer(b1, 10, 'small');
+    const c1 = await openPikeletChain([b1.outPath, l1.outPath]);
+    const i1 = c1.info();
+    check('a base with a real fit and drift inside the limit is inherited',
+        i1.calibrationStatus === 'inherited', `status ${i1.calibrationStatus}, drift ${i1.calibrationDrift}`);
+    check('drift is (appended + tombstoned) / base records', Math.abs(i1.calibrationDrift - 0.1) < 1e-9);
+    check('an absent producer envelope leaves the reader limit in force',
+        i1.driftLimit === 0.2 && i1.producerEnvelope === Infinity);
+    check('the union bloom carries base and layer bits', (() => {
+        const u = c1.chainBloom();
+        const set = (i) => ((u[i >> 3] >> (i & 7)) & 1) === 1;
+        return u && set(1) && set(2) && set(3) && set(4) && set(5);
+    })());
+    await c1.close();
+
+    // 30 appended = 0.30 drift, past the reader's 0.20 default.
+    const l2 = buildLayer(b1, 30, 'big');
+    const c2 = await openPikeletChain([b1.outPath, l2.outPath]);
+    check('drift past the reader limit is drift-exceeded',
+        c2.info().calibrationStatus === 'drift-exceeded');
+    await c2.close();
+
+    // A host may be stricter than its own default.
+    const c3 = await openPikeletChain([b1.outPath, l1.outPath], { readerDriftLimit: 0.05 });
+    check('a stricter host limit lowers the effective limit',
+        c3.info().driftLimit === 0.05 && c3.info().calibrationStatus === 'drift-exceeded');
+    await c3.close();
+
+    // A producer envelope stricter than the host's limit wins; a looser one
+    // cannot raise it (5.5's fixed precedence).
+    const bStrict = buildBase(0.05);
+    const lStrict = buildLayer(bStrict, 10, 'strict');
+    const c4 = await openPikeletChain([bStrict.outPath, lStrict.outPath]);
+    check('a stricter producer envelope lowers the effective limit',
+        c4.info().driftLimit === 0.05 && c4.info().calibrationStatus === 'drift-exceeded');
+    await c4.close();
+
+    const bLoose = buildBase(0.9);
+    const lLoose = buildLayer(bLoose, 30, 'loose');
+    const c5 = await openPikeletChain([bLoose.outPath, lLoose.outPath]);
+    check('a looser producer envelope cannot raise the host\'s limit',
+        c5.info().driftLimit === 0.2 && c5.info().calibrationStatus === 'drift-exceeded');
+    await c5.close();
+
+    // 4.5/5.5: a layer shipping no bloom while the base carries a fit degrades
+    // the chain, even though drift is well inside the limit.
+    const lNoBloom = buildLayer(b1, 10, 'nobloom', false);
+    const c6 = await openPikeletChain([b1.outPath, lNoBloom.outPath]);
+    check('a layer shipping no bloom degrades a scored chain',
+        c6.info().calibrationStatus === 'drift-exceeded', `status ${c6.info().calibrationStatus}`);
+    await c6.close();
+
+    fs.rmSync(calTmp, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// append (6.1)
+// ---------------------------------------------------------------------------
+const {
+    planAppendability, planLayer, buildLayerSegments, checkAppendDrift, idsSetIn,
+    PRODUCER_MAX_DEPTH, FORMAT_MAX_DEPTH,
+} = await import('../packages/pikelet-wasm/complete/layer-append.mjs');
+
+console.log('append: appendability and the encoder source (6.1)');
+{
+    const ING = { chunker: 'v1', targetTokens: 256 };
+    const k3 = planAppendability({ qiKind: 3, corpusIngest: ING });
+    check('a kind-3 base is appendable from its own pack', k3.encoderSource === 'pack' && k3.appendable === true);
+    const k2 = planAppendability({ qiKind: 2, corpusIngest: ING });
+    check('a kind-2 base appends with the host\'s encoder', k2.encoderSource === 'host');
+
+    // The rule with a normative answer for every base ever released.
+    rejects('a kind-1 base is readable but not appendable',
+        () => planAppendability({ qiKind: 1, corpusIngest: ING }), /readable, but not appendable/);
+    rejects('a layer is not a base to append to',
+        () => planAppendability({ qiKind: 4, corpusIngest: ING }), /a layer is not a base/);
+
+    // The ingestion declaration: granularity is part of what calibration saw.
+    rejects('a base with no corpus.ingest refuses without an assertion',
+        () => planAppendability({ qiKind: 3, corpusIngest: null }), /supply --assert-ingest/);
+    const asserted = planAppendability({ qiKind: 3, corpusIngest: null, assertIngest: ING });
+    check('an operator may assert the declaration',
+        asserted.ingestAsserted === true && canonicalJson(asserted.ingest) === canonicalJson(ING));
+    rejects('an assertion cannot override an artifact\'s own declaration',
+        () => planAppendability({ qiKind: 3, corpusIngest: ING, assertIngest: ING }), /would override an artifact/);
+    rejects('the asserted declaration must not smuggle ingestAsserted inside it',
+        () => planAppendability({ qiKind: 3, corpusIngest: null, assertIngest: { ...ING, ingestAsserted: true } }),
+        /must not contain ingestAsserted/);
+}
+
+console.log('append: id assignment, mask and supersessions (6.1 steps 4-5)');
+{
+    const parentBitset = parseTombstoneSegment(
+        buildTombstoneSegment({ rowBase: 100, tombstonedIds: [5, 6] }),
+    ).bitset;
+    const common = { parentRowBase: 0, parentRecords: 100, parentBitset, parentDepth: 0 };
+
+    const p = planLayer({ ...common, newRecordCount: 10, remove: [7, 8] });
+    check('rowBase is parent rowBase + parent records', p.rowBase === 100);
+    check('depth is parent depth + 1', p.depth === 1);
+    check('the mask inherits the parent\'s bits', testBit(p.bitset, 5) && testBit(p.bitset, 6));
+    check('and adds the layer\'s own removals', testBit(p.bitset, 7) && testBit(p.bitset, 8));
+    check('tombstones is the cumulative popcount', p.tombstones === 4);
+    check('the delta is only what this layer introduced',
+        JSON.stringify(p.delta) === JSON.stringify([7, 8]));
+
+    // A --remove of an already-deleted id is a no-op, not an error.
+    const noop = planLayer({ ...common, newRecordCount: 1, remove: [5] });
+    check('removing an already-deleted id is a no-op', noop.delta.length === 0 && noop.tombstones === 2);
+
+    // Supersessions take ids from this layer's own range, in order.
+    const sup = planLayer({ ...common, newRecordCount: 3, supersede: [[10, 'a.md'], [20, 'b.md']] });
+    check('supersessions assign newIds from this layer\'s range',
+        JSON.stringify(sup.supersessions) === JSON.stringify([[10, 100], [20, 101]]));
+    check('a superseded oldId is tombstoned by the same step',
+        testBit(sup.bitset, 10) && testBit(sup.bitset, 20));
+
+    rejects('removing an id at or above rowBase is refused',
+        () => planLayer({ ...common, newRecordCount: 5, remove: [100] }),
+        /cannot retract its own records/);
+    rejects('more supersessions than new records is refused',
+        () => planLayer({ ...common, newRecordCount: 1, supersede: [[10, 'a'], [20, 'b']] }),
+        /more --supersede pairs than new records/);
+    rejects('the same oldId twice in one layer is refused',
+        () => planLayer({ ...common, newRecordCount: 2, supersede: [[10, 'a'], [10, 'b']] }),
+        /more than once/);
+
+    // "A layer must do something" (6.1).
+    rejects('a layer introducing neither a record nor a new tombstone is refused',
+        () => planLayer({ ...common, newRecordCount: 0, remove: [5, 6] }),
+        /neither a record nor a new tombstone/);
+    const tombOnly = planLayer({ ...common, newRecordCount: 0, remove: [9] });
+    check('a tombstone-only layer that does delete something is allowed',
+        tombOnly.tombstoneOnly === true && tombOnly.delta.length === 1);
+
+    // Depth limits: the producer default and the format ceiling.
+    rejects('appending past the producer default is refused',
+        () => planLayer({ ...common, parentDepth: PRODUCER_MAX_DEPTH, newRecordCount: 1 }),
+        new RegExp(`past --max-depth ${PRODUCER_MAX_DEPTH}`));
+    check('a higher --max-depth allows it',
+        planLayer({ ...common, parentDepth: PRODUCER_MAX_DEPTH, newRecordCount: 1, maxDepth: 12 }).depth === 9);
+    rejects('the format ceiling is enforced regardless of --max-depth',
+        () => planLayer({ ...common, parentDepth: FORMAT_MAX_DEPTH, newRecordCount: 1, maxDepth: 99 }),
+        /past the format ceiling of 16/);
+
+    // 3.3: the id space is finite and only compaction reclaims it.
+    rejects('an append that would exhaust the id space is refused',
+        () => planLayer({
+            parentRowBase: MAX_RECORDS - 5, parentRecords: 5, parentBitset: new Uint8Array(0),
+            parentDepth: 0, newRecordCount: 10,
+        }), /would exhaust the id space/);
+}
+
+console.log('append: the layer\'s segments and manifest (6.1 step 6)');
+{
+    const parentBitset = parseTombstoneSegment(buildTombstoneSegment({ rowBase: 50, tombstonedIds: [1] })).bitset;
+    const plan = planLayer({
+        parentRowBase: 0, parentRecords: 50, parentBitset, parentDepth: 0,
+        newRecordCount: 4, remove: [2], supersede: [[3, 'x.md']],
+    });
+    const ING = { chunker: 'v1' };
+    const built = buildLayerSegments({
+        plan, baseIdentity: BASE_ID, parentIdentity: BASE_ID,
+        baseQueryInterpSha256: '7'.repeat(64), parentLocator: 'base.pikelet',
+        ingest: ING, ingestAsserted: false, dim: 384, metric: 'cosine',
+        encoder: { kind: 'inline-transformer-v1' },
+        corpus: { records: 4, layout: 'records-v2' },
+    });
+    const v = validateLayerObject(built.manifestFields);
+    check('the assembled manifest passes layer validation', v.depth === 1 && v.rowBase === 50);
+    check('the tombstone segment round-trips with the manifest counts', (() => {
+        const t = parseTombstoneSegment(built.tombstones, {
+            rowBase: 50, tombstones: built.manifestFields.layer.tombstones,
+            supersessions: 1, records: 4,
+        });
+        return t.tombstoneCount === 3 && JSON.stringify(t.supersessions) === JSON.stringify([[3, 50]]);
+    })());
+    check('the locator is recorded when supplied', built.manifestFields.layer.parent.locator === 'base.pikelet');
+    check('ingestAsserted is absent when the base declared the ingest',
+        built.manifestFields.layer.ingestAsserted === undefined);
+
+    // An asserted chain records the sibling flag, and the declaration's
+    // canonical form is unchanged by the assertion (4.1).
+    const assertedBuilt = buildLayerSegments({
+        plan, baseIdentity: BASE_ID, parentIdentity: BASE_ID,
+        baseQueryInterpSha256: '7'.repeat(64), ingest: ING, ingestAsserted: true,
+        dim: 384, metric: 'cosine', encoder: { kind: 'inline-transformer-v1' },
+        corpus: { records: 4, layout: 'records-v2' },
+    });
+    check('an asserted chain records the sibling flag',
+        assertedBuilt.manifestFields.layer.ingestAsserted === true);
+    check('the declaration\'s canonical form is identical either way',
+        canonicalJson(built.manifestFields.layer.ingest) === canonicalJson(assertedBuilt.manifestFields.layer.ingest));
+
+    // A tombstone-only layer's manifest omits the layout fields.
+    const tPlan = planLayer({ parentRowBase: 0, parentRecords: 50, parentBitset, parentDepth: 0, newRecordCount: 0, remove: [9] });
+    const tBuilt = buildLayerSegments({
+        plan: tPlan, baseIdentity: BASE_ID, parentIdentity: BASE_ID,
+        baseQueryInterpSha256: '7'.repeat(64), ingest: ING, ingestAsserted: false,
+        dim: 384, metric: 'cosine', encoder: { kind: 'inline-transformer-v1' },
+        corpus: { records: 4, layout: 'records-v2' },
+    });
+    check('a tombstone-only layer omits the corpus layout fields',
+        tBuilt.manifestFields.corpus.records === 0 && tBuilt.manifestFields.corpus.layout === undefined);
+    check('and validates as tombstone-only', validateLayerObject(tBuilt.manifestFields).tombstoneOnly === true);
+}
+
+console.log('append: drift refusal (6.1, 5.5)');
+{
+    const base = { baseRecords: 1000, appendedBefore: 100, headTombstones: 50, effectiveLimit: 0.2 };
+    const ok = checkAppendDrift({ ...base, newRecords: 10 });
+    check('an append inside the limit is allowed', ok.exceedsLimit === false && Math.abs(ok.drift - 0.16) < 1e-9);
+    rejects('an append past the limit is refused',
+        () => checkAppendDrift({ ...base, newRecords: 100 }), /past the chain's effective limit/);
+    const forced = checkAppendDrift({ ...base, newRecords: 100, allowDrift: true });
+    check('--allow-drift emits it anyway and reports that it exceeds',
+        forced.exceedsLimit === true && Math.abs(forced.drift - 0.25) < 1e-9);
+}
+
+// ---------------------------------------------------------------------------
+// rebase (6.2) — section 10 fixture family (D)
+// ---------------------------------------------------------------------------
+const {
+    forkPoint, checkRebasePreconditions, planRebase, ON_CONFLICT, ON_FOREIGN,
+} = await import('../packages/pikelet-wasm/complete/layer-rebase.mjs');
+
+const maskFor = (rowBase, ids) => parseTombstoneSegment(
+    buildTombstoneSegment({ rowBase, tombstonedIds: ids }),
+).bitset;
+
+console.log('rebase: THE DELTA CASE — a rebase replays what the layer did (6.2)');
+{
+    // Section 10 (D): on branch A, A1 tombstones base record 5 (once plainly,
+    // once with a supersession); then A2 MERELY APPENDS. Rebasing A2 onto
+    // branch B must NOT set bit 5 and must NOT carry A1's edge: bit 5 is in
+    // A2's CUMULATIVE bitset only because it inherited it, and replaying the
+    // cumulative set would import an ancestor's operation into a branch that
+    // never performed it. Draft 2 replayed the cumulative set; this is the
+    // correction.
+    const base = { identity: id64(1), records: 100 };
+    const a1 = { identity: id64(2), records: 10 };
+    const b1 = { identity: id64(3), records: 7 };
+
+    // A1 tombstoned base id 5. A2 inherits that and appends 4 records.
+    const a1Bitset = maskFor(100, [5]);
+    const a2Bitset = maskFor(110, [5]);        // cumulative: inherited only
+    const headBitset = maskFor(107, []);       // branch B deleted nothing
+
+    const { forkRowBase } = forkPoint([base, a1], [base, b1]);
+    check('the fork point is the shared base only', forkRowBase === 100);
+
+    const plan = planRebase({
+        layerBitset: a2Bitset, oldParentBitset: a1Bitset, oldRowBase: 110,
+        layerRecords: 4, layerSupersessions: [],
+        newRowBase: 107, headBitset, forkRowBase,
+    });
+    check('the rebase emits (it owns records)', plan.emit === true);
+    check('its delta over its own parent is empty', plan.delta.length === 0);
+    check('IT DOES NOT SET BIT 5: that was its ancestor\'s deletion, not its own',
+        !testBit(plan.bitset, 5), 'bit 5 leaked from the cumulative set');
+    check('it carries no supersession it did not record', plan.supersessions.length === 0);
+    check('its rowBase is the new head\'s row total', plan.newRowBase === 107);
+
+    // The same layer whose OWN segment recorded the deletion does carry it.
+    const a2Own = planRebase({
+        layerBitset: maskFor(110, [5, 9]), oldParentBitset: a1Bitset, oldRowBase: 110,
+        layerRecords: 4, layerSupersessions: [], newRowBase: 107, headBitset, forkRowBase,
+    });
+    check('a deletion the layer itself introduced IS replayed',
+        testBit(a2Own.bitset, 9) && a2Own.delta.length === 1 && a2Own.delta[0] === 9);
+    check('and the inherited bit still is not', !testBit(a2Own.bitset, 5));
+
+    rejects('a rebase with no access to the original parent refuses rather than guessing',
+        () => planRebase({
+            layerBitset: a2Bitset, oldParentBitset: null, oldRowBase: 110,
+            layerRecords: 4, newRowBase: 107, headBitset, forkRowBase,
+        }), /delta over that parent is unknowable/);
+}
+
+console.log('rebase: two kinds of id (6.2)');
+{
+    const base = { identity: id64(1), records: 100 };
+    const a1 = { identity: id64(2), records: 10 };
+    const { forkRowBase } = forkPoint([base, a1], [base, { identity: id64(3), records: 5 }]);
+
+    // A layer owning ids 110..113 with an edge (7 -> 111): the y side is its
+    // own and must be translated; the x side is an ancestor id and is not.
+    const plan = planRebase({
+        layerBitset: maskFor(110, [7]), oldParentBitset: maskFor(110, []), oldRowBase: 110,
+        layerRecords: 4, layerSupersessions: [[7, 111]],
+        newRowBase: 105, headBitset: maskFor(105, []), forkRowBase,
+    });
+    check('the y side is translated into the new range',
+        JSON.stringify(plan.supersessions) === JSON.stringify([[7, 106]]),
+        JSON.stringify(plan.supersessions));
+    check('the x side is an ancestor id and is unchanged', plan.supersessions[0][0] === 7);
+    check('the superseded id is tombstoned in the rebased bitset', testBit(plan.bitset, 7));
+
+    rejects('a translated newId outside the new range is refused',
+        () => planRebase({
+            layerBitset: maskFor(110, [7]), oldParentBitset: maskFor(110, []), oldRowBase: 110,
+            layerRecords: 1, layerSupersessions: [[7, 118]],
+            newRowBase: 105, headBitset: maskFor(105, []), forkRowBase,
+        }), /falls outside the layer's new range/);
+}
+
+console.log('rebase: foreign ids above the fork point (6.2)');
+{
+    // Two depth-1 forks of the same base assign OVERLAPPING id ranges to
+    // different records, so an id at or above the fork point names a different
+    // record in the two histories.
+    const base = { identity: id64(1), records: 100 };
+    const a1 = { identity: id64(2), records: 10 };
+    const a2 = { identity: id64(4), records: 5 };
+    const b1 = { identity: id64(3), records: 8 };
+    const { forkRowBase } = forkPoint([base, a1, a2], [base, b1]);
+    check('the fork point excludes both branches\' own layers', forkRowBase === 100);
+
+    // A3 deleted id 105 — an id A1 owned, which B's history never had.
+    const spec = {
+        layerBitset: maskFor(115, [105]), oldParentBitset: maskFor(115, []), oldRowBase: 115,
+        layerRecords: 2, layerSupersessions: [], newRowBase: 108,
+        headBitset: maskFor(108, []), forkRowBase,
+    };
+    rejects('a foreign deletion refuses by default, naming the id',
+        () => planRebase(spec), /foreign id\(s\) at or above the fork point 100.*105/);
+    const dropped = planRebase({ ...spec, onForeign: ON_FOREIGN.DROP });
+    check('--on-foreign drop discards it', dropped.emit === true && dropped.droppedForeign.deletions[0] === 105);
+    check('and sets no bit for it', !testBit(dropped.bitset, 105));
+
+    // The common case: H merely grew from L's own parent, so there are no
+    // foreign ids at all.
+    const grown = forkPoint([base, a1], [base, a1, { identity: id64(9), records: 3 }]);
+    check('a head that merely grew has forkRowBase = the layer\'s old rowBase',
+        grown.forkRowBase === 110);
+}
+
+console.log('rebase: deletion and supersession conflicts (6.2)');
+{
+    const base = { identity: id64(1), records: 100 };
+    const shared = [base];
+    const { forkRowBase } = forkPoint(shared, shared);
+    const common = {
+        oldParentBitset: maskFor(100, []), oldRowBase: 100,
+        layerRecords: 3, newRowBase: 100, forkRowBase,
+    };
+
+    // Deletion already performed by H: a no-op, not a conflict. Idempotent.
+    const idem = planRebase({
+        ...common, layerBitset: maskFor(100, [5]), headBitset: maskFor(100, [5]),
+    });
+    check('a deletion H already performed is a no-op, not a conflict',
+        idem.emit === true && idem.newlySet.length === 0 && testBit(idem.bitset, 5));
+
+    // (x -> y) where H tombstoned x but recorded no edge: L adds information.
+    const addsInfo = planRebase({
+        ...common, layerBitset: maskFor(100, [5]), layerSupersessions: [[5, 100]],
+        headBitset: maskFor(100, [5]), headSupersessions: new Map(),
+    });
+    check('an edge for an id H tombstoned without one is recorded',
+        JSON.stringify(addsInfo.supersessions) === JSON.stringify([[5, 100]]));
+
+    // H records a DIFFERENT successor: a conflict.
+    const headSup = new Map([[5, [{ depth: 1, newId: 42 }]]]);
+    const conflictSpec = {
+        ...common, layerBitset: maskFor(100, [5]), layerSupersessions: [[5, 100]],
+        headBitset: maskFor(100, [5]), headSupersessions: headSup,
+    };
+    rejects('a different successor in H is a conflict, refused by default',
+        () => planRebase(conflictSpec), /supersession conflict\(s\).*5/);
+    const skipped = planRebase({ ...conflictSpec, onConflict: ON_CONFLICT.SKIP });
+    check('--on-conflict skip drops L\'s edge and keeps its record',
+        skipped.supersessions.length === 0 && skipped.skippedEdges[0] === 5 && skipped.records === 3);
+    const both = planRebase({ ...conflictSpec, onConflict: ON_CONFLICT.KEEP_BOTH });
+    check('--on-conflict keep-both records L\'s edge as an additional one',
+        JSON.stringify(both.supersessions) === JSON.stringify([[5, 100]]));
+}
+
+console.log('rebase: the terminal empty rule (6.2)');
+{
+    const base = { identity: id64(1), records: 100 };
+    const { forkRowBase } = forkPoint([base], [base]);
+    // A tombstone-only layer whose every deletion H has independently performed.
+    const empty = planRebase({
+        layerBitset: maskFor(100, [5, 6]), oldParentBitset: maskFor(100, []), oldRowBase: 100,
+        layerRecords: 0, newRowBase: 100, headBitset: maskFor(100, [5, 6]), forkRowBase,
+    });
+    check('an empty rebase emits nothing', empty.emit === false);
+    check('and says why', /already represents/.test(empty.reason));
+
+    // One deletion H lacks: it emits.
+    const notEmpty = planRebase({
+        layerBitset: maskFor(100, [5, 6]), oldParentBitset: maskFor(100, []), oldRowBase: 100,
+        layerRecords: 0, newRowBase: 100, headBitset: maskFor(100, [5]), forkRowBase,
+    });
+    check('a tombstone-only rebase that adds a deletion does emit',
+        notEmpty.emit === true && notEmpty.newlySet.length === 1 && notEmpty.newlySet[0] === 6);
+
+    // A layer with records always emits, whatever became of its deletions.
+    const withRecords = planRebase({
+        layerBitset: maskFor(100, [5]), oldParentBitset: maskFor(100, []), oldRowBase: 100,
+        layerRecords: 2, newRowBase: 100, headBitset: maskFor(100, [5]), forkRowBase,
+    });
+    check('a rebase with records always emits', withRecords.emit === true);
+}
+
+console.log('rebase: preconditions and evaluation material (6.2)');
+{
+    const ING = { chunker: 'v1' };
+    const lm = { layer: { ingest: ING, depth: 1 } };
+    const same = { canonical: canonicalJson(ING), asserted: false };
+    const ok = checkRebasePreconditions({
+        layerManifest: lm, headChainDecl: same, layerChainDecl: same,
+        headBaseIdentity: BASE_ID, layerBaseIdentity: BASE_ID,
+    });
+    check('matching declarations and bases pass', canonicalJson(ok.ingest) === canonicalJson(ING));
+
+    rejects('a different base refuses',
+        () => checkRebasePreconditions({
+            layerManifest: lm, headChainDecl: same, layerChainDecl: same,
+            headBaseIdentity: BASE_ID, layerBaseIdentity: 'c'.repeat(64),
+        }), /is not the layer's base/);
+    // The case 6.2 spells out: two depth-1 forks of a legacy base each asserted
+    // a DIFFERENT declaration. Same base is not sufficient.
+    rejects('two histories that disagree on the declaration refuse',
+        () => checkRebasePreconditions({
+            layerManifest: lm,
+            headChainDecl: { canonical: canonicalJson({ chunker: 'v2' }), asserted: true },
+            layerChainDecl: { canonical: canonicalJson(ING), asserted: true },
+            headBaseIdentity: BASE_ID, layerBaseIdentity: BASE_ID,
+        }), /disagree on the chain ingestion declaration/);
+    const legacy = checkRebasePreconditions({
+        layerManifest: lm, headIsLegacyBase: true,
+        layerChainDecl: { canonical: canonicalJson(ING), asserted: true },
+        headBaseIdentity: BASE_ID, layerBaseIdentity: BASE_ID,
+    });
+    check('onto a legacy base, an asserted declaration may be introduced',
+        legacy.ingestAsserted === true);
+
+    // Chain-level golden queries carry global ids that are wrong after a rebase.
+    const plan = planRebase({
+        layerBitset: maskFor(100, [5]), oldParentBitset: maskFor(100, []), oldRowBase: 100,
+        layerRecords: 1, newRowBase: 100, headBitset: maskFor(100, []), forkRowBase: 100,
+    });
+    check('a rebase drops chain-level golden queries rather than copying them',
+        plan.goldenQueries === null && plan.goldenQueriesDropped === 'rebase');
+}
+
+// ---------------------------------------------------------------------------
+// compact and the lineage segment (6.3)
+// ---------------------------------------------------------------------------
+const {
+    planCompaction, buildLineageSegment, parseLineageSegment, translateCitation,
+    LINEAGE_HEADER_BYTES, LINEAGE_HEAD_ENTRY_BYTES, MAX_HEADS,
+} = await import('../packages/pikelet-wasm/complete/layer-compact.mjs');
+
+console.log('compact: live enumeration and dense renumbering (6.3 steps 1-2)');
+{
+    // rowTotal 20, ids 3, 7, 8 tombstoned.
+    const head = maskFor(20, [3, 7, 8]);
+    const plan = planCompaction({ rowTotal: 20, headBitset: head });
+    check('live ids are enumerated in ascending global order',
+        JSON.stringify(plan.liveIds.slice(0, 5)) === JSON.stringify([0, 1, 2, 4, 5]));
+    check('the live count excludes every tombstone', plan.liveRecords === 17 && plan.tombstones === 3);
+    // Survivors renumbered densely IN THE SAME ORDER — the translation is
+    // positional, which is what makes compaction byte-deterministic.
+    check('renumbering is dense and order-preserving',
+        plan.newIdOf(0) === 0 && plan.newIdOf(2) === 2 && plan.newIdOf(4) === 3 && plan.newIdOf(19) === 16);
+    check('a tombstoned id maps to nothing', plan.newIdOf(3) === null && plan.newIdOf(7) === null);
+    rejects('a chain with no live records cannot be compacted',
+        () => planCompaction({ rowTotal: 4, headBitset: maskFor(4, [0, 1, 2, 3]) }), /no live records/);
+}
+
+console.log('lineage-v1: round trip and the head table (6.3)');
+{
+    // A three-head chain: base(10) -> L1(+5) -> L2(+3). L1 superseded id 2
+    // with id 10; L2 deleted id 4.
+    const heads = [
+        { identity: id64(1), rowTotal: 10, depth: 0 },
+        { identity: id64(2), rowTotal: 15, depth: 1 },
+        { identity: id64(3), rowTotal: 18, depth: 2 },
+    ];
+    const head = maskFor(18, [2, 4]);
+    const seg = buildLineageSegment({
+        heads, headBitset: head, oldRowTotal: 18,
+        supersessions: [[2, 10, 1]],
+    });
+    const lin = parseLineageSegment(seg, { identity: id64(3), liveRecords: 16, tombstones: 2 });
+    check('the head table carries every artifact of the compacted chain', lin.headCount === 3);
+    check('depths are 0..headCount-1 in order', lin.heads.map((h) => h.depth).join() === '0,1,2');
+    check('rowTotal values are non-decreasing, the last equal to oldRowTotal',
+        lin.heads[2].rowTotal === 18 && lin.oldRowTotal === 18);
+    check('the bitset and its popcount survive', lin.tombstoneCount === 2 && testBit(lin.bitset, 2) && testBit(lin.bitset, 4));
+    check('each edge carries its own depth, so nothing is inferred from order (3.5)',
+        JSON.stringify(lin.supersessions) === JSON.stringify([[2, 10, 1]]));
+    check('the segment tiles exactly',
+        seg.length === LINEAGE_HEADER_BYTES + LINEAGE_HEAD_ENTRY_BYTES * 3 + bitsetBytesFor(18) + 12);
+    // Draft 2's segment named only the old head; the table is what makes a
+    // citation against an INTERMEDIATE head resolvable.
+    check('the table is at most 17 x 48 bytes', MAX_HEADS === 17 && LINEAGE_HEAD_ENTRY_BYTES === 48);
+}
+
+console.log('lineage-v1: validation of untrusted input (6.3)');
+{
+    const heads = [
+        { identity: id64(1), rowTotal: 10, depth: 0 },
+        { identity: id64(2), rowTotal: 15, depth: 1 },
+    ];
+    const good = buildLineageSegment({ heads, headBitset: maskFor(15, [2]), oldRowTotal: 15, supersessions: [[2, 10, 1]] });
+    const tamp = (fn) => { const c = good.slice(); fn(new DataView(c.buffer), c); return c; };
+
+    rejects('a wrong version', () => parseLineageSegment(tamp((v) => v.setUint32(0, 2, true))), /unsupported version 2/);
+    rejects('non-zero flags', () => parseLineageSegment(tamp((v) => v.setUint32(4, 1, true))), /flags must be 0/);
+    rejects('non-zero reserved header bytes', () => parseLineageSegment(tamp((v) => v.setUint32(32, 9, true))), /reserved header bytes/);
+    rejects('a headCount past the ceiling', () => parseLineageSegment(tamp((v) => v.setUint32(8, 18, true))), /outside \[1, 17\]/);
+    rejects('a headCount that does not tile', () => parseLineageSegment(tamp((v) => v.setUint32(8, 1, true))), /do not tile/);
+    rejects('a tombstoneCount that disagrees with the popcount',
+        () => parseLineageSegment(tamp((v) => v.setBigUint64(24, 9n, true))), /popcount is 1/);
+    rejects('a truncated segment', () => parseLineageSegment(good.subarray(0, 40)), /shorter than its 64-byte header/);
+
+    // Out-of-order depths, duplicate identities, decreasing rowTotals.
+    rejects('head depths out of order', () => parseLineageSegment(tamp((v) => v.setUint32(LINEAGE_HEADER_BYTES + 40, 5, true))), /depths must be exactly/);
+    rejects('a decreasing rowTotal', () => parseLineageSegment(tamp((v) => v.setBigUint64(LINEAGE_HEADER_BYTES + LINEAGE_HEAD_ENTRY_BYTES + 32, 5n, true))), /non-decreasing|must equal oldRowTotal/);
+    rejects('duplicate head identities', () => parseLineageSegment(tamp((v, c) => {
+        c.set(c.subarray(LINEAGE_HEADER_BYTES, LINEAGE_HEADER_BYTES + 32), LINEAGE_HEADER_BYTES + LINEAGE_HEAD_ENTRY_BYTES);
+    })), /pairwise distinct|must equal oldRowTotal/);
+    rejects('the last head not matching compactedFrom.identity',
+        () => parseLineageSegment(good, { identity: id64(9) }), /must equal the manifest's compactedFrom.identity/);
+    rejects('compactedFrom counts that disagree',
+        () => parseLineageSegment(good, { identity: id64(2), tombstones: 5 }), /disagrees with manifest compactedFrom.tombstones/);
+
+    // Edge constraints.
+    rejects('an edge whose newId is outside the depth\'s owned range',
+        () => buildLineageSegment({ heads, headBitset: maskFor(15, [2]), oldRowTotal: 15, supersessions: [[2, 14, 2]] }),
+        /depth 2 must be in \[1, 1\]|outside the range/);
+    rejects('an edge with oldId >= newId',
+        () => buildLineageSegment({ heads, headBitset: maskFor(15, [11]), oldRowTotal: 15, supersessions: [[11, 10, 1]] }),
+        /oldId < newId/);
+    rejects('an edge whose oldId is not tombstoned',
+        () => buildLineageSegment({ heads, headBitset: maskFor(15, [3]), oldRowTotal: 15, supersessions: [[2, 10, 1]] }),
+        /not tombstoned/);
+    rejects('duplicate (oldId, depth) pairs',
+        () => buildLineageSegment({ heads, headBitset: maskFor(15, [2]), oldRowTotal: 15, supersessions: [[2, 10, 1], [2, 11, 1]] }),
+        /appears twice/);
+}
+
+console.log('forward translation of a citation by a compacted base (6.3)');
+{
+    // base(10) -> L1(+5, supersedes 2 -> 10) -> L2(+3, deletes 4).
+    const heads = [
+        { identity: id64(1), rowTotal: 10, depth: 0 },
+        { identity: id64(2), rowTotal: 15, depth: 1 },
+        { identity: id64(3), rowTotal: 18, depth: 2 },
+    ];
+    const head = maskFor(18, [2, 4]);
+    const lin = parseLineageSegment(buildLineageSegment({
+        heads, headBitset: head, oldRowTotal: 18, supersessions: [[2, 10, 1]],
+    }));
+    const plan = planCompaction({ rowTotal: 18, headBitset: head });
+
+    // A live record cited at the old base.
+    const live = translateCitation(lin, plan.forward, id64(1), 0);
+    check('a live record cited at the base translates to its new dense id',
+        live.ok === true && live.newId === 0 && live.via === 'live');
+    const live9 = translateCitation(lin, plan.forward, id64(1), 9);
+    check('a later live id shifts down past the tombstones',
+        live9.ok === true && live9.newId === 7);
+
+    // THE reason the head table exists: a citation against an INTERMEDIATE
+    // head, made while H1 was published, still resolves.
+    const mid = translateCitation(lin, plan.forward, id64(2), 12);
+    check('a citation against an intermediate head resolves', mid.ok === true && mid.citedAtDepth === 1);
+
+    // A superseded record: forward translation follows the edge set.
+    const sup = translateCitation(lin, plan.forward, id64(1), 2);
+    check('a superseded record translates to its successor',
+        sup.ok === true && sup.via === 'superseded' && sup.newId === plan.newIdOf(10));
+
+    // A plainly deleted record has no successor.
+    const gone = translateCitation(lin, plan.forward, id64(3), 4);
+    check('a deleted record with no successor answers "deleted"', gone.reason === 'deleted');
+
+    // 5.6's scoping rules carry over.
+    check('an id that postdates the cited head is invalid',
+        translateCitation(lin, plan.forward, id64(1), 12).reason === 'id-postdates-that-head');
+    check('a fork not on this history is answered as such',
+        translateCitation(lin, plan.forward, id64(9), 1).reason === 'not-on-this-history');
 }
 
 console.log(`\nLayered profile conformance: ${passed} passed, ${failed} failed`);

@@ -828,7 +828,34 @@ class PikeletSketchArtifact {
         const base = resolveOptionalPositiveInt(options.rerank, 'rerank', 0);
         const boost = Math.max(1, Math.trunc(options.microBoost || 4));
         const rec = this.recommendedRerank || Math.max(100, k * 10);
-        const C = Math.min(this.count, Math.max(k, base > 0 ? base : tier.name === 'micro' ? rec * boost : rec));
+        // options.exclude: a LSB-first bitset over local rows, one bit per row,
+        // supplied by a layered chain (LAYERED_PROFILE.md 5.3). A masked row
+        // must not enter the candidate heap, must not count toward C, and must
+        // not be fetched for reranking. Masking AFTER truncation is a defect,
+        // not a simplification: if the C nearest rows are all masked and the
+        // nearest live row is the C+1-th, a post-hoc mask returns nothing while
+        // the correct answer exists.
+        const exclude = options.exclude || null;
+        if (exclude !== null) {
+            if (!(exclude instanceof Uint8Array)) {
+                throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'search() exclude must be a Uint8Array bitset');
+            }
+            if (exclude.length < Math.ceil(this.count / 8)) {
+                throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'search() exclude bitset is too short for this artifact', { bytes: exclude.length, needed: Math.ceil(this.count / 8) });
+            }
+        }
+        const isExcluded = exclude === null
+            ? () => false
+            : (row) => ((exclude[row >> 3] >> (row & 7)) & 1) === 1;
+        // C counts unmasked rows, so a heavily tombstoned tier still offers a
+        // full candidate pool over what is live.
+        let liveCountForC = this.count;
+        if (exclude !== null) {
+            liveCountForC = 0;
+            for (let i = 0; i < this.count; i++) if (!isExcluded(i)) liveCountForC++;
+        }
+        if (liveCountForC === 0) return { results: [], stats: this.stats() };
+        const C = Math.min(liveCountForC, Math.max(k, base > 0 ? base : tier.name === 'micro' ? rec * boost : rec));
         const { dim, count } = this;
         const tierDims = tier.dims;
         const pool = dim / tierDims;
@@ -859,6 +886,11 @@ class PikeletSketchArtifact {
         // C beyond them would silently shrink the candidate pool — recall
         // loss, not an error. Fall back to the JS scan for that query.
         if (scanner && scanner.maxRerank !== undefined && C > scanner.maxRerank) scanner = null;
+        // A scan kernel scores every resident row and knows nothing about an
+        // exclusion mask, so it cannot honour one. Masking its output would be
+        // exactly the post-truncation defect 5.3 forbids, so a masked query
+        // takes the JS scan — correctness over speed.
+        if (scanner && exclude !== null) scanner = null;
         if (scanner) {
             // A scanner scores the resident sketches itself, so it must
             // implement this artifact's metric. Cosine requires an explicit
@@ -871,17 +903,21 @@ class PikeletSketchArtifact {
                 throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'cosine sketch artifacts require a metric-aware scanner (scanner.metric === 1)', { metric: this.metric });
             }
             ids = scanner.scan(qPool, C);
-        } else if (C >= count) {
-            // Every row is a candidate: the exact rerank below scores them
+        } else if (C >= liveCountForC) {
+            // Every live row is a candidate: the exact rerank below scores them
             // all, so the resident scan has nothing to select. Without this
             // the selection loop degenerates to 2*count^2 slot operations
             // (candMax stays Infinity until the last slot fills).
-            ids = Array.from({ length: count }, (_, i) => i);
+            ids = [];
+            for (let i = 0; i < count; i++) if (!isExcluded(i)) ids.push(i);
         } else {
             const candDist = new Float64Array(C).fill(Infinity);
             const candId = new Int32Array(C).fill(-1);
             let candMax = Infinity;
             for (let i = 0; i < count; i++) {
+                // Skipped before scoring, so a masked row never occupies a
+                // candidate slot (5.3).
+                if (isExcluded(i)) continue;
                 const s = this.scales[i];
                 const o = this.offsets[i];
                 let metricAcc = 0;

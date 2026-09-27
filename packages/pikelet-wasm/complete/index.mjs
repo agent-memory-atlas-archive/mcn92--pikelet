@@ -282,7 +282,7 @@ function toFloat32(vector, dim, what) {
     return v;
 }
 
-function base64Bytes(text) {
+export function base64Bytes(text) {
     if (typeof text !== 'string') return new Uint8Array(0);
     return typeof Buffer !== 'undefined'
         ? Buffer.from(text, 'base64')
@@ -331,6 +331,88 @@ export async function verifyHostEncoder(declaration, encodeQuery, dim) {
  * { read(offset, length), size? } range source (any runtime).
  * Returns { query(text, {k}), info(), evaluation(), close() }.
  */
+/**
+ * Read a chain member's manifest and segment table without opening the corpus,
+ * sketch or lexical machinery — LAYERED_PROFILE.md 4.3.
+ *
+ * A tombstone-only layer carries only a query-interp (kind 4) and a tombstones
+ * segment. It is a chain member but not a search tier (3.1), so the full open
+ * has nothing to do for it and every corpus/index step would need a branch.
+ * The chain reader uses this instead; the header, manifest identity and each
+ * segment digest are verified exactly as the full open verifies them.
+ *
+ * Returns { tombstoneOnly, tier, close }. When `tombstoneOnly` is false the
+ * caller should close this and use openPikeletFile() instead: the member is a
+ * search tier and needs the real open.
+ */
+export async function readChainMemberShell(input, options = {}) {
+    const source = typeof input === 'string' ? await fileSource(input) : input;
+    const owned = typeof input === 'string';
+    const maxReadBytes = resolveBudget(options.maxReadBytes, 'maxReadBytes', DEFAULT_OPEN_READ_BYTES);
+    const close = async () => { if (owned && source.close) await source.close(); };
+    try {
+        const header = await readChecked(source, 0, HEADER_BYTES, 'header', maxReadBytes);
+        const hv = viewOf(header);
+        if (hv.getUint32(0, true) !== MAGIC) throw new Error('not a .pikelet file (bad magic)');
+        const formatVersion = hv.getUint32(4, true);
+        const manifestBytes = hv.getUint32(8, true);
+        const segmentCount = hv.getUint32(12, true);
+        const identity = [...new Uint8Array(header.buffer, header.byteOffset + 24, 32)]
+            .map((b) => b.toString(16).padStart(2, '0')).join('');
+        const fileBytes = u64(hv, 16, 'header fileBytes');
+        const manifestBuf = await readChecked(source, HEADER_BYTES, manifestBytes, 'manifest', maxReadBytes, fileBytes);
+        if (await sha256hex(manifestBuf) !== identity) {
+            throw new Error('.pikelet manifest failed identity verification');
+        }
+        const manifest = JSON.parse(decoder.decode(manifestBuf));
+        if (manifest.profile !== 'pikelet-layer-v1' || formatVersion !== 2) {
+            return { tombstoneOnly: false, tier: null, close };
+        }
+        if (manifest.layer?.records !== 0) {
+            return { tombstoneOnly: false, tier: null, close };
+        }
+        const table = await readChecked(source, HEADER_BYTES + manifestBytes, segmentCount * TABLE_ENTRY_BYTES, 'segment table', maxReadBytes, fileBytes);
+        const tv = viewOf(table);
+        const segments = new Map();
+        let expectedOffset = align16(HEADER_BYTES + manifestBytes + segmentCount * TABLE_ENTRY_BYTES);
+        for (let i = 0; i < segmentCount; i++) {
+            const entry = i * TABLE_ENTRY_BYTES;
+            const kind = KIND_NAMES[tv.getUint32(entry, true)];
+            const offset = u64(tv, entry + 8, `segment ${i} offset`);
+            const length = u64(tv, entry + 16, `segment ${i} length`);
+            const declared = manifest.segments[i];
+            if (!declared || declared.bytes !== length || !isSha256Hex(declared.sha256)
+                || offset !== expectedOffset || offset + length > fileBytes) {
+                throw new Error(`.pikelet segment table disagrees with manifest at entry ${i}`);
+            }
+            if (kind !== undefined) segments.set(kind, { offset, length, sha256: declared.sha256 });
+            expectedOffset = align16(offset + length);
+        }
+        for (const required of ['query-interp', 'tombstones']) {
+            if (!segments.has(required)) throw new Error(`a tombstone-only layer is missing the ${required} segment`);
+        }
+        return {
+            tombstoneOnly: true,
+            tier: {
+                manifest, identity, recordCount: 0, dim: manifest.dim,
+                sketch: null, lexicalIndex: null, hydrate: null,
+                encoderInfo: null, segments,
+                async readSegmentBytes(seg) {
+                    const bytes = await readChecked(source, seg.offset, seg.length, 'chain segment', maxReadBytes, fileBytes);
+                    if (await sha256hex(bytes) !== seg.sha256) {
+                        throw new Error('.pikelet chain segment failed hash verification');
+                    }
+                    return bytes;
+                },
+            },
+            close,
+        };
+    } catch (err) {
+        await close().catch(() => {});
+        throw err;
+    }
+}
+
 export async function openPikeletFile(input, options = {}) {
     const source = typeof input === 'string' ? await fileSource(input) : input;
     const owned = typeof input === 'string';
@@ -413,8 +495,15 @@ export async function openPikeletFile(input, options = {}) {
         try { manifest = JSON.parse(decoder.decode(manifestBuf)); } catch (err) {
             throw new Error('.pikelet manifest is not valid JSON', { cause: err });
         }
+        // 4.1 of the layered profile: a layer carries `pikelet-layer-v1` under
+        // formatVersion 2, and a reader MUST refuse it by default — a layer
+        // opened alone would silently serve a fraction of a corpus. Only the
+        // chain reader, which opens every ancestor and verifies the hash chain,
+        // passes asChainMember to accept one.
+        const isLayerProfile = manifest?.profile === 'pikelet-layer-v1' && formatVersion === 2;
+        const acceptLayer = isLayerProfile && options.asChainMember === true;
         if (!manifest || typeof manifest !== 'object'
-            || (manifest.profile !== profile && manifest.profile !== LEGACY_PROFILES[formatVersion])) {
+            || (manifest.profile !== profile && manifest.profile !== LEGACY_PROFILES[formatVersion] && !acceptLayer)) {
             throw new Error(`unsupported profile ${manifest?.profile} for format version ${formatVersion}`);
         }
         if (!Array.isArray(manifest.segments) || manifest.segments.length !== segmentCount) {
@@ -459,7 +548,20 @@ export async function openPikeletFile(input, options = {}) {
             }
             expectedOffset = align16(offset + length);
         }
-        for (const required of ['index', 'corpus', 'query-interp']) {
+        // Required segments are per-profile (layered profile 4.3). A layer with
+        // records carries a tombstones segment on top of the complete set; a
+        // TOMBSTONE-ONLY layer has neither an index nor a corpus segment and is
+        // therefore not opened through this function at all — the chain reader
+        // reads its two segments directly (see openPikeletChain), because
+        // threading "no index, no corpus" through the whole of this open would
+        // put a branch on every step of the single-file path.
+        if (acceptLayer && manifest.layer?.records === 0) {
+            throw new Error('a tombstone-only layer is read by the chain reader, not opened as a member');
+        }
+        const requiredSegments = acceptLayer
+            ? ['index', 'corpus', 'query-interp', 'tombstones']
+            : ['index', 'corpus', 'query-interp'];
+        for (const required of requiredSegments) {
             if (!segments.has(required)) throw new Error(`.pikelet is missing the ${required} segment`);
         }
 
@@ -787,6 +889,17 @@ export async function openPikeletFile(input, options = {}) {
                 return { vector: toFloat32(vector, dim, 'inline transformer encoder'), text };
             };
             scoreQuality = retrievalScorer();
+        } else if (qiKind === 4 && acceptLayer) {
+            // Kind 4, `inherited-v1` (layered profile 4.5): a layer carries a
+            // COMMITMENT to the base's encoder, never encoder bytes. This open
+            // therefore installs no embedder — the chain reader resolves the
+            // encoder from the base it opened and validates the commitment
+            // itself (layer-reader.mjs), and a query on this member alone is
+            // refused rather than answered with a missing encoder.
+            embed = async () => {
+                throw new Error('a layer inherits its encoder from the base: query the chain, not the layer (4.5)');
+            };
+            scoreQuality = null;
         } else {
             throw new Error(`unsupported query-interpretation kind ${qiKind}`);
         }
@@ -1229,6 +1342,52 @@ export async function openPikeletFile(input, options = {}) {
                     throw new Error('.pikelet evaluation segment must be a JSON object');
                 }
                 return parsed;
+            },
+
+            /**
+             * Internal seam for the layered profile (LAYERED_PROFILE.md 5.1
+             * step 3): a chain reader mounts each member through this same
+             * open, then needs each search tier's sketch, lexical index and
+             * hydration to merge across tiers (5.3). Exposing them keeps one
+             * container parser rather than a second one — decision 1.
+             *
+             * Deliberately not part of the documented reader API: the names
+             * carry no compatibility promise and a caller outside this package
+             * should use query()/record() instead.
+             */
+            get __chainTier() {
+                assertOpen();
+                return {
+                    manifest,
+                    identity,
+                    recordCount,
+                    dim,
+                    sketch,
+                    lexicalIndex,
+                    hydrate,
+                    encoderInfo,
+                    segments,
+                    // The base's fit, for a chain's calibration status (5.5).
+                    // It lives in the query-interp segment's calibration
+                    // region, not in the manifest — `asset` present means the
+                    // base carries a retrieval-signals fit, and
+                    // `asset.driftLimit` is the producer's declared validity
+                    // envelope when it declared one.
+                    calibrationJson,
+                    // Raw segment bytes for the chain's structural parsing
+                    // (tombstones, kind-4). Bounded and digest-checked exactly
+                    // as any other segment read: the digest comes from the
+                    // identity-verified manifest, so bytes that fail it never
+                    // reach a parser.
+                    async readSegmentBytes(seg) {
+                        assertOpen();
+                        const bytes = await readChecked(source, seg.offset, seg.length, 'chain segment', maxReadBytes, fileBytes);
+                        if (await sha256hex(bytes) !== seg.sha256) {
+                            throw new Error('.pikelet chain segment failed hash verification');
+                        }
+                        return bytes;
+                    },
+                };
             },
 
             async close() {
