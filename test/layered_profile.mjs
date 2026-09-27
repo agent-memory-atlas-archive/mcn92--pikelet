@@ -954,24 +954,47 @@ console.log('masked search: a masked row never enters the result (5.3)');
     await small.close();
 }
 
-console.log('masked search: the WASM scanner cannot honour a mask (5.3)');
+console.log('masked search with a WASM scanner: over-fetch, never post-truncate (5.3)');
 {
-    // A scan kernel scores every resident row and knows nothing about a mask,
-    // so a masked query must fall back to the JS scan rather than mask the
-    // kernel's already-truncated output.
+    // A scan kernel knows nothing about a mask, so masking its top-C output
+    // would be the post-truncation defect 5.3 forbids. The kernel is used
+    // safely by asking for C + maskedCount candidates and dropping the masked
+    // ones: at least C live rows survive by construction.
     const art = await Pikelet.openSketchArtifactFile(buildLadderSketch(40));
     const q = ladderVector(0);
-    let scannerCalls = 0;
-    const fakeScanner = {
+    let lastC = null;
+    const scanner = {
         metric: 1, sketchDims: MDIM, maxRerank: 1024,
-        scan() { scannerCalls++; return [0, 1, 2, 3, 4]; },
+        scan(_q, c) {
+            lastC = c;
+            // A real kernel returns the c nearest; the ladder makes that 0..c-1.
+            return Array.from({ length: Math.min(c, MCOUNT) }, (_, i) => i);
+        },
     };
-    await art.search(q, 5, { scanner: fakeScanner });
-    check('an unmasked query does use the scanner', scannerCalls === 1);
-    const masked = await art.search(q, 5, { scanner: fakeScanner, exclude: maskOf([0, 1, 2]) });
-    check('a masked query bypasses the scanner', scannerCalls === 1);
-    check('and still returns correct live rows',
-        !masked.results.map((r) => r.id).some((id) => [0, 1, 2].includes(id)));
+    await art.search(q, 5, { scanner, rerank: 10 });
+    check('an unmasked query asks the scanner for exactly C', lastC === 10);
+
+    const masked = await art.search(q, 5, { scanner, rerank: 10, exclude: maskOf([0, 1, 2]) });
+    check('a masked query over-fetches by the masked count', lastC === 13, `asked for ${lastC}`);
+    const mids = masked.results.map((r) => r.id);
+    check('masked rows are absent from the result', !mids.some((id) => [0, 1, 2].includes(id)), JSON.stringify(mids));
+    check('and the nearest live row leads', mids[0] === 3, JSON.stringify(mids));
+
+    // The case that made the naive post-filter wrong: EVERY row the kernel
+    // would have returned at C is masked. Over-fetching still finds live rows.
+    const allTopMasked = await art.search(q, 2, { scanner, rerank: 4, exclude: maskOf([0, 1, 2, 3]) });
+    const atm = allTopMasked.results.map((r) => r.id);
+    check('with the C nearest all masked, over-fetch still returns live rows',
+        atm.length === 2 && atm[0] === 4, JSON.stringify(atm));
+
+    // A scanner whose buffers cannot hold the over-fetch must fall back to the
+    // masked JS scan rather than silently return a short pool.
+    let smallCalls = 0;
+    const smallScanner = { metric: 1, sketchDims: MDIM, maxRerank: 6, scan() { smallCalls++; return [0, 1, 2, 3, 4, 5]; } };
+    const fellBack = await art.search(q, 3, { scanner: smallScanner, rerank: 5, exclude: maskOf(Array.from({ length: 20 }, (_, i) => i)) });
+    check('an over-fetch past the scanner\'s buffers falls back to the JS scan', smallCalls === 0);
+    check('and the fallback is still correct',
+        !fellBack.results.map((r) => r.id).some((id) => id < 20), JSON.stringify(fellBack.results.map((r) => r.id)));
     await art.close();
 }
 

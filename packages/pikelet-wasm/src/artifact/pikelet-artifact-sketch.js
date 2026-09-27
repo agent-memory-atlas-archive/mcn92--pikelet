@@ -887,10 +887,26 @@ class PikeletSketchArtifact {
         // loss, not an error. Fall back to the JS scan for that query.
         if (scanner && scanner.maxRerank !== undefined && C > scanner.maxRerank) scanner = null;
         // A scan kernel scores every resident row and knows nothing about an
-        // exclusion mask, so it cannot honour one. Masking its output would be
-        // exactly the post-truncation defect 5.3 forbids, so a masked query
-        // takes the JS scan — correctness over speed.
-        if (scanner && exclude !== null) scanner = null;
+        // exclusion mask. Masking its top-C output would be the post-truncation
+        // defect 5.3 forbids — if the C nearest rows are all masked, a post-hoc
+        // filter returns nothing while the correct answer exists.
+        //
+        // But the kernel CAN be used safely by over-fetching: ask it for
+        // C + (number of masked rows) candidates, then drop the masked ones.
+        // At least C live rows survive by construction, because at most
+        // maskedCount of the returned rows can be masked. That is not a
+        // post-hoc mask on a truncated list; it is an exact selection over a
+        // provably sufficient superset.
+        //
+        // When the over-fetch would exceed the kernel's buffers or the row
+        // count, fall back to the masked JS scan, which is always correct.
+        let scannerOverfetch = 0;
+        if (scanner && exclude !== null) {
+            const maskedCount = this.count - liveCountForC;
+            scannerOverfetch = C + maskedCount;
+            const limit = Math.min(count, scanner.maxRerank ?? count);
+            if (scannerOverfetch > limit) { scanner = null; scannerOverfetch = 0; }
+        }
         if (scanner) {
             // A scanner scores the resident sketches itself, so it must
             // implement this artifact's metric. Cosine requires an explicit
@@ -902,7 +918,17 @@ class PikeletSketchArtifact {
             if (this.metric === 1 && scannerMetric !== 1) {
                 throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'cosine sketch artifacts require a metric-aware scanner (scanner.metric === 1)', { metric: this.metric });
             }
-            ids = scanner.scan(qPool, C);
+            // Over-fetch when a mask is in play (see above), then drop the
+            // masked rows. The survivors are the exact top-C live rows.
+            ids = scanner.scan(qPool, scannerOverfetch || C);
+            if (exclude !== null) {
+                const live = [];
+                for (const id of ids) {
+                    if (!isExcluded(id)) live.push(id);
+                    if (live.length === C) break;
+                }
+                ids = live;
+            }
         } else if (C >= liveCountForC) {
             // Every live row is a candidate: the exact rerank below scores them
             // all, so the resident scan has nothing to select. Without this
