@@ -366,7 +366,95 @@ function callListPacks(packs) {
   };
 }
 
+/**
+ * Mount a chain named by a shelf entry's `lineage` (LAYERED_PROFILE.md 7).
+ *
+ * The members are opened base-first through openPikeletChain, which verifies
+ * every parent commitment — so the listing only says WHERE the bytes are, and
+ * the chain it reaches must be exactly the one listed. 7: "the listing
+ * accelerates resolution, it does not define the chain."
+ *
+ * The chain reader's query() takes a vector (a chain encodes once with the
+ * base's encoder and merges across tiers), while every MCP tool passes text.
+ * This adapts one to the other so search/get_record/verify_pack need no
+ * chain-specific branch.
+ */
+async function mountChain(packs, spec, { httpRangeSource, log }) {
+  const { openPikeletChain } = await import('pikelet-wasm/complete/layer-reader.mjs');
+  const members = [...spec.lineage.map((m) => m.location), spec.location];
+  const opened = [];
+  for (const loc of members) {
+    if (/^https?:\/\//i.test(loc)) {
+      const source = httpRangeSource(loc);
+      await source.init();
+      opened.push(source);
+    } else {
+      opened.push(path.resolve(loc));
+    }
+  }
+  const chain = await openPikeletChain(opened);
+  const info = chain.info();
+  // The head identity pins the whole chain: every layer commits to its parent,
+  // so this one hash covers every byte a query can touch.
+  if (spec.identity && info.identity !== spec.identity) {
+    await chain.close();
+    throw new Error(`${spec.location}: chain head identity ${info.identity.slice(0, 12)}… does not match the `
+      + `pinned ${spec.identity.slice(0, 12)}… — the chain at these locations is not the knowledge state the `
+      + 'mount pinned; refusing to serve it.');
+  }
+  // The listing must be exactly the chain that was reached, in order (7).
+  const reached = info.members.map((m) => m.identity);
+  const listed = [...spec.lineage.map((m) => m.identity), info.identity];
+  if (reached.length !== listed.length || reached.some((id, i) => id !== listed[i])) {
+    await chain.close();
+    throw new Error(`${spec.location}: the chain reached by following parent commitments is not the listed `
+      + `lineage (reached ${reached.length} member(s), listed ${listed.length}); refusing to serve it (7).`);
+  }
+
+  const encoder = await chain.__head.passageEmbedder();
+  if (!encoder) {
+    await chain.close();
+    throw new Error(`${spec.location}: this chain's base cannot embed a query self-contained; `
+      + 'compile the base with the inline encoder to serve it over MCP');
+  }
+  const search = {
+    info: () => chain.info(),
+    async query(text, queryOptions = {}) {
+      const vector = await encoder.embed(String(text ?? ''));
+      return chain.query(vector, queryOptions.k ?? 5, { ...queryOptions, text: String(text ?? '') });
+    },
+    record: (id) => chain.record(id),
+    // A chain has no single evaluation segment: each member carries its own,
+    // and 6.2 says chain-level golden queries are invalid after a rebase. Until
+    // the chain-level material of 4.7 is assembled, report none rather than
+    // serving one member's as the chain's.
+    evaluation: async () => null,
+    close: () => chain.close(),
+  };
+
+  let name = spec.name || path.basename(isUrlLike(spec.location) ? new URL(spec.location).pathname : spec.location).replace(/\.pikelet$/, '');
+  if (packs.has(name)) {
+    let n = 2;
+    while (packs.has(`${name}-${n}`)) n += 1;
+    name = `${name}-${n}`;
+  }
+  packs.set(name, {
+    search, identity: info.identity,
+    file: isUrlLike(spec.location) ? spec.location : path.resolve(spec.location),
+    remote: isUrlLike(spec.location), chain: true,
+  });
+  log(`mounted ${name} as a chain (${info.layers} members, ${info.liveRecords} live of ${info.records} ids, `
+    + `${info.tombstones} tombstoned, identity ${info.identity.slice(0, 12)}…, `
+    + `${spec.identity ? 'identity-pinned' : 'unpinned'}, calibration ${info.calibrationStatus})`);
+}
+
+const isUrlLike = (v) => /^https?:\/\//i.test(String(v));
+
 async function mountPack(packs, spec, { openPikeletFile, httpRangeSource, log }) {
+  // A shelf entry naming a lineage is a chain, not a pack (7).
+  if (Array.isArray(spec.lineage) && spec.lineage.length) {
+    return mountChain(packs, spec, { httpRangeSource, log });
+  }
   const isUrl = /^https?:\/\//i.test(spec.location);
   // URL packs are the format's native habitat: range-read off dumb HTTP,
   // nothing downloaded but the resident slice and per-query ranges. The
@@ -498,20 +586,62 @@ export async function loadShelf(location) {
   if (!Array.isArray(shelf?.packs) || shelf.packs.length === 0) {
     throw new Error(`shelf ${location} must be a JSON object with a non-empty "packs" array`);
   }
+  // Members resolve relative to the shelf, exactly as `url` does.
+  const resolveTarget = (target, i, what) => {
+    if (typeof target !== 'string' || !target) throw new Error(`shelf ${location} entry ${i} needs a ${what}`);
+    if (/^https?:\/\//i.test(target)) return target;
+    if (isUrl) return new URL(target, location).href;
+    return path.resolve(path.dirname(path.resolve(location)), target);
+  };
+  const requireIdentity = (value, i, what) => {
+    if (!/^[0-9a-f]{64}$/i.test(String(value))) {
+      throw new Error(`shelf ${location} entry ${i}: ${what} must be a sha256 hex string`);
+    }
+    return String(value).toLowerCase();
+  };
+
   return shelf.packs.map((entry, i) => {
     const target = entry.url ?? entry.path;
-    if (typeof target !== 'string' || !target) throw new Error(`shelf ${location} entry ${i} needs a url or path`);
-    if (entry.identity !== undefined && !/^[0-9a-f]{64}$/i.test(entry.identity)) {
-      throw new Error(`shelf ${location} entry ${i}: identity must be a sha256 hex string`);
+    const resolved = resolveTarget(target, i, 'url or path');
+    if (entry.identity !== undefined) requireIdentity(entry.identity, i, 'identity');
+
+    // LAYERED_PROFILE.md 7: an OPTIONAL `lineage` array names every member
+    // below the head, base first, so a chain resolves from one pointer.
+    //
+    // "the listing accelerates resolution, it does not define the chain" — the
+    // reader still follows each layer's parent commitment and refuses if the
+    // chain it reaches is not exactly the listed lineage. That check happens at
+    // mount (layer-reader.mjs verifies every link); the shelf only supplies
+    // where the bytes are.
+    let lineage;
+    if (entry.lineage !== undefined) {
+      if (!Array.isArray(entry.lineage) || entry.lineage.length === 0) {
+        throw new Error(`shelf ${location} entry ${i}: lineage must be a non-empty array, base first`);
+      }
+      if (entry.identity === undefined) {
+        // Without a head identity the listing cannot be checked against what
+        // the chain actually is, which is the whole point of pinning it.
+        throw new Error(`shelf ${location} entry ${i}: a lineage needs the head's identity to pin the chain (7)`);
+      }
+      lineage = entry.lineage.map((m, j) => ({
+        location: resolveTarget(m.url ?? m.path, i, `lineage[${j}] url or path`),
+        identity: requireIdentity(m.identity, i, `lineage[${j}].identity`),
+      }));
+      const seen = new Set();
+      for (const m of lineage) {
+        if (seen.has(m.identity)) throw new Error(`shelf ${location} entry ${i}: lineage repeats identity ${m.identity.slice(0, 12)}…`);
+        seen.add(m.identity);
+      }
+      if (seen.has(String(entry.identity).toLowerCase())) {
+        throw new Error(`shelf ${location} entry ${i}: lineage must list the members BELOW the head, not the head itself (7)`);
+      }
     }
-    let resolved;
-    if (/^https?:\/\//i.test(target)) resolved = target;
-    else if (isUrl) resolved = new URL(target, location).href;
-    else resolved = path.resolve(path.dirname(path.resolve(location)), target);
+
     return {
       location: resolved,
-      ...(entry.identity ? { identity: entry.identity.toLowerCase() } : {}),
+      ...(entry.identity ? { identity: String(entry.identity).toLowerCase() } : {}),
       ...(typeof entry.name === 'string' && entry.name ? { name: entry.name } : {}),
+      ...(lineage ? { lineage } : {}),
     };
   });
 }
@@ -542,7 +672,10 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
   // kernel init, and (URL mounts) the first rerank round trips. Failures
   // surface on real queries, not here.
   for (const [, mounted] of packs) {
-    const probe = mounted.search.info().sampleQueries[0] || 'what is this about';
+    // Defensive: an older pack (or a reader that does not report them) may
+    // carry no sampleQueries at all, and warmup must not be the thing that
+    // fails a mount.
+    const probe = mounted.search.info().sampleQueries?.[0] || 'what is this about';
     mounted.warmup = mounted.search.query(probe, { k: 1 }).catch(() => {});
   }
 

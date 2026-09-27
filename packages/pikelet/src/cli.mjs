@@ -24,6 +24,21 @@ export async function main(argv) {
     }
     return;
   }
+  if (parsed.positionals[0] === 'append') {
+    const { appendLayer } = await import('./append.mjs');
+    await appendLayer(parsed.flags);
+    return;
+  }
+  if (parsed.positionals[0] === 'compact') {
+    const { compactChain } = await import('./compact.mjs');
+    await compactChain(parsed.flags);
+    return;
+  }
+  if (parsed.positionals[0] === 'rebase') {
+    const { rebaseLayer } = await import('./compact.mjs');
+    await rebaseLayer(parsed.flags);
+    return;
+  }
   if (parsed.positionals[0] === 'mcp') {
     const { runMcpServer, loadShelf, installMcpConfig } = await import('./mcp.mjs');
     const { loadCompleteModules, CLI_VERSION } = await import('./common.mjs');
@@ -82,6 +97,8 @@ Usage:
   pikelet compile --source <path|url> --out search.pikelet
   pikelet rebuild --yes
   pikelet doctor <url>   # probe artifact hosting: Range/206, cache-key ranges, h2, ETag, RTT
+  pikelet append --parent <file|url> [--source <path|url> ...] [--remove <id> ...] --out layer.pikelet
+  pikelet compact --head <base> [--head <layer> ...] --out compacted.pikelet
   pikelet mcp --pack <file-or-url> [--pack ... | --shelf <file-or-url>]
   pikelet mcp install --pack <file-or-url> [--client claude-code|claude-desktop]
 
@@ -179,9 +196,27 @@ Flags:
 `);
 }
 
+const BOOLEAN_FLAGS = new Set([
+  'deploy', 'yes', 'force', 'verbose', 'skip-abstention', 'skip-calibration',
+  'help', 'h',
+  // append (LAYERED_PROFILE.md 6.1)
+  'allow-drift',
+]);
+
 function parseArgs(args) {
   const flags = {};
-  const repeated = new Set(['include', 'exclude', 'include-url', 'exclude-url', 'pack']);
+  // Flags that may appear more than once collect into an array. A flag that is
+  // repeatable in spirit but missing here silently keeps only the LAST value,
+  // which for append's --remove would drop deletions without a word.
+  //
+  // `source` is deliberately NOT here: compile and create take a single
+  // --source and read it as a string (`new URL(flags.source)`,
+  // `path.resolve(..., flags.source)`), so making it an array globally breaks
+  // both. append accepts several and normalizes with [].concat() itself.
+  const repeated = new Set(['include', 'exclude', 'include-url', 'exclude-url', 'pack',
+    'remove', 'supersede',
+    // compact takes a chain, listed base-first, so --head repeats.
+    'head', 'parent']);
   const positionals = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -190,7 +225,10 @@ function parseArgs(args) {
       continue;
     }
     const name = arg.slice(2);
-    if (name === 'deploy' || name === 'yes' || name === 'force' || name === 'verbose' || name === 'skip-abstention' || name === 'skip-calibration' || name === 'help' || name === 'h') {
+    // Boolean flags take no value. A flag missing here silently swallows the
+    // NEXT argument as its value: `--allow-drift --out x` set
+    // allow-drift="--out" and left --out unset.
+    if (BOOLEAN_FLAGS.has(name)) {
       flags[name] = true;
       continue;
     }
