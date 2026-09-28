@@ -557,8 +557,17 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
     }
   })();
   // A mount failure must reach the operator rather than becoming an unhandled
-  // rejection; tool calls re-await it and surface it per call.
-  mountsReady.catch((err) => log(`mount failed: ${err?.message || err}`));
+  // rejection; tool calls re-await it and surface it per call. It is also
+  // recorded so the process can still exit non-zero once the protocol loop
+  // drains: a supervisor or install script that pins `#sha256` and checks the
+  // status would otherwise read a refused mount as success. Recorded, not
+  // rethrown here, because the server must keep serving the packs that did
+  // mount -- that is the trade this concurrent mounting buys.
+  let mountFailure = null;
+  mountsReady.catch((err) => {
+    mountFailure = err;
+    log(`mount failed: ${err?.message || err}`);
+  });
 
   const serverInfo = { name: 'pikelet-knowledge-packs', version: serverVersion };
   const supportedVersions = [...MODERN_VERSIONS, ...LEGACY_VERSIONS];
@@ -667,5 +676,20 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
     }
   }
 
+  // Settle the mounts before reporting. A client that closes stdin without
+  // calling a tool (or any run whose input drains faster than a URL mount's
+  // `source.init()` round trip) reaches here while `mountsReady` is still
+  // pending, so checking `mountFailure` first would read null and exit 0 on a
+  // pack that was in fact refused. Awaiting is safe: the promise is already
+  // caught above, so this observes the outcome without a second rejection.
+  await mountsReady.catch(() => {});
+
   for (const mounted of packs.values()) await mounted.search.close();
+
+  // Exit non-zero if any pack never mounted. Deferred to here so the
+  // handshake stays fast and the surviving packs stay queryable for the
+  // session's life; `bin/pikelet.mjs` maps `exitCode` onto the status.
+  if (mountFailure) {
+    throw Object.assign(new Error(`mount failed: ${mountFailure?.message || mountFailure}`), { exitCode: 1 });
+  }
 }
