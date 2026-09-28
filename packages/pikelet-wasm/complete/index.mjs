@@ -345,6 +345,45 @@ export async function verifyHostEncoder(declaration, encodeQuery, dim) {
  * caller should close this and use openPikeletFile() instead: the member is a
  * search tier and needs the real open.
  */
+/**
+ * Read and identity-verify just a member's manifest, without opening its
+ * segments. 5.1.1's locator walk needs this: to find a chain's ancestors from
+ * the head alone it must read each member's `layer.parent` and stop at the
+ * base, and paying for a full open per hop only to discard it is wasteful when
+ * the walk may then reject the location.
+ *
+ * Returns { identity, manifest, isLayer, parent }. The identity check is the
+ * same one openPikeletFile makes, so a tampered manifest fails here too.
+ */
+export async function readMemberManifest(input, options = {}) {
+    const source = typeof input === 'string' ? await fileSource(input) : input;
+    const owned = typeof input === 'string';
+    const maxReadBytes = resolveBudget(options.maxReadBytes, 'maxReadBytes', DEFAULT_OPEN_READ_BYTES);
+    try {
+        const header = await readChecked(source, 0, HEADER_BYTES, 'header', maxReadBytes);
+        const hv = viewOf(header);
+        if (hv.getUint32(0, true) !== MAGIC) throw new Error('not a .pikelet file (bad magic)');
+        const manifestBytes = hv.getUint32(8, true);
+        const identity = [...new Uint8Array(header.buffer, header.byteOffset + 24, 32)]
+            .map((b) => b.toString(16).padStart(2, '0')).join('');
+        const fileBytes = u64(hv, 16, 'header fileBytes');
+        const manifestBuf = await readChecked(source, HEADER_BYTES, manifestBytes, 'manifest', maxReadBytes, fileBytes);
+        if (await sha256hex(manifestBuf) !== identity) {
+            throw new Error('.pikelet manifest failed identity verification');
+        }
+        const manifest = JSON.parse(decoder.decode(manifestBuf));
+        const isLayer = manifest.profile === 'pikelet-layer-v1';
+        return {
+            identity,
+            manifest,
+            isLayer,
+            parent: isLayer && manifest.layer?.parent ? { ...manifest.layer.parent } : null,
+        };
+    } finally {
+        if (owned && source.close) await source.close();
+    }
+}
+
 export async function readChainMemberShell(input, options = {}) {
     const source = typeof input === 'string' ? await fileSource(input) : input;
     const owned = typeof input === 'string';
@@ -573,6 +612,61 @@ export async function openPikeletFile(input, options = {}) {
             }
             return parsed;
         };
+        // The lineage segment (kind 7, LAYERED_PROFILE.md 6.3), parsed and
+        // validated on first use. Present only on a base compacted from a
+        // chain. buildLineageSegment wrote it and parseLineageSegment validated
+        // it, but nothing on the read side ever reached either: a real
+        // compacted pack could not translate a citation, which is the whole
+        // point of the segment ("what lets a consumer treat a translated
+        // citation as evidence rather than as a hint").
+        //
+        // Cached because the validation is not free and the segment is
+        // immutable; the cache holds the parse, never a translation.
+        let lineageCache;
+        const readLineageSegment = async () => {
+            if (lineageCache !== undefined) return lineageCache;
+            const seg = segments.get('lineage');
+            if (!seg) { lineageCache = null; return null; }
+            const bytes = await readChecked(source, seg.offset, seg.length, 'lineage segment', maxReadBytes, fileBytes);
+            if (await sha256hex(bytes) !== seg.sha256) {
+                throw new Error('.pikelet lineage segment failed hash verification');
+            }
+            const { parseLineageSegment } = await import('./layer-compact.mjs');
+            // Cross-checked against the manifest: the parser refuses a segment
+            // whose last head is not compactedFrom.identity, or whose counts
+            // disagree, so a tampered pair fails rather than translating.
+            lineageCache = parseLineageSegment(bytes, manifest.compactedFrom || null);
+            return lineageCache;
+        };
+
+        // oldId -> new dense id, by 6.3's rule: a surviving id loses one
+        // position per tombstone below it. The per-byte prefix table is built
+        // once and reused, because the naive form rescans the bitset from zero
+        // on every call -- O(id) per citation, quadratic over a run of them on
+        // a large pack.
+        let compactPrefix;
+        const compactMapFor = (lineage) => {
+            if (compactPrefix === undefined) {
+                const bytes = lineage.bitset.length;
+                compactPrefix = new Uint32Array(bytes + 1);
+                for (let b = 0; b < bytes; b++) {
+                    let n = 0;
+                    for (let k = 0; k < 8; k++) if ((lineage.bitset[b] >> k) & 1) n++;
+                    compactPrefix[b + 1] = compactPrefix[b] + n;
+                }
+            }
+            return (oldId) => {
+                if (oldId < 0 || oldId >= lineage.oldRowTotal) return null;
+                if ((lineage.bitset[oldId >> 3] >> (oldId & 7)) & 1) return null;
+                const byte = oldId >> 3;
+                let below = compactPrefix[byte];
+                for (let k = 0; k < (oldId & 7); k++) {
+                    if ((lineage.bitset[byte] >> k) & 1) below++;
+                }
+                return oldId - below;
+            };
+        };
+
         // Required segments are per-profile (layered profile 4.3). A layer with
         // records carries a tombstones segment on top of the complete set; a
         // TOMBSTONE-ONLY layer has neither an index nor a corpus segment and is
@@ -1124,6 +1218,16 @@ export async function openPikeletFile(input, options = {}) {
                     identity,
                     formatVersion,
                     profile,
+                    // 6.3: present when this base was compacted from a chain,
+                    // and the key to whether citation() can say anything. It
+                    // was in the manifest all along and reported nowhere, so a
+                    // compacted pack looked indistinguishable from a freshly
+                    // compiled one.
+                    compactedFrom: manifest.compactedFrom
+                        && typeof manifest.compactedFrom === 'object'
+                        && !Array.isArray(manifest.compactedFrom)
+                        ? { ...manifest.compactedFrom }
+                        : null,
                     // Human-readable pack name from the identity-verified
                     // manifest (compile records it under corpus.provenance);
                     // null when the builder recorded none.
@@ -1369,6 +1473,47 @@ export async function openPikeletFile(input, options = {}) {
             },
 
             /**
+             * 6.3: translate a citation made against any head of the chain this
+             * base was compacted from. Returns null when this pack carries no
+             * lineage segment, i.e. it was not compacted from a chain.
+             *
+             * Forward translation only, and the shape says so: `{ok: true,
+             * newId, via}` for a record that survives, `{ok: true,
+             * deleted: true, ...}` for one that does not, and `{ok: false,
+             * reason}` for an id or identity this history cannot speak to.
+             * It answers what an old id BECAME, never what an old head served
+             * — the old record's bytes are not in this file (see the spec's
+             * "Translation is not dereference").
+             */
+            async citation(identity, id) {
+                assertOpen();
+                const lineage = await readLineageSegment();
+                if (!lineage) return null;
+                const { translateCitation } = await import('./layer-compact.mjs');
+                // oldId -> new dense id, by the spec's own rule: a live id
+                // loses one position per tombstone below it. Derived from the
+                // segment's bitset rather than passed in, so a caller cannot
+                // supply a mapping that disagrees with the bytes.
+                return translateCitation(lineage, compactMapFor(lineage), identity, id);
+            },
+
+            /**
+             * The parsed lineage segment, or null. Exposed so a consumer can
+             * enumerate the heads a citation may name without guessing.
+             */
+            async lineage() {
+                assertOpen();
+                const parsed = await readLineageSegment();
+                if (!parsed) return null;
+                return {
+                    heads: parsed.heads.map((h) => ({ ...h })),
+                    oldRowTotal: parsed.oldRowTotal,
+                    tombstoneCount: parsed.tombstoneCount,
+                    supersessions: parsed.supersessions.map((e) => [...e]),
+                };
+            },
+
+            /**
              * Internal seam for the layered profile (LAYERED_PROFILE.md 5.1
              * step 3): a chain reader mounts each member through this same
              * open, then needs each search tier's sketch, lexical index and
@@ -1434,6 +1579,24 @@ export async function openPikeletFile(input, options = {}) {
                                 const { vector } = await embedder.embed(`${prefix}${text}`);
                                 return vector;
                             },
+                            // A refit (6.3 step 4) embeds generated QUERIES,
+                            // which take the query prefix, not the passage one:
+                            // the asymmetry is the encoder's contract and
+                            // applying the wrong side puts the fit's probes in
+                            // a different space from the corpus it scores.
+                            embedQuery: async (text) => {
+                                const prefix = declaration.prefixPolicy?.query || '';
+                                const { vector } = await embedder.embed(`${prefix}${text}`);
+                                return vector;
+                            },
+                            // Word-level vectors for the comparison feature.
+                            // Unprefixed by design -- a single word is not a
+                            // query needing an instruction prefix. Null when
+                            // the kernel cannot do it, which the caller reads
+                            // as "fit without that feature".
+                            embedWords: typeof embedder.embedWords === 'function'
+                                ? (text) => embedder.embedWords(text)
+                                : null,
                         };
                     },
                     // The base's own abstention scorer, for a chain serving

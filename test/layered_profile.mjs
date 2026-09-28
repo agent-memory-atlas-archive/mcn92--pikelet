@@ -2072,5 +2072,265 @@ console.log('forward translation of a citation by a compacted base (6.3)');
         translateCitation(lin, plan.forward, id64(9), 1).reason === 'not-on-this-history');
 }
 
+// ---------------------------------------------------------------------------
+// The lineage segment through a REAL reader (6.3)
+// ---------------------------------------------------------------------------
+// Everything above tests buildLineageSegment/parseLineageSegment/
+// translateCitation as functions. Nothing read the segment off a pack: the
+// writer emitted it, the manifest carried its digest, and openPikeletFile had
+// no citation(), no lineage() and no compactedFrom on info(). So a real
+// compacted pack could not translate a citation at all, which is the entire
+// purpose of the segment.
+// ---------------------------------------------------------------------------
+// Locator following through openPikeletChain (5.1.1)
+// ---------------------------------------------------------------------------
+// validateLocatorShape/resolveLocatorUrl/assertConfined/resolveLocatorPath/
+// resolveParentLocation are all covered above, as functions. Nothing called
+// them: layer-reader.mjs did not import layer-locator.mjs at all, while its
+// header comment claimed "locator following ... is wired". So every ancestor
+// had to be named by the caller and a published chain could not be mounted
+// from its head, which is what 5.1.1 exists for.
+console.log('locator following: a chain mounts from its head alone (5.1.1)');
+{
+    const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-walk-'));
+    const { openPikeletChain: openChain } = await import('../packages/pikelet-wasm/complete/layer-reader.mjs');
+    const CDIM = 16;
+    const ENC2 = { kind: 'host-encoder-v1', model: 'test' };
+    const INGEST2 = { chunker: 'v1', targetTokens: 256 };
+    const recBytes = (i) => Buffer.from(JSON.stringify({ title: `rec ${i}`, text: `record ${i} body text` }));
+    const sketchFor = (ids, tag) => {
+        const n = ids.length;
+        const qdata = new Uint8Array(n * CDIM);
+        const scales = new Float32Array(n);
+        const offsets = new Float32Array(n);
+        for (let r = 0; r < n; r++) {
+            for (let d = 0; d < CDIM; d++) qdata[r * CDIM + d] = (ids[r] * 7 + d) % 256;
+            scales[r] = 1 / 255; offsets[r] = 0;
+        }
+        const sp = path.join(wt, `sk-${tag}.pikelet-sketch`);
+        exportSketchArtifact({ dim: CDIM, count: n, metric: 1, qdata, scales, offsets }, sp,
+            { sketchDims: CDIM, sketchBits: 8, recommendedRerank: 20 });
+        return fs.readFileSync(sp);
+    };
+    const mkBase = (dir, name, ids = [0, 1, 2, 3]) => {
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const qi = buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' })));
+        const at = path.join(dir, name);
+        const built = assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+            corpus: { ...corpus.corpus, ingest: INGEST2 }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, `b-${name}`) },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: qi },
+        ], at);
+        return { at, identity: built.identity, qiSha: built.manifest.segments.find((x) => x.kind === 'query-interp').sha256 };
+    };
+    const mkLayer = (dir, name, base, locator) => {
+        const ids = [4, 5];
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const at = path.join(dir, name);
+        assemblePikeletFile({
+            profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+            layer: {
+                depth: 1, rowBase: 4, records: 2, baseIdentity: base.identity,
+                tombstones: 1, supersessions: 0, ingest: INGEST2,
+                parent: { identity: base.identity, ...(locator ? { locator } : {}) },
+            },
+            corpus: { ...corpus.corpus, ingest: INGEST2 }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, `l-${name}`) },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildInheritedQuerySegment({ baseIdentity: base.identity, queryInterpSha256: base.qiSha }) },
+            { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 4, tombstonedIds: [1], records: 2 }) },
+        ], at);
+        return at;
+    };
+
+    const base = mkBase(wt, 'base.pikelet');
+    const headWith = mkLayer(wt, 'head.pikelet', base, 'base.pikelet');
+    const headWithout = mkLayer(wt, 'nolocator.pikelet', base, null);
+
+    // The whole point: one member in, a full chain mounted. Caught rather than
+    // awaited bare, because a reader that does not walk throws here ("a layer
+    // opened alone") and would abort the run instead of reporting a FAIL.
+    let walked = null;
+    let walkErr = null;
+    try { walked = await openChain([headWith]); } catch (err) { walkErr = err; }
+    check('a head alone mounts its whole chain through the locator',
+        !!walked && walked.info().layers === 2 && walked.info().records === 6 && walked.info().tombstones === 1,
+        walkErr ? `threw: ${walkErr.message.slice(0, 80)}` : JSON.stringify({ layers: walked.info().layers, records: walked.info().records }));
+    const explicit = await openChain([base.at, headWith]);
+    check('the walked chain is identical to the explicitly named one',
+        !!walked && walked.info().identity === explicit.info().identity
+        && JSON.stringify(walked.info().members) === JSON.stringify(explicit.info().members),
+        walkErr ? 'the walk did not mount' : 'members differ');
+    if (walked) await walked.close();
+    await explicit.close();
+
+    // A lineage listing is operator-supplied and takes precedence (5.1.1).
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-walk-far-'));
+    fs.copyFileSync(base.at, path.join(elsewhere, 'base.pikelet'));
+    const viaLineage = await openChain([headWithout], {
+        lineage: new Map([[base.identity, path.join(elsewhere, 'base.pikelet')]]),
+    });
+    check('a lineage listing locates a parent the manifest names no locator for',
+        viaLineage.info().layers === 2);
+    await viaLineage.close();
+
+    await rejectsAsync('a head with no locator and no lineage cannot be walked',
+        () => openChain([headWithout]), /no lineage entry, no locator and no host resolver/);
+    await rejectsAsync('resolveParents:false refuses to follow a locator',
+        () => openChain([headWith], { resolveParents: false }), /locator resolution is disabled/);
+
+    // Confinement: the locator names a sibling, but the real file it reaches is
+    // outside the child's real directory (5.1.1's realpath wording).
+    const sub = path.join(wt, 'sub');
+    fs.mkdirSync(sub);
+    const subHead = mkLayer(sub, 'head.pikelet', base, 'base.pikelet');
+    await rejectsAsync('a locator naming a file that is not there is an availability failure',
+        () => openChain([subHead]), /cannot be located/);
+    fs.symlinkSync(base.at, path.join(sub, 'base.pikelet'));
+    await rejectsAsync('a symlink escaping the child\'s real directory is refused',
+        () => openChain([subHead]), /outside the child's real directory/);
+
+    // A locator that resolves to a real pack which is NOT the parent the child
+    // committed to must fail on identity, before the pairwise checks.
+    fs.rmSync(path.join(sub, 'base.pikelet'));
+    // Different records, so this is genuinely a different artifact: mkBase is
+    // deterministic and a second call with the same ids reproduces the identity.
+    const other = mkBase(sub, 'base.pikelet', [10, 11, 12, 13]);
+    check('the decoy base really is a different artifact', other.identity !== base.identity);
+    await rejectsAsync('a locator resolving to the wrong artifact is refused on identity',
+        () => openChain([subHead]), /is not the parent the chain commits to/);
+
+    fs.rmSync(wt, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+}
+
+console.log('lineage: a compacted base translates citations through the reader');
+{
+    const linTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-lineage-'));
+    const { openPikeletFile } = await import('../packages/pikelet-wasm/complete/index.mjs');
+    // Local copies: the chain-file block above scopes these to itself.
+    const CDIM = 16;
+    const ENC2 = { kind: 'host-encoder-v1', model: 'test' };
+    const INGEST2 = { chunker: 'v1', targetTokens: 256 };
+    const recBytes = (i) => Buffer.from(JSON.stringify({ title: `rec ${i}`, text: `record ${i} body text` }));
+    const sketchFor = (ids) => {
+        const n = ids.length;
+        const qdata = new Uint8Array(n * CDIM);
+        const scales = new Float32Array(n);
+        const offsets = new Float32Array(n);
+        for (let r = 0; r < n; r++) {
+            for (let d = 0; d < CDIM; d++) qdata[r * CDIM + d] = (ids[r] * 7 + d) % 256;
+            scales[r] = 1 / 255; offsets[r] = 0;
+        }
+        const sp = path.join(linTmp, `sk-${n}.pikelet-sketch`);
+        exportSketchArtifact({ dim: CDIM, count: n, metric: 1, qdata, scales, offsets }, sp,
+            { sketchDims: CDIM, sketchBits: 8, recommendedRerank: 20 });
+        return fs.readFileSync(sp);
+    };
+
+    // An old chain: base of 6 (depth 0), layer of 2 (depth 1) that tombstones
+    // old ids 1 and 2 and supersedes 2 -> 6. Live after: 0, 3, 4, 5, 6, 7.
+    const OLD_BASE = id64(41);
+    const OLD_HEAD = id64(42);
+    const oldRowTotal = 8;
+    const headBitset = new Uint8Array(1);
+    headBitset[0] |= (1 << 1) | (1 << 2);
+    const lineageBytes = buildLineageSegment({
+        heads: [
+            { identity: OLD_BASE, rowTotal: 6, depth: 0 },
+            { identity: OLD_HEAD, rowTotal: 8, depth: 1 },
+        ],
+        headBitset,
+        oldRowTotal,
+        supersessions: [[2, 6, 1]],
+    });
+
+    // The compacted base: 6 live records, dense ids 0..5.
+    const liveOld = [0, 3, 4, 5, 6, 7];
+    const cIds = liveOld.map((_, i) => i);
+    const cCorpus = buildCorpusSegment(cIds.map(recBytes));
+    const cQi = buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' })));
+    const cPath = path.join(linTmp, 'compacted.pikelet');
+    assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...cCorpus.corpus, ingest: INGEST2 }, index: {},
+        compactedFrom: { identity: OLD_HEAD, depth: 1, liveRecords: 6, tombstones: 2 },
+    }, [
+        { kind: 'index', bytes: sketchFor(cIds) },
+        { kind: 'corpus', bytes: cCorpus.bytes },
+        { kind: 'query-interp', bytes: cQi },
+        { kind: 'lineage', bytes: lineageBytes },
+    ], cPath);
+
+    const reader = await openPikeletFile(cPath);
+    check('info() reports compactedFrom on a compacted base',
+        reader.info().compactedFrom?.identity === OLD_HEAD,
+        JSON.stringify(reader.info().compactedFrom));
+    const surfaced = await reader.lineage();
+    check('lineage() surfaces both heads in depth order',
+        !!surfaced && surfaced.heads.length === 2 && surfaced.heads[0].identity === OLD_BASE
+        && surfaced.heads[1].identity === OLD_HEAD && surfaced.oldRowTotal === 8,
+        JSON.stringify(surfaced && surfaced.heads.map((h) => h.depth)));
+    // A reader that does not read the segment returns null from citation() for
+    // a pack that HAS one, so every check below would throw on null rather
+    // than report. `?? {}` keeps the failure legible as a FAIL line.
+    const cite = async (ident, id) => (await reader.citation(ident, id)) ?? {};
+
+    // A live id loses one position per tombstone below it (bits 1 and 2 set).
+    const t0 = await cite(OLD_BASE, 0);
+    check('a live id below every tombstone translates unshifted',
+        t0.ok === true && t0.newId === 0, JSON.stringify(t0));
+    const t3 = await cite(OLD_BASE, 3);
+    check('a live id above two tombstones shifts down by two',
+        t3.ok === true && t3.newId === 1, JSON.stringify(t3));
+    const t7 = await cite(OLD_HEAD, 7);
+    check('a layer-owned id translates against the depth-1 head',
+        t7.ok === true && t7.newId === 5, JSON.stringify(t7));
+    // The head table is what makes these two differ for the same id.
+    const at6Base = await cite(OLD_BASE, 6);
+    const at6Head = await cite(OLD_HEAD, 6);
+    check('an id that postdates the cited head is refused at that head but not at a later one',
+        at6Base.ok === false && at6Base.reason === 'id-postdates-that-head' && at6Head.ok === true,
+        `${JSON.stringify(at6Base)} vs ${JSON.stringify(at6Head)}`);
+    const tomb = await cite(OLD_HEAD, 1);
+    check('a tombstoned id with no successor answers deleted',
+        tomb.ok === false && tomb.reason === 'deleted', JSON.stringify(tomb));
+    // Old id 2 was superseded by old id 6, which survives as dense id 4. The
+    // walk and the dense translation both have to happen, so this pins the
+    // whole shape rather than just "answered something".
+    const sup = await cite(OLD_HEAD, 2);
+    check('a superseded id translates through its successor to a dense id',
+        sup.ok === true && sup.newId === 4 && sup.via === 'superseded'
+        && JSON.stringify(sup.supersededChain) === '[6]',
+        JSON.stringify(sup));
+    const foreign = await cite(id64(77), 0);
+    check('an identity absent from the head table is not on this history',
+        foreign.ok === false && foreign.reason === 'not-on-this-history', JSON.stringify(foreign));
+    await reader.close();
+
+    // A pack with no lineage segment must answer null, not throw.
+    const plainPath = path.join(linTmp, 'plain.pikelet');
+    const pCorpus = buildCorpusSegment([0, 1, 2].map(recBytes));
+    assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...pCorpus.corpus, ingest: INGEST2 }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor([0, 1, 2]) },
+        { kind: 'corpus', bytes: pCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+    ], plainPath);
+    const plain = await openPikeletFile(plainPath);
+    check('a pack that was never compacted answers null rather than throwing',
+        (await plain.citation(OLD_BASE, 0)) === null && (await plain.lineage()) === null);
+    check('info().compactedFrom is null on a pack that was never compacted',
+        plain.info().compactedFrom === null);
+    await plain.close();
+    fs.rmSync(linTmp, { recursive: true, force: true });
+}
+
 console.log(`\nLayered profile conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

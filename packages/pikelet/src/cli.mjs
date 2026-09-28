@@ -98,7 +98,7 @@ Usage:
   pikelet rebuild --yes
   pikelet doctor <url>   # probe artifact hosting: Range/206, cache-key ranges, h2, ETag, RTT
   pikelet append --parent <file|url> [--source <path|url> ...] [--remove <id> ...] --out layer.pikelet
-  pikelet compact --head <base> [--head <layer> ...] --out compacted.pikelet
+  pikelet compact --head <base> [--head <layer> ...] --out compacted.pikelet [--no-refit]
   pikelet mcp --pack <file-or-url> [--pack ... | --shelf <file-or-url>]
   pikelet mcp install --pack <file-or-url> [--client claude-code|claude-desktop]
 
@@ -201,6 +201,10 @@ const BOOLEAN_FLAGS = new Set([
   'help', 'h',
   // append (LAYERED_PROFILE.md 6.1)
   'allow-drift',
+  // compact (6.3): ship unscored instead of refitting. Boolean, so it does not
+  // consume the next argument -- an unregistered flag here set itself to
+  // '--out' and left --out unset.
+  'no-refit',
 ]);
 
 function parseArgs(args) {

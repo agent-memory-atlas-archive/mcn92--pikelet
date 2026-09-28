@@ -25,6 +25,33 @@ function loadCompleteModules() {
   return completeModulesPromise;
 }
 
+/**
+ * Resolve chain members for a producer: a `https?://` location becomes an
+ * initialized range source, anything else a resolved local path. Layered
+ * producers (`append --parent`, `compact --head`) handed their arguments to
+ * openPikeletChain verbatim, so a URL was treated as a filename and failed at
+ * open -- while `mcp` had mounted remote chains this way all along. The
+ * capability was the reader's; only the producers were local-only.
+ *
+ * `#sha256` pins are not stripped here: a producer names members it is about
+ * to build on, and the head identity it reports is what a consumer pins.
+ */
+async function resolveChainMembers(locations, log = () => {}) {
+  const { reader } = await loadCompleteModules();
+  const resolved = [];
+  for (const loc of locations) {
+    if (/^https?:\/\//i.test(loc)) {
+      const source = reader.httpRangeSource(loc);
+      await source.init();
+      log(`Reading ${loc} over HTTP range requests`);
+      resolved.push(source);
+    } else {
+      resolved.push(path.resolve(process.cwd(), loc));
+    }
+  }
+  return resolved;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -86,6 +113,7 @@ export {
   sha256,
   completeModulesPromise,
   loadCompleteModules,
+  resolveChainMembers,
   __filename,
   __dirname,
   PACKAGE_ROOT,

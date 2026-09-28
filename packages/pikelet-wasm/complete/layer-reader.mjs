@@ -13,12 +13,20 @@
 //     mask supplied to the scan, merges by distance, and fuses once (5.3)
 //   - record()/citation resolution over global ids (5.6)
 //
-// The caller supplies the head and, for now, the ancestors explicitly. Locator
-// following through layer-locator.mjs is wired but a caller may also pass a
-// lineage map (section 7), which is the cheaper path: every layer's identity
-// and location is known up front and layers open in one parallel wave.
+// The caller may supply every member base-first, or just the head and let the
+// reader walk up to the base through 5.1.1's parent resolution: a caller-
+// supplied lineage map (section 7), then each layer's confined
+// `parent.locator`, then a host resolver. The lineage map is the cheaper path
+// when available, since every location is known up front and members open in
+// one wave; the locator walk is sequential by nature, because each hop's
+// location is only known once its child's manifest has been read.
+//
+// This comment used to claim locator following "is wired". It was not: this
+// module did not import layer-locator.mjs at all, so every ancestor had to be
+// named by the caller and a published chain could not be mounted from its head.
 
-import { openPikeletFile, readChainMemberShell, base64Bytes } from './index.mjs';
+import { openPikeletFile, readChainMemberShell, readMemberManifest, base64Bytes } from './index.mjs';
+import { resolveParentLocation } from './layer-locator.mjs';
 import { fuseCandidates, FUSION_DEFAULTS } from './fusion.mjs';
 import { parseTombstoneSegment, firstSupersetViolation } from './tombstones.mjs';
 import { validateAgainstParent, chainIngestDeclaration, validateIngestAgainstChain, LAYER_PROFILE, MAX_DEPTH } from './layer-manifest.mjs';
@@ -49,9 +57,82 @@ export const CHAIN_DEFAULTS = Object.freeze({
  * @param {object} [options] forwarded to each member's open, plus:
  *   readerDriftLimit, maxDepth.
  */
+/**
+ * 5.1.1: walk from a head to its base, resolving each parent by lineage
+ * listing, then confined locator, then host resolver. Returns the members
+ * base-first, which is what openPikeletChain consumes.
+ *
+ * Sequential by necessity: a hop's location comes from its child's manifest,
+ * so nothing below the head is known until the head is read. Bounded by
+ * maxDepth so a manifest cycle or a hostile chain of locators cannot walk
+ * forever, and every hop's identity is checked against what its child named
+ * before that member is accepted -- a locator that resolves to the wrong
+ * artifact fails here rather than at the pairwise check later.
+ */
+async function walkToBase(head, options) {
+    const maxDepth = options.maxDepth ?? CHAIN_DEFAULTS.maxDepth;
+    const lineage = options.lineage instanceof Map ? options.lineage : null;
+    const chain = [head];
+    let cursor = head;
+    let expectIdentity = null;
+    for (let hop = 0; hop <= maxDepth; hop++) {
+        const peek = await readMemberManifest(cursor, options);
+        if (expectIdentity !== null && peek.identity !== expectIdentity) {
+            throw new Error(`chain member at ${describeLocation(cursor)} has identity ${peek.identity.slice(0, 12)}… `
+                + `but its child named ${expectIdentity.slice(0, 12)}…: the located artifact is not the parent the chain commits to (3.2)`);
+        }
+        if (!peek.isLayer) return chain;          // reached the base
+        if (!peek.parent) throw new Error('a layer manifest carries no layer.parent (3.2)');
+        const located = await resolveParentLocation(peek.parent, {
+            lineage,
+            childLocation: typeof cursor === 'string' ? cursor : (cursor.url ?? cursor.location ?? null),
+            kind: typeof cursor === 'string' ? 'file' : 'url',
+            resolveParents: options.resolveParents !== false,
+            hostResolver: options.hostResolver || null,
+            // A file-path locator needs realpath/dirname/join to confine
+            // against the child's REAL directory (symlink escapes are the
+            // point of 5.1.1's "real path" wording). The locator module stays
+            // runtime-agnostic, so the Node implementation is supplied here
+            // and only when a file path is actually being resolved -- a
+            // browser or Worker mount is URL-only and never loads node:fs.
+            fsops: options.fsops || (typeof cursor === 'string' ? await nodeFsops() : null),
+        });
+        expectIdentity = peek.parent.identity;
+        cursor = located.location;
+        chain.unshift(cursor);
+    }
+    throw new Error(`walking to the base exceeded the depth limit ${maxDepth} (2.7): a layer.parent cycle or an over-deep chain`);
+}
+
+const describeLocation = (loc) => (typeof loc === 'string' ? loc : (loc?.url ?? loc?.location ?? '<source>'));
+
+// Lazily imported so a URL-only mount in a runtime without node:fs never
+// touches it. Cached: the walk resolves one hop at a time and would otherwise
+// re-import per hop.
+let fsopsPromise = null;
+const nodeFsops = () => {
+    fsopsPromise ??= (async () => {
+        const [fsp, path] = await Promise.all([import('node:fs/promises'), import('node:path')]);
+        return {
+            realpath: (p) => fsp.realpath(p),
+            dirname: (p) => path.dirname(p),
+            join: (a, b) => path.join(a, b),
+            sep: path.sep,
+        };
+    })();
+    return fsopsPromise;
+};
+
 export async function openPikeletChain(members, options = {}) {
     if (!Array.isArray(members) || members.length === 0) {
         throw new Error('openPikeletChain() needs at least a base');
+    }
+    // A single member that turns out to be a layer is a head to walk up from,
+    // not an error: 5.1.1 exists so a published chain can be mounted by naming
+    // its head. A single base is just a base, and the walk returns it as-is.
+    if (members.length === 1 && options.followParents !== false) {
+        const peek = await readMemberManifest(members[0], options);
+        if (peek.isLayer) members = await walkToBase(members[0], options);
     }
     const maxDepth = options.maxDepth ?? CHAIN_DEFAULTS.maxDepth;
     if (members.length - 1 > maxDepth) {
@@ -423,6 +504,58 @@ export async function openPikeletChain(members, options = {}) {
             chainBloom() { assertOpen(); return chainBloom; },
 
             /**
+             * 6.3's verbatim row copy: the quantized bytes and per-row
+             * scale/offset for a set of chain ids, read back from whichever
+             * tier owns each one. Producer seam, like __head.
+             *
+             * `compact` re-embedded every live record with the base's own
+             * encoder instead, on the stated grounds that the engine exposed
+             * no row readback. It does: the sketch reader's fetchRows()
+             * (format 2 verifies each row's digest as it reads) plus the
+             * resident scales/offsets arrays. Re-embedding costs a forward
+             * pass per record and only reproduces the same bytes when the
+             * encoder is bit-identical, which is a stronger assumption than
+             * the spec's copy makes.
+             *
+             * Returns rows in the order ids were given. Throws if an id is
+             * outside every tier, which callers should read as a planning bug
+             * rather than a missing row.
+             */
+            async __fetchRows(ids) {
+                assertOpen();
+                // Group by owning tier so each tier's fetchRows sees one
+                // batched call: the reader coalesces adjacent rows into single
+                // range reads, which per-id calls would defeat on a URL mount.
+                const byTier = new Map();
+                const placed = ids.map((id, at) => {
+                    const owner = ownerOf(table, id);
+                    if (!owner) throw new Error(`id ${id} is outside every search tier's interval (5.2)`);
+                    const t = owner.tier.tier;
+                    if (!byTier.has(t)) byTier.set(t, []);
+                    byTier.get(t).push({ at, localId: owner.localId });
+                    return { tier: t, localId: owner.localId };
+                });
+                const out = new Array(ids.length);
+                for (const [tierIndex, wanted] of byTier) {
+                    const { reader } = searchTiers[tierIndex];
+                    const fetched = await reader.sketch.fetchRows(wanted.map((w) => w.localId));
+                    for (const w of wanted) {
+                        const row = fetched.get(w.localId);
+                        if (!row) throw new Error(`tier ${tierIndex} returned no row for local id ${w.localId}`);
+                        out[w.at] = {
+                            row,
+                            scale: reader.sketch.scales[w.localId],
+                            offset: reader.sketch.offsets[w.localId],
+                        };
+                    }
+                }
+                for (let i = 0; i < out.length; i++) {
+                    if (!out[i]) throw new Error(`no row read back for id ${ids[i]} (tier ${placed[i].tier})`);
+                }
+                return out;
+            },
+
+            /**
              * The chain's members with each layer's own bitset and edges, which
              * is what `rebase` replays (6.2) and what `compact` reads to
              * enumerate live ids and rebuild the lineage segment (6.3).
@@ -451,6 +584,10 @@ export async function openPikeletChain(members, options = {}) {
                     bitset: headBitset,
                     baseIdentity: base.identity,
                     baseRecords: baseMember.records,
+                    // The base sketch's numeric metric code, which
+                    // exportSketchArtifact writes verbatim. manifest.metric is
+                    // the string form and is not interchangeable with it.
+                    metricCode: base.sketch.metric,
                     // Sum of every layer's records, for the drift numerator.
                     appendedBefore: chainMembers.slice(1).reduce((n, m) => n + m.records, 0),
                     // 6.1 needs the base's kind to decide appendability, its
