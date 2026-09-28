@@ -3361,6 +3361,57 @@ async function testFloatUint8DeleteCompactParity() {
     }
 }
 
+async function testCompactPreservesCreationSeed() {
+    section('compact() rebuild keeps the creation seed');
+
+    // compact() rebuilds the graph outright once half the nodes are deleted,
+    // and that rebuild used to construct its config without a seed, silently
+    // falling back to the struct default (108). An index created with
+    // `seed: N` therefore stopped honouring N the first time deletes crossed
+    // 50%, which is exactly when a caller who asked for reproducibility needs
+    // it. Both backends now retain the seed in seed_ and pass it through.
+    //
+    // The existing float/uint8 parity test cannot catch this: it compares the
+    // two backends against each other, and both dropped the seed identically,
+    // so it stayed green. This asserts the thing that actually regressed —
+    // that two DIFFERENT creation seeds still produce different level
+    // assignments after a rebuild-path compaction. Levels are the only thing
+    // the seed drives, so they are what gets compared.
+    const N = 300;
+    const cfg = { dim: 32, maxElements: N, metric: 'l2', M: 8, efConstruction: 60 };
+    const vectors = seededParityVectors(N, cfg.dim, 77);
+
+    async function compactedLevels(seed, quantized) {
+        const index = await Pikelet.create({ ...cfg, seed, quantized });
+        const ids = index.addBatch(vectors);
+        // 80% deleted: comfortably past the >= half threshold that selects the
+        // rebuild branch rather than the in-place remap.
+        for (let i = 0; i < N; i++) if (i % 5 !== 0) index.delete(ids[i]);
+        index.compact();
+        const skeleton = parseGraphSkeleton(extractRawEngineBytes(index.export()), quantized);
+        index.dispose();
+        return skeleton;
+    }
+
+    for (const quantized of [false, true]) {
+        const label = quantized ? 'uint8' : 'float';
+        const a = await compactedLevels(11, quantized);
+        const b = await compactedLevels(4242, quantized);
+        const c = await compactedLevels(11, quantized);
+
+        assert(a.count === 60 && b.count === 60,
+            `${label}: rebuild-path compaction kept 60 survivors (got ${a.count}, ${b.count})`);
+        // Same seed, same levels: the rebuild must be deterministic.
+        assert(a.levels.join(',') === c.levels.join(','),
+            `${label}: seed 11 reproduces its own post-compact levels`);
+        // Different seeds, different levels: the seed must actually reach the
+        // rebuilt graph. Before the fix these were equal on both backends.
+        assert(a.levels.join(',') !== b.levels.join(','),
+            `${label}: seeds 11 and 4242 give different post-compact levels `
+            + '(equal means compact() dropped the seed)');
+    }
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -3419,6 +3470,7 @@ async function main() {
         testSearchAndSerializationDeterminismOracle,
         testFloatUint8GraphParity,
         testFloatUint8DeleteCompactParity,
+        testCompactPreservesCreationSeed,
     ];
 
     for (const suite of suites) {
