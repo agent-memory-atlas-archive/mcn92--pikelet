@@ -864,6 +864,12 @@ console.log('ancestry and citation scoping (5.6)');
 // ---------------------------------------------------------------------------
 // Masked sketch search (5.3) — against a real PikeletSketchArtifact
 // ---------------------------------------------------------------------------
+// `pikelet-wasm/complete` is ESM. require() of an ES module works on Node 20+
+// (require(esm) was backported there) but throws ERR_REQUIRE_ESM on Node 18,
+// which the CI matrix still covers, so it is imported rather than required.
+// Loaded here, not beside its one caller: a `const` does not hoist the way a
+// function declaration does, and the caller runs earlier in the file.
+const { openLexicalIndex: openLexicalIndexImpl } = await import('../packages/pikelet-wasm/complete/index.mjs');
 const require_ = createRequire(import.meta.url);
 const Pikelet = require_('pikelet-wasm');
 const { exportSketchArtifact } = require_('pikelet-wasm/artifact');
@@ -1279,8 +1285,7 @@ console.log('chain files: a base and two layers assemble and re-read');
     fs.rmSync(chainTmp, { recursive: true, force: true });
 }
 function openLexicalIndexFor(bytes) {
-    const { openLexicalIndex } = require_('pikelet-wasm/complete');
-    return openLexicalIndex(bytes);
+    return openLexicalIndexImpl(bytes);
 }
 
 fs.rmSync(maskTmp, { recursive: true, force: true });
