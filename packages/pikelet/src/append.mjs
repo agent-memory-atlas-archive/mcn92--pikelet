@@ -105,6 +105,36 @@ export async function appendLayer(flags) {
       }
     }
 
+    // Resolve each --supersede path to the local index of the chunk it
+    // produced. The path was parsed and then thrown away, so supersession
+    // edges were assigned by the order the pairs happened to appear rather
+    // than by which file replaced which record. A path that ingested to
+    // exactly one chunk resolves to it; anything else is refused rather than
+    // guessed, because a silently wrong edge points readers at the wrong
+    // successor.
+    const resolvedSupersede = supersedePairs.map(([oldId, target]) => {
+      if (!sources.length) {
+        throw new CliError(`--supersede ${oldId}=${target} needs a --source: the path names which new record replaces id ${oldId}`);
+      }
+      const wanted = path.resolve(process.cwd(), target);
+      const matches = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const sp = chunks[i].sourcePath;
+        if (!sp) continue;
+        if (sp === target || path.resolve(process.cwd(), sp) === wanted) matches.push(i);
+      }
+      if (!matches.length) {
+        throw new CliError(`--supersede ${oldId}=${target} matched no ingested record; `
+          + `the path must be one the --source ingested (${chunks.length} chunk(s) produced)`);
+      }
+      if (matches.length > 1) {
+        throw new CliError(`--supersede ${oldId}=${target} matched ${matches.length} records `
+          + `(local ids ${matches.join(', ')}); a supersession edge names exactly one successor, `
+          + 'so split the source or supersede by resolved id');
+      }
+      return [oldId, matches[0]];
+    });
+
     // --- 4-5. Plan ids, mask and supersessions (6.1 steps 4-5) --------------
     const plan = planLayer({
       parentRowBase: head.rowBase,
@@ -113,7 +143,7 @@ export async function appendLayer(flags) {
       parentDepth: head.depth,
       newRecordCount: chunks.length,
       remove: removeIds,
-      supersede: supersedePairs,
+      supersede: resolvedSupersede,
       ...(flags['max-depth'] ? { maxDepth: Number(flags['max-depth']) } : {}),
     });
 

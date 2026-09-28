@@ -124,7 +124,10 @@ function toolDefinitions(packs) {
     {
       name: 'get_record',
       description: 'Fetch one full record from a pack by the id a search result reported — '
-        + 'the complete chunk text plus its provenance, integrity-verified from the pack.',
+        + 'the complete chunk text plus its provenance, integrity-verified from the pack. '
+        + 'On a layered pack a record may carry `tombstoned: true`, meaning it was deleted '
+        + 'from the current state and is served only because it was asked for by id: do not '
+        + 'present it as current. `currentSuccessor` names the id that replaced it, if any.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -148,6 +151,17 @@ function provenanced(packName, identity, result) {
     source: result.url ?? result.sourcePath ?? null,
     distance: result.distance,
     text: result.text ?? result.preview ?? null,
+    // Chain-only fields (LAYERED_PROFILE.md 3.4, 3.5). This shape is a
+    // whitelist, so anything not named here is dropped -- which silently
+    // turned a tombstoned record into an ordinary live one on its way to the
+    // model. A single-file pack has no layers and no tombstones, so these
+    // stay absent there rather than reporting a false `tombstoned: false`.
+    ...(result.tombstoned === undefined ? {} : { tombstoned: result.tombstoned === true }),
+    ...(result.layer === undefined ? {} : { layer: result.layer }),
+    ...(result.supersededBy === undefined || result.supersededBy === null
+      ? {} : { supersededBy: result.supersededBy }),
+    ...(result.currentSuccessor === undefined || result.currentSuccessor === null
+      ? {} : { currentSuccessor: result.currentSuccessor }),
   };
 }
 
@@ -351,16 +365,32 @@ function callListPacks(packs) {
   return {
     packs: [...packs.entries()].map(([name, mounted]) => {
       const info = mounted.search.info();
+      // A chain reports `records` as the cumulative row total across every
+      // layer, so a pack that had 100 records, appended 10 and tombstoned 40
+      // used to advertise 110 when 70 are live. `liveRecords` is what a
+      // searchable-count means to a caller, and a chain's own shape (depth,
+      // tombstones, whether the inherited fit still applies) is not
+      // derivable from a single-file pack's fields, so it is named here
+      // rather than left for the model to infer.
+      const isChain = Number.isInteger(info.layers) && info.layers > 1;
       return {
         name,
         identity: info.identity,
         file: mounted.file,
-        records: info.records,
+        records: Number.isInteger(info.liveRecords) ? info.liveRecords : info.records,
         encoder: info.encoder?.model ?? info.encoder?.kind ?? null,
         license: info.license,
         remote: mounted.remote === true,
         hybridLexical: info.lexical !== null,
         sampleQueries: info.sampleQueries.slice(0, 5),
+        ...(isChain ? {
+          chain: true,
+          layers: info.layers,
+          baseIdentity: info.baseIdentity,
+          recordsEverAppended: info.records,
+          tombstones: info.tombstones,
+          calibrationStatus: info.calibrationStatus,
+        } : {}),
       };
     }),
   };

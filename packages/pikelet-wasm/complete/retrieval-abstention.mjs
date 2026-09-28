@@ -151,14 +151,25 @@ export function createAbstentionScorer(asset, bloomBytes) {
     }
     const SEEDS = [0, 0x9e3779b9];
 
-    function knownFrac(text) {
+    // `override` is the layered profile's union bloom (LAYERED_PROFILE.md
+    // 4.5): the bitwise OR of the base's bloom and every mounted layer's,
+    // which a chain MUST score against rather than the base's alone.
+    // Identical geometry is enforced where the union is built, and re-checked
+    // here because reading a different-sized bloom with these `bits` would
+    // silently probe the wrong positions rather than fail.
+    function knownFrac(text, override) {
+        const table = override || bloom;
+        if (table !== bloom && table.length !== bloom.length) {
+            throw new Error(`abstention: bloom override is ${table.length} bytes but the fit's is ${bloom.length}; `
+                + 'known_frac would probe the wrong bits');
+        }
         const words = text.toLowerCase().match(/[a-z0-9']+/g) || [];
         if (!words.length) return 0;
         let known = 0;
         for (const w of words) {
             const hit = SEEDS.every((seed) => {
                 const bit = fnv1a(w, seed);
-                return (bloom[bit >> 3] >> (bit & 7)) & 1;
+                return (table[bit >> 3] >> (bit & 7)) & 1;
             });
             if (hit) known++;
         }
@@ -173,7 +184,7 @@ export function createAbstentionScorer(asset, bloomBytes) {
         // fits them together), so coverageCfg.topK already covers both.
         usesPassage: !!coverageCfg,
         passagesNeeded: coverageCfg ? (coverageCfg.topK || 1) : 0,
-        async score(queryText, results, passageTexts) {
+        async score(queryText, results, passageTexts, options = {}) {
             // Fit at build time (pikelet/src/calibrate.mjs) always scores a
             // fixed top-10 window (K = min(10, candidates)), independent of
             // whatever k a caller later passes to query(). Slicing to the
@@ -187,7 +198,7 @@ export function createAbstentionScorer(asset, bloomBytes) {
                 ? top[Math.min(4, top.length - 1)].distance - d0 : 0;
             const mean10 = top.length
                 ? top.reduce((s, r) => s + r.distance, 0) / top.length : 1;
-            const signals = { d0, margin, mean10, known_frac: knownFrac(queryText) };
+            const signals = { d0, margin, mean10, known_frac: knownFrac(queryText, options.vocabBloom) };
             let z = asset.bias;
             asset.features.forEach((f, j) => {
                 z += ((signals[f] - asset.standardize.mean[f]) / asset.standardize.std[f]) * asset.weights[j];

@@ -117,15 +117,38 @@ export function planLayer({
     };
     for (const id of remove) setOne(id, '--remove');
 
+    // Each pair is [oldId, target]. `target` is the CALLER's way of naming
+    // which new record supersedes oldId: a number is a resolved local index
+    // into this layer's own records, which the producer computed by matching
+    // the --supersede path against the chunks that path produced. A
+    // non-numeric target (a raw path the producer could not resolve) falls
+    // back to positional assignment, which is what this did for every pair —
+    // so `--supersede 5=a.md --supersede 9=b.md` bound 5 to whichever chunk
+    // happened to land first, regardless of which file produced it.
     const supersessions = [];
     let nextNewId = rowBase;
-    for (const [oldId] of supersede) {
-        if (nextNewId >= rowBase + newRecordCount) {
-            throw new Error('more --supersede pairs than new records: every newId must lie in this layer\'s own id range (3.5)');
+    const claimed = new Set();
+    for (const [oldId, target] of supersede) {
+        let newId;
+        if (Number.isSafeInteger(target)) {
+            if (target < 0 || target >= newRecordCount) {
+                throw new Error(`--supersede resolved to local record ${target}, outside this layer's ${newRecordCount} record(s) (3.5)`);
+            }
+            newId = rowBase + target;
+            if (claimed.has(newId)) {
+                throw new Error(`--supersede maps two old ids onto new record ${newId}: each new record supersedes at most one predecessor (3.5)`);
+            }
+        } else {
+            while (claimed.has(nextNewId)) nextNewId += 1;
+            if (nextNewId >= rowBase + newRecordCount) {
+                throw new Error('more --supersede pairs than new records: every newId must lie in this layer\'s own id range (3.5)');
+            }
+            newId = nextNewId;
+            nextNewId += 1;
         }
         setOne(oldId, '--supersede');
-        supersessions.push([oldId, nextNewId]);
-        nextNewId += 1;
+        supersessions.push([oldId, newId]);
+        claimed.add(newId);
     }
     // 3.5: within one layer each oldId appears at most once.
     const seen = new Set();

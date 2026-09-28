@@ -280,11 +280,29 @@ export async function openPikeletChain(members, options = {}) {
                         // openLexicalIndex's search is sync; the LAZY opener
                         // used for a large segment (the wiki pack's is 69 MB)
                         // returns a promise. Awaiting covers both.
-                        const hits = await lex.search(queryOptions.text, 24);
+                        // 5.3: a tombstoned row must not occupy a lexical
+                        // slot BEFORE the cap. The mask goes into search() so
+                        // it is applied while postings score; filtering the
+                        // returned hits instead capped first and masked after,
+                        // so a tier whose top-24 were all tombstoned
+                        // contributed nothing while live rows ranked 25+ were
+                        // thrown away.
+                        //
+                        // 5.4: the chain-global {docCount, avgdl} drive IDF and
+                        // length normalization, so scores from different tiers
+                        // are comparable before fusion. These were computed at
+                        // mount, reported in info().lexical, and never applied.
+                        const tierMask = masks[j];
+                        const hits = await lex.search(queryOptions.text, 24, {
+                            exclude: maskCounts[j] > 0 ? (id) => bitAt(tierMask, id) : undefined,
+                            // globalLexicalStats names the corpus size `N`;
+                            // search() takes `docCount`. Mapping it here
+                            // rather than reading `stats.docCount` off
+                            // lexStats, which is undefined and would fall
+                            // back to the tier's own count without a word.
+                            stats: { docCount: lexStats.N, avgdl: lexStats.avgdl },
+                        });
                         for (const h of hits) {
-                            // A tombstoned row must not occupy a lexical slot
-                            // before the cap (5.3), so skip as postings score.
-                            if (bitAt(masks[j], h.id)) continue;
                             merged.push({ id: searchTiers[j].rowBase + h.id, score: h.score });
                         }
                     }
@@ -322,7 +340,18 @@ export async function openPikeletChain(members, options = {}) {
                         const rec = await searchTiers[owner.tier.tier].reader.hydrate(owner.localId);
                         return rec?.text ?? '';
                     }));
-                    const scored = await base.scoreQuality(searched, { text: queryOptions.text ?? '', vector, passages }, fused);
+                    // 4.5 is normative: "A reader MUST compute the union
+                    // before scoring." The union was computed at mount and
+                    // then never reached the scorer, so known_frac was
+                    // measured against the base's vocabulary alone and
+                    // under-read every query about a layer's content —
+                    // exactly the records a layer is published to add.
+                    const scored = await base.scoreQuality(
+                        searched,
+                        { text: queryOptions.text ?? '', vector, passages },
+                        fused,
+                        { vocabBloom: chainBloom },
+                    );
                     if (scored && scored.match_quality) {
                         matchQuality = scored.match_quality;
                         if (Number.isFinite(scored.confidence)) confidence = scored.confidence;
@@ -370,6 +399,25 @@ export async function openPikeletChain(members, options = {}) {
             citation(identity, id) {
                 assertOpen();
                 return resolveCitation(ancestry, identity, id);
+            },
+
+            /**
+             * 6.2: a chain has no evaluation segment of its own, so this
+             * surfaces the BASE's, tagged with where it came from. Callers use
+             * it to run goldens against the chain; a golden written for the
+             * base may legitimately fail here, because a layer can tombstone
+             * or supersede the record it expects, so `evaluationScope` says
+             * the material is the base's and not the chain's.
+             *
+             * Before this existed `verify_pack` called `search.evaluation()`
+             * on a chain and got a TypeError.
+             */
+            async evaluation() {
+                assertOpen();
+                if (typeof base.evaluation !== 'function') return null;
+                const ev = await base.evaluation();
+                if (!ev) return null;
+                return { ...ev, evaluationScope: 'base', evaluationIdentity: base.identity };
             },
 
             chainBloom() { assertOpen(); return chainBloom; },

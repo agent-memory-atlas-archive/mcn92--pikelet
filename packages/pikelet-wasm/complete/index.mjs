@@ -552,6 +552,27 @@ export async function openPikeletFile(input, options = {}) {
             }
             expectedOffset = align16(offset + length);
         }
+        // The evaluation segment, read and hash-verified. Named so both the
+        // reader's own evaluation() and the __chainTier seam can reach it: a
+        // chain has no evaluation segment of its own, and `verify_pack` called
+        // `search.evaluation()` on a chain reader that had no such method,
+        // which threw a TypeError instead of reporting the base's goldens.
+        const readEvaluationSegment = async () => {
+            const ev = segments.get('evaluation');
+            if (!ev) return null;
+            const bytes = await readChecked(source, ev.offset, ev.length, 'evaluation segment', maxReadBytes, fileBytes);
+            if (await sha256hex(bytes) !== ev.sha256) {
+                throw new Error('.pikelet evaluation segment failed hash verification');
+            }
+            let parsed;
+            try { parsed = JSON.parse(decoder.decode(bytes)); } catch (err) {
+                throw new Error('.pikelet evaluation segment is not valid JSON', { cause: err });
+            }
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('.pikelet evaluation segment must be a JSON object');
+            }
+            return parsed;
+        };
         // Required segments are per-profile (layered profile 4.3). A layer with
         // records carries a tombstones segment on top of the complete set; a
         // TOMBSTONE-ONLY layer has neither an index nor a corpus segment and is
@@ -741,7 +762,7 @@ export async function openPikeletFile(input, options = {}) {
         const retrievalScorer = () => {
             const scorer = createAbstentionScorer(calibrationJson.asset, base64Bytes(calibrationJson.vocabBloomBase64));
             const VERDICTS = { answer: 'strong', weak: 'weak', abstain: 'none' };
-            return async (hits, context, fusedHits) => {
+            return async (hits, context, fusedHits, scoreOptions) => {
                 if (!scorer) return { match_quality: 'unscored' };
                 // The coverage term grounds the verdict in the top passages'
                 // text, so those records hydrate before scoring. Hydrated
@@ -781,7 +802,12 @@ export async function openPikeletFile(input, options = {}) {
                         ? (await Promise.all(passageSource.slice(0, scorer.passagesNeeded || 1)
                             .map((hit) => hydrate(hit.id)))).map((record) => splitHeadingBody(record?.text))
                         : [];
-                const scored = await scorer.score(context.text, hits, topTexts);
+                // scoreOptions.vocabBloom is the chain's union bloom (4.5).
+                // Absent for a single-file pack, where the fit's own bloom is
+                // the whole vocabulary.
+                const scored = await scorer.score(context.text, hits, topTexts, {
+                    vocabBloom: scoreOptions?.vocabBloom,
+                });
                 return { match_quality: VERDICTS[scored.verdict] || scored.verdict, confidence: scored.p, grounding: scored.grounding || null };
             };
         };
@@ -1339,20 +1365,7 @@ export async function openPikeletFile(input, options = {}) {
 
             async evaluation() {
                 assertOpen();
-                const ev = segments.get('evaluation');
-                if (!ev) return null;
-                const bytes = await readChecked(source, ev.offset, ev.length, 'evaluation segment', maxReadBytes, fileBytes);
-                if (await sha256hex(bytes) !== ev.sha256) {
-                    throw new Error('.pikelet evaluation segment failed hash verification');
-                }
-                let parsed;
-                try { parsed = JSON.parse(decoder.decode(bytes)); } catch (err) {
-                    throw new Error('.pikelet evaluation segment is not valid JSON', { cause: err });
-                }
-                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                    throw new Error('.pikelet evaluation segment must be a JSON object');
-                }
-                return parsed;
+                return readEvaluationSegment();
             },
 
             /**
@@ -1384,6 +1397,9 @@ export async function openPikeletFile(input, options = {}) {
                     // encoderInfo.kind loses kind 2, whose encoderInfo is
                     // shaped by the host declaration rather than a fixed name.
                     qiKind,
+                    // This member's own evaluation segment, hash-verified.
+                    // A chain surfaces the base's through it (6.2).
+                    evaluation: readEvaluationSegment,
                     // The tier's staged WASM scan kernel, or null before
                     // background staging resolves. A chain queries
                     // sketch.search directly, so without passing this through

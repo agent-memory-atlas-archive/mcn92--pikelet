@@ -1400,6 +1400,85 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
     })());
     await c1.close();
 
+    // 5.3/5.4: the tombstone mask must reach the lexical index BEFORE its cap,
+    // and the chain-global stats must actually drive scoring. Both were
+    // computed and then dropped: hits were capped at 24 per tier and filtered
+    // afterwards, so a tier whose top-24 were all tombstoned contributed
+    // nothing, and info().lexical reported stats no query used.
+    {
+        const { openLexicalIndex } = await import('../packages/pikelet-wasm/complete/lexical.mjs');
+        // 30 docs all matching 'widget'; the first five score highest.
+        const texts = [];
+        for (let i = 0; i < 30; i++) {
+            texts.push(i < 5 ? 'widget widget widget widget' : 'widget filler filler filler filler filler');
+        }
+        const built = buildLexSeg(texts);
+        const lex = openLexicalIndex(built.bytes ?? built);
+        const top5 = lex.search('widget', 5).map((h) => h.id);
+        const dead = new Set(top5);
+        const refilled = lex.search('widget', 5, { exclude: (id) => dead.has(id) });
+        check('excluding the top hits refills the cap from live rows',
+            refilled.length === 5 && refilled.every((h) => !dead.has(h.id)),
+            `got ${refilled.length} hits: ${refilled.map((h) => h.id).join(',')} (capping before the mask returns 0)`);
+        const own = lex.search('widget', 3);
+        const global = lex.search('widget', 3, { stats: { docCount: 100000, avgdl: 50 } });
+        check('chain-global docCount/avgdl change the BM25 score',
+            own[0].score !== global[0].score,
+            `own ${own[0].score}, global ${global[0].score} — equal means stats were ignored`);
+    }
+
+    // 4.5's normative MUST: the union has to reach the SCORER, not merely be
+    // computed. This asserted only that chainBloom() held the right bits,
+    // which stayed true for the whole time the reader built the union and then
+    // scored against the base's bloom alone. Assert the seam itself: an
+    // override changes known_frac, and a wrong-sized one is refused rather
+    // than silently probing the wrong bit positions.
+    {
+        const { createAbstentionScorer } = await import('../packages/pikelet-wasm/complete/retrieval-abstention.mjs');
+        const BITS = 1024;
+        const fnv = (str, seed) => {
+            let h = 0x811c9dc5 ^ seed;
+            for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+            return (h >>> 0) % BITS;
+        };
+        const bloomFor = (words) => {
+            const b = new Uint8Array(BITS / 8);
+            for (const w of words) for (const seed of [0, 0x9e3779b9]) { const bit = fnv(w, seed); b[bit >> 3] |= 1 << (bit & 7); }
+            return b;
+        };
+        // known_frac only, with the shipped model's NEGATIVE sign, so a
+        // vocabulary the chain knows pushes toward abstention.
+        const asset = {
+            bias: 0, features: ['d0', 'margin', 'mean10', 'known_frac'], weights: [0, 0, 0, -2],
+            standardize: {
+                mean: { d0: 0, margin: 0, mean10: 0, known_frac: 0 },
+                std: { d0: 1, margin: 1, mean10: 1, known_frac: 1 },
+            },
+            thresholds: { answer: 0.9, weak: 0.4 }, vocabBloom: { bits: BITS },
+        };
+        const baseBloom = bloomFor(['alpha', 'beta']);
+        const layerBloom = bloomFor(['gamma', 'delta']);
+        const union = new Uint8Array(baseBloom);
+        for (let i = 0; i < union.length; i++) union[i] |= layerBloom[i];
+
+        const scorer = createAbstentionScorer(asset, baseBloom);
+        const hits = [{ distance: 0.2 }, { distance: 0.3 }, { distance: 0.4 }];
+        // A query whose words live only in the LAYER's vocabulary.
+        const baseOnly = await scorer.score('gamma delta', hits, []);
+        const withUnion = await scorer.score('gamma delta', hits, [], { vocabBloom: union });
+        check('the union bloom changes known_frac when passed to the scorer',
+            baseOnly.p !== withUnion.p,
+            `base-only p ${baseOnly.p}, union p ${withUnion.p} — equal means the override was ignored`);
+        check('scoring against the base bloom alone over-answers a layer-vocabulary query',
+            baseOnly.p > withUnion.p,
+            `base-only p ${baseOnly.p} should exceed union p ${withUnion.p} at a negative known_frac weight`);
+        let refused = null;
+        try { await scorer.score('gamma delta', hits, [], { vocabBloom: new Uint8Array(union.length + 1) }); }
+        catch (err) { refused = err.message; }
+        check('a bloom override of the wrong geometry is refused',
+            refused !== null && /probe the wrong bits/.test(refused), String(refused));
+    }
+
     // 30 appended = 0.30 drift, past the reader's 0.20 default.
     const l2 = buildLayer(b1, 30, 'big');
     const c2 = await openPikeletChain([b1.outPath, l2.outPath]);
@@ -1501,6 +1580,25 @@ console.log('append: id assignment, mask and supersessions (6.1 steps 4-5)');
         JSON.stringify(sup.supersessions) === JSON.stringify([[10, 100], [20, 101]]));
     check('a superseded oldId is tombstoned by the same step',
         testBit(sup.bitset, 10) && testBit(sup.bitset, 20));
+
+    // A resolved numeric target binds oldId to a SPECIFIC new record. Before
+    // this, every pair was assigned positionally and the second element of the
+    // pair -- the --supersede path -- was destructured away, so which file
+    // replaced which record was decided by argument order.
+    const supResolved = planLayer({ ...common, newRecordCount: 3, supersede: [[10, 2], [20, 0]] });
+    check('a resolved supersede target binds oldId to that new record',
+        JSON.stringify(supResolved.supersessions) === JSON.stringify([[10, 102], [20, 100]]),
+        JSON.stringify(supResolved.supersessions));
+    const supMixed = planLayer({ ...common, newRecordCount: 3, supersede: [[10, 1], [20, 'b.md']] });
+    check('an unresolved target falls back to a slot the resolved ones did not claim',
+        JSON.stringify(supMixed.supersessions) === JSON.stringify([[10, 101], [20, 100]]),
+        JSON.stringify(supMixed.supersessions));
+    rejects('a resolved target outside the layer\'s own records is refused',
+        () => planLayer({ ...common, newRecordCount: 2, supersede: [[10, 5]] }),
+        /outside this layer's 2 record\(s\)/);
+    rejects('two old ids resolving onto one new record is refused',
+        () => planLayer({ ...common, newRecordCount: 3, supersede: [[10, 1], [20, 1]] }),
+        /each new record supersedes at most one predecessor/);
 
     rejects('removing an id at or above rowBase is refused',
         () => planLayer({ ...common, newRecordCount: 5, remove: [100] }),

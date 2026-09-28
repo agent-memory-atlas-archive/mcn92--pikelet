@@ -134,7 +134,20 @@ export async function openLexicalIndexLazy(read, segLength) {
         termCount,
         totalTokens,
         lazy: true,
-        async search(text, n) {
+        // `options.exclude(id)` drops a row BEFORE the cap, and
+        // `options.stats` supplies chain-global {docCount, avgdl} for IDF and
+        // length normalization. Both exist for the layered profile
+        // (LAYERED_PROFILE.md 5.3, 5.4): a chain used to cap each tier at n
+        // and mask afterwards, so a tier whose top-n were all tombstoned
+        // contributed nothing while live rows below the cap were discarded;
+        // and each tier scored BM25 against its own docCount, making scores
+        // from different tiers incomparable before fusion.
+        async search(text, n, options = {}) {
+            const exclude = typeof options.exclude === 'function' ? options.exclude : null;
+            const statDocCount = Number.isFinite(options.stats?.docCount) && options.stats.docCount > 0
+                ? options.stats.docCount : docCount;
+            const statAvgdl = Number.isFinite(options.stats?.avgdl) && options.stats.avgdl > 0
+                ? options.stats.avgdl : avgdl;
             const terms = [...new Set(tokenize(text))];
             if (!terms.length || docCount === 0) return [];
             const found = (await Promise.all(terms.map((t) => findTerm(fnv1a32(t, 0), fnv1a32(t, 0x9e3779b9)))))
@@ -144,7 +157,7 @@ export async function openLexicalIndexLazy(read, segLength) {
             const scores = new Map();
             found.forEach((e, i) => {
                 const bytes = postings[i];
-                const idf = Math.log(1 + (docCount - e.df + 0.5) / (e.df + 0.5));
+                const idf = Math.log(1 + (statDocCount - e.df + 0.5) / (e.df + 0.5));
                 const cursor = { at: 0, end: bytes.length };
                 const readVarint = () => {
                     let value = 0;
@@ -163,8 +176,9 @@ export async function openLexicalIndexLazy(read, segLength) {
                     docId = p === 0 ? readVarint() : docId + readVarint();
                     const tf = readVarint();
                     if (docId >= docCount) throw new Error('.pikelet lexical postings doc id out of range');
+                    if (exclude && exclude(docId)) continue;
                     const dl = doclenOf(docId);
-                    const norm = tf + BM25_K1 * (1 - BM25_B + (BM25_B * dl) / avgdl);
+                    const norm = tf + BM25_K1 * (1 - BM25_B + (BM25_B * dl) / statAvgdl);
                     scores.set(docId, (scores.get(docId) || 0) + (idf * tf * (BM25_K1 + 1)) / norm);
                 }
             });
@@ -232,7 +246,20 @@ export function openLexicalIndex(bytes) {
         totalTokens,
         // BM25 over the query's unique tokens; returns [{id, score}] sorted
         // by score descending (ties by id), at most n entries.
-        search(text, n) {
+        // `options.exclude(id)` drops a row BEFORE the cap, and
+        // `options.stats` supplies chain-global {docCount, avgdl} for IDF and
+        // length normalization. Both exist for the layered profile
+        // (LAYERED_PROFILE.md 5.3, 5.4): a chain used to cap each tier at n
+        // and mask afterwards, so a tier whose top-n were all tombstoned
+        // contributed nothing while live rows below the cap were discarded;
+        // and each tier scored BM25 against its own docCount, making scores
+        // from different tiers incomparable before fusion.
+        search(text, n, options = {}) {
+            const exclude = typeof options.exclude === 'function' ? options.exclude : null;
+            const statDocCount = Number.isFinite(options.stats?.docCount) && options.stats.docCount > 0
+                ? options.stats.docCount : docCount;
+            const statAvgdl = Number.isFinite(options.stats?.avgdl) && options.stats.avgdl > 0
+                ? options.stats.avgdl : avgdl;
             const terms = [...new Set(tokenize(text))];
             if (!terms.length || docCount === 0) return [];
             const scores = new Map();
@@ -243,15 +270,16 @@ export function openLexicalIndex(bytes) {
                 const len = view.getUint32(entryAt(i) + 16, true);
                 const df = view.getUint32(entryAt(i) + 20, true);
                 if (rel + len > postingsBytes) throw new Error('.pikelet lexical postings out of bounds');
-                const idf = Math.log(1 + (docCount - df + 0.5) / (df + 0.5));
+                const idf = Math.log(1 + (statDocCount - df + 0.5) / (df + 0.5));
                 const cursor = { at: postingsOffset + rel, end: postingsOffset + rel + len };
                 let docId = 0;
                 for (let p = 0; p < df; p++) {
                     docId = p === 0 ? readVarint(cursor) : docId + readVarint(cursor);
                     const tf = readVarint(cursor);
                     if (docId >= docCount) throw new Error('.pikelet lexical postings doc id out of range');
+                    if (exclude && exclude(docId)) continue;
                     const dl = view.getUint32(doclenOffset + 4 * docId, true);
-                    const norm = tf + BM25_K1 * (1 - BM25_B + (BM25_B * dl) / avgdl);
+                    const norm = tf + BM25_K1 * (1 - BM25_B + (BM25_B * dl) / statAvgdl);
                     scores.set(docId, (scores.get(docId) || 0) + (idf * tf * (BM25_K1 + 1)) / norm);
                 }
             }
