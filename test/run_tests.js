@@ -3302,7 +3302,8 @@ async function testFloatUint8DeleteCompactParity() {
     const queries = seededParityVectors(20, cfg.dim, 88);
 
     // Heavy deletion (>= half) drives the rebuild path in compact(): a fresh
-    // graph is constructed with the same seed, so the post-compact skeleton
+    // graph is constructed, reseeded with the seed this index was created
+    // with (both backends retain it in seed_), so the post-compact skeleton
     // must again match exactly across backends.
     {
         const pair = await buildParityPair(vectors, cfg);
