@@ -1,0 +1,31 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "nfcorpus",
+  "configuration": "E-workersai",
+  "num_queries_scored": 323,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.3568938572743132,
+    "recall_at_10": 0.16819076009632514,
+    "recall_at_100": 0.317214686710097
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "build_ms": 807.8818879999999,
+    "rerank": 256,
+    "fusion": {
+      "rrfK": 60,
+      "lexicalWeight": 0.5,
+      "guardMargin": 0.05
+    },
+    "rrf_k": 60,
+    "lexical_cutoff": 1.5,
+    "median_ms": 5.120138000000225,
+    "p95_ms": 17.272640000000138,
+    "num_queries": 323
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}

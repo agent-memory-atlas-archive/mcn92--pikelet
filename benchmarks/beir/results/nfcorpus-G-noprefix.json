@@ -1,0 +1,24 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "nfcorpus",
+  "configuration": "G-noprefix",
+  "num_queries_scored": 323,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.1545976058263697,
+    "recall_at_10": 0.07769342756611862,
+    "recall_at_100": 0.1817613064333486
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "build_ms": 1038.499411,
+    "rerank": 256,
+    "median_ms": 5.537551999999778,
+    "p95_ms": 12.21614999999997,
+    "num_queries": 323
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}

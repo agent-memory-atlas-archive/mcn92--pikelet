@@ -1,0 +1,24 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "fiqa",
+  "configuration": "D",
+  "num_queries_scored": 648,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.3568796606303084,
+    "recall_at_10": 0.4268372616752245,
+    "recall_at_100": 0.6992925541536656
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "build_ms": 25819.956567,
+    "ef_search": 64,
+    "median_ms": 0.38564899999983027,
+    "p95_ms": 0.5491739999997662,
+    "num_queries": 648
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}

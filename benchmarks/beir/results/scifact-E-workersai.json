@@ -1,0 +1,31 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "scifact",
+  "configuration": "E-workersai",
+  "num_queries_scored": 300,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.729812231166682,
+    "recall_at_10": 0.8495555555555556,
+    "recall_at_100": 0.9416666666666667
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "build_ms": 1315.827287,
+    "rerank": 256,
+    "fusion": {
+      "rrfK": 60,
+      "lexicalWeight": 0.5,
+      "guardMargin": 0.05
+    },
+    "rrf_k": 60,
+    "lexical_cutoff": 1.5,
+    "median_ms": 8.213722999999845,
+    "p95_ms": 24.541160000000218,
+    "num_queries": 300
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}

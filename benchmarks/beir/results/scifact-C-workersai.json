@@ -1,0 +1,22 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "scifact",
+  "configuration": "C-workersai",
+  "num_queries_scored": 300,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.7050999608243675,
+    "recall_at_10": 0.8262222222222223,
+    "recall_at_100": 0.9466666666666667
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "median_ms": 3.7381110000000035,
+    "p95_ms": 4.961243999999851,
+    "num_queries": 300
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}

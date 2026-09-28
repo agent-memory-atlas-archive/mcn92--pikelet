@@ -1,0 +1,26 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "arguana",
+  "configuration": "H",
+  "num_queries_scored": 1406,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.37883302475874925,
+    "recall_at_10": 0.7681365576102418,
+    "recall_at_100": 0.9566145092460882
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "build_ms": 2119.932673,
+    "rerank": 256,
+    "rrf_k": 60,
+    "lexical_cutoff": 1.5,
+    "median_ms": 17.46632800000225,
+    "p95_ms": 24.785099000000628,
+    "num_queries": 1406
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}

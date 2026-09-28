@@ -1,0 +1,24 @@
+{
+  "benchmark": "BEIR",
+  "dataset": "scifact",
+  "configuration": "G",
+  "num_queries_scored": 300,
+  "num_queries_missing": 0,
+  "metrics": {
+    "ndcg_at_10": 0.6427011347415886,
+    "recall_at_10": 0.77,
+    "recall_at_100": 0.8620000000000001
+  },
+  "system": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "build_ms": 1619.293036,
+    "rerank": 256,
+    "median_ms": 7.776937999999973,
+    "p95_ms": 22.653767999999673,
+    "num_queries": 300
+  },
+  "config_snapshot": null,
+  "pikelet_commit": null,
+  "pack_hash": null
+}
