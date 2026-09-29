@@ -74,6 +74,9 @@
     "./complete/tombstones.mjs": {
       "default": "./complete/tombstones.mjs"
     },
+    "./complete/format.mjs": {
+      "default": "./complete/format.mjs"
+    },
     "./complete/layer-manifest.mjs": {
       "default": "./complete/layer-manifest.mjs"
     },

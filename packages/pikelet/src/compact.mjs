@@ -258,27 +258,239 @@ export async function compactChain(flags) {
   }
 }
 
-export async function rebaseLayer() {
-  // 6.2's rules are implemented and conformance-tested in
-  // pikelet-wasm/complete/layer-rebase.mjs: fork point, delta replay, foreign
-  // ids, the conflict policies and the terminal empty rule.
+export async function rebaseLayer(flags) {
+  // 6.2: recompile a layer onto a different head. The layer's BYTES are copied
+  // verbatim — u8 rows, sketch, records, postings, vocabulary bloom — and
+  // nothing is re-embedded; local ids do not change. What is recomputed is the
+  // layer's position in a new history: rowBase, the cumulative bitset, the
+  // supersession edges (translated and conflict-resolved) and the manifest.
   //
-  // The row readback this used to blame is no longer missing — `compact` copies
-  // rows verbatim through the chain's __fetchRows seam, and a rebase would use
-  // the same one. What is actually missing is the command: planRebase needs the
-  // layer's ORIGINAL PARENT bitset, so rebase must mount three things (the old
-  // chain the layer was cut against, the new head chain, and the layer itself)
-  // and then apply the fork-point and conflict policy across them. None of that
-  // has a flag surface yet — `rebase` is absent from printHelp, so --layer,
-  // --onto, --on-foreign and --on-conflict would be designed here rather than
-  // connected. That is a command to design, not a call to wire, and doing it
-  // badly is worse than refusing.
-  throw new CliError(
-    'rebase is not wired as a command yet. Its rules (fork point, delta replay, foreign ids, '
-    + 'conflicts, the terminal empty rule) are implemented and tested in '
-    + 'pikelet-wasm/complete/layer-rebase.mjs, and the verbatim row copy it needs now exists '
-    + '(the same readback `compact` uses). What is missing is the command around them: a rebase '
-    + 'mounts the layer\'s original parent as well as the new head, and that flag surface is '
-    + 'not designed yet.',
-  );
+  // The rules live in pikelet-wasm/complete/layer-rebase.mjs and are
+  // conformance-tested there. This is the command around them: it mounts three
+  // artifacts, because computing what the layer DID (rather than what it
+  // inherited) needs the layer's ORIGINAL parent as well as the new head.
+  if (!flags.layer) throw new CliError('rebase requires --layer <file>: the layer to move');
+  if (!flags.onto) throw new CliError('rebase requires --onto <file|...>: the new head, base-first for a chain');
+  if (!flags.out) throw new CliError('rebase requires --out <file>');
+  const outPath = path.resolve(process.cwd(), flags.out);
+  if (fssync.existsSync(outPath) && !flags.force) {
+    throw new CliError(`Output file already exists: ${outPath}\nNext: rerun with --force or choose --out`);
+  }
+  const onConflict = flags['on-conflict'] || 'refuse';
+  const onForeign = flags['on-foreign'] || 'refuse';
+
+  const { loadCompleteModules, resolveChainMembers } = await import('./common.mjs');
+  const { builder } = await loadCompleteModules();
+  const { openPikeletChain } = await import('pikelet-wasm/complete/layer-reader.mjs');
+  const { readMemberManifest } = await import('pikelet-wasm/complete');
+  const { planRebase, forkPoint, checkRebasePreconditions, ON_CONFLICT, ON_FOREIGN } =
+    await import('pikelet-wasm/complete/layer-rebase.mjs');
+  const { buildLayerSegments } = await import('pikelet-wasm/complete/layer-append.mjs');
+  const { chainIngestDeclaration } = await import('pikelet-wasm/complete/layer-manifest.mjs');
+
+  for (const [flag, value, allowed] of [['--on-conflict', onConflict, Object.values(ON_CONFLICT)],
+    ['--on-foreign', onForeign, Object.values(ON_FOREIGN)]]) {
+    if (!allowed.includes(value)) throw new CliError(`${flag} must be one of ${allowed.join(', ')}`);
+  }
+
+  // --- 1. The layer, read as a manifest only: it is not mountable alone ------
+  const layerPath = (await resolveChainMembers([flags.layer], log))[0];
+  const layerPeek = await readMemberManifest(layerPath);
+  if (!layerPeek.isLayer) throw new CliError(`${flags.layer} is not a layer (profile ${layerPeek.manifest.profile})`);
+  const L = layerPeek.manifest.layer;
+  log(`Layer ${layerPeek.identity.slice(0, 12)}…: depth ${L.depth}, rowBase ${L.rowBase}, `
+    + `${L.records} record(s), ${L.tombstones} tombstone(s), ${L.supersessions ?? 0} edge(s)`);
+
+  // --- 2. The layer's ORIGINAL parent chain (6.2) ----------------------------
+  // "To compute ΔT_L the rebase MUST open L's original parent by
+  // L.layer.parent.identity; if that artifact is unavailable, the delta is
+  // unknowable and the rebase MUST refuse." T_L is cumulative; replaying it
+  // would import ancestors' operations into a branch that never performed them.
+  const oldParentSpec = flags['old-parent']
+    ? [].concat(flags['old-parent'])
+    : (L.parent?.locator ? [path.resolve(path.dirname(layerPath), L.parent.locator)] : null);
+  if (!oldParentSpec) {
+    throw new CliError('rebase needs the layer\'s original parent to compute what the layer itself deleted '
+      + `(6.2). The layer names parent ${String(L.parent?.identity).slice(0, 12)}… but carries no locator; `
+      + 'pass --old-parent <file> [--old-parent <layer> ...], base-first.');
+  }
+  const oldChainMembers = await resolveChainMembers(oldParentSpec, log);
+  let oldParent;
+  try {
+    oldParent = await openPikeletChain(oldChainMembers, { followParents: false });
+  } catch (err) {
+    // 6.2: "if that artifact is unavailable, the delta is unknowable and the
+    // rebase MUST refuse." Say that, rather than leaking an ENOENT: the
+    // operator needs to know WHY the file matters, since the obvious next move
+    // (rebase the cumulative bitset instead) is the thing Draft 2 got wrong.
+    throw new CliError(`cannot open the layer's original parent `
+      + `${String(L.parent?.identity).slice(0, 12)}… (${err.message}). A rebase replays what the layer `
+      + 'itself deleted, which is its cumulative mask MINUS its parent\'s; without the parent that '
+      + 'difference is unknowable, and replaying the cumulative mask would import its ancestors\' '
+      + 'deletions into a history that never performed them (6.2). Pass --old-parent <file> '
+      + '[--old-parent <layer> ...], base-first.');
+  }
+  let head = null;
+  try {
+    const oldInfo = oldParent.info();
+    if (oldInfo.identity !== L.parent.identity) {
+      throw new CliError(`the original parent resolved to ${oldInfo.identity.slice(0, 12)}… but the layer `
+        + `commits to ${String(L.parent.identity).slice(0, 12)}…: that is not the parent this layer was cut against (6.2)`);
+    }
+    const oldHead = oldParent.__head;
+    log(`Original parent: ${oldInfo.layers} member(s), ${oldInfo.records} rows, depth ${oldInfo.layers - 1}`);
+
+    // --- 3. The new head ----------------------------------------------------
+    head = await openPikeletChain(await resolveChainMembers([].concat(flags.onto), log));
+    const headInfo = head.info();
+    const H = head.__head;
+    log(`New head: ${headInfo.layers} member(s), ${headInfo.records} rows, depth ${headInfo.layers - 1}`);
+
+    // --- 4. Preconditions (6.2) --------------------------------------------
+    // Each history's chain declaration in the {canonical, asserted} form the
+    // check compares. The head's is the one validated at its mount, or its
+    // base's corpus.ingest when it is a lone base (null for a legacy base).
+    // The layer's history is its original parent PLUS the layer, so when that
+    // parent is a lone legacy base the layer itself is the depth-1 member that
+    // asserts the declaration.
+    const baseDecl = (ingest) => (ingest == null ? null
+      : chainIngestDeclaration({ corpus: { ingest } }, null));
+    const headChainDecl = H.chainIngest ?? baseDecl(H.corpusIngest);
+    let layerChainDecl;
+    try {
+      layerChainDecl = oldHead.chainIngest
+        ?? chainIngestDeclaration({ corpus: { ingest: oldHead.corpusIngest } }, layerPeek.manifest);
+    } catch (err) {
+      throw new CliError(`rebase refuses: ${err.message}`);
+    }
+    const decl = checkRebasePreconditions({
+      layerManifest: layerPeek.manifest,
+      headChainDecl,
+      layerChainDecl,
+      headIsLegacyBase: headInfo.layers === 1 && H.corpusIngest == null,
+      headBaseIdentity: headInfo.baseIdentity,
+      layerBaseIdentity: L.baseIdentity,
+    });
+
+    // The fork point is the longest common prefix BY IDENTITY, base first.
+    const fork = forkPoint(oldInfo.members, headInfo.members);
+    log(`Fork point: ${fork.sharedPrefix} shared member(s), forkRowBase ${fork.forkRowBase}`);
+
+    // --- 5. Plan -----------------------------------------------------------
+    const plan = planRebase({
+      layerBitset: await layerCumulativeBitset(layerPath, L),
+      oldParentBitset: oldHead.bitset,
+      oldRowBase: L.rowBase,
+      layerRecords: L.records,
+      layerSupersessions: await layerOwnEdges(layerPath, L),
+      newRowBase: H.rowBase + H.records,
+      headBitset: H.bitset,
+      headSupersessions: headEdgeMap(headInfo, head),
+      forkRowBase: fork.forkRowBase,
+      onForeign, onConflict,
+    });
+    if (plan.droppedForeign?.length) {
+      log(`Dropped ${plan.droppedForeign.length} foreign id(s) at --on-foreign drop: ${plan.droppedForeign.join(', ')}`);
+    }
+    if (plan.skippedEdges?.length) {
+      // skippedEdges holds the conflicting OLD ids (planRebase pushes x, not a
+      // pair), and each y stays as an ordinary appended record (6.2).
+      log(`Skipped ${plan.skippedEdges.length} conflicting edge(s) at --on-conflict skip: `
+        + `id(s) ${plan.skippedEdges.join(', ')} keep the head's successor; this layer's replacement `
+        + 'stays as an ordinary record');
+    }
+    // 6.2's terminal rule.
+    if (!plan.emit) {
+      log('Nothing to emit: the rebased operation is empty because the target history already '
+        + 'represents it (every deletion this layer introduced is already performed on the new head, '
+        + 'and the layer adds no records). No file written (6.2).');
+      return;
+    }
+    log(`Planned rebase: rowBase ${L.rowBase} -> ${plan.newRowBase}, ${plan.records} record(s) copied verbatim, `
+      + `${plan.tombstones} tombstone(s) (${plan.newlySet.length} newly set), ${plan.supersessions.length} edge(s)`);
+
+    // --- 6. Copy the layer's own segments VERBATIM (6.2) --------------------
+    const carried = await copyLayerSegments(layerPath);
+    const segments = buildLayerSegments({
+      plan: { ...plan, depth: headInfo.layers, rowBase: plan.newRowBase, tombstoneOnly: plan.records === 0 },
+      baseIdentity: headInfo.baseIdentity,
+      parentIdentity: headInfo.identity,
+      baseQueryInterpSha256: H.baseQueryInterpSha256,
+      parentLocator: flags['parent-locator'] || null,
+      // What the precondition resolved against the NEW history, not the
+      // layer's own flags: a layer rebased from depth 2 onto a legacy base
+      // becomes the depth-1 member and must carry the assertion.
+      ingest: decl.ingest,
+      ingestAsserted: decl.ingestAsserted,
+      dim: layerPeek.manifest.dim,
+      metric: layerPeek.manifest.metric,
+      encoder: layerPeek.manifest.encoder,
+      corpus: layerPeek.manifest.corpus,
+      layerBloom: null,   // the bloom rides in the copied query-interp segment
+    });
+
+    const written = builder.assemblePikeletFile(segments.manifestFields, [
+      ...(carried.index ? [{ kind: 'index', bytes: carried.index }] : []),
+      ...(carried.corpus ? [{ kind: 'corpus', bytes: carried.corpus }] : []),
+      { kind: 'query-interp', bytes: carried.queryInterp },
+      ...(carried.lexical ? [{ kind: 'lexical', bytes: carried.lexical }] : []),
+      { kind: 'tombstones', bytes: segments.tombstones },
+    ], outPath);
+
+    log(`Wrote ${outPath}`);
+    log(`  ${(written.fileBytes / 1024).toFixed(1)} KiB, depth ${headInfo.layers}, ${plan.records} record(s), `
+      + `identity ${written.identity}`);
+    log('  Chain-level golden queries dropped (goldenQueriesDropped: "rebase"): their expected global '
+      + 'ids moved, and 6.2 forbids copying them.');
+    log(`  The old layer ${layerPeek.identity.slice(0, 12)}… is untouched; citations against it still resolve `
+      + 'against the old files.');
+  } finally {
+    await oldParent.close();
+    if (head) await head.close();
+  }
+}
+
+// The layer's cumulative bitset T_L, read from its own tombstone segment.
+async function layerCumulativeBitset(layerPath, L) {
+  const { readChainMemberShellBytes } = await import('./common.mjs');
+  const { parseTombstoneSegment } = await import('pikelet-wasm/complete/tombstones.mjs');
+  const bytes = await readChainMemberShellBytes(layerPath, 'tombstones');
+  const parsed = parseTombstoneSegment(bytes, { rowBase: L.rowBase, tombstones: L.tombstones, records: L.records });
+  return parsed.bitset;
+}
+
+// S_L: the supersession edges physically recorded in L's OWN segment (3.5).
+async function layerOwnEdges(layerPath, L) {
+  const { readChainMemberShellBytes } = await import('./common.mjs');
+  const { parseTombstoneSegment } = await import('pikelet-wasm/complete/tombstones.mjs');
+  const bytes = await readChainMemberShellBytes(layerPath, 'tombstones');
+  const parsed = parseTombstoneSegment(bytes, { rowBase: L.rowBase, tombstones: L.tombstones, records: L.records });
+  return parsed.supersessions ?? [];
+}
+
+// S_H: the head chain's union supersession map, as planRebase wants it.
+function headEdgeMap(headInfo, head) {
+  const map = new Map();
+  for (const m of head.__members) {
+    for (const [x, y] of m.supersessions || []) {
+      if (!map.has(x)) map.set(x, []);
+      map.get(x).push({ newId: y, depth: m.depth });
+    }
+  }
+  return map;
+}
+
+// The layer's own bytes, copied without interpretation (6.2).
+async function copyLayerSegments(layerPath) {
+  const { readChainMemberShellBytes } = await import('./common.mjs');
+  const out = {};
+  for (const kind of ['index', 'corpus', 'query-interp', 'lexical']) {
+    out[kind === 'query-interp' ? 'queryInterp' : kind] =
+      // Null means absent. A digest or structure failure throws and the
+      // rebase refuses: catching it here dropped a corrupt segment and wrote
+      // an unmountable layer with exit 0.
+      await readChainMemberShellBytes(layerPath, kind);
+  }
+  if (!out.queryInterp) throw new CliError('the layer carries no query-interp segment to copy (4.5)');
+  return out;
 }

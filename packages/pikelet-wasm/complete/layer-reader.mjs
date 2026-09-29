@@ -626,6 +626,11 @@ export async function openPikeletChain(members, options = {}) {
                         return base.readSegmentBytes(seg);
                     },
                     corpusIngest: base.manifest.corpus?.ingest ?? null,
+                    // The chain's ingestion declaration as validated at mount
+                    // ({canonical, asserted, source}); null for a lone base,
+                    // whose declaration is corpusIngest alone. rebase (6.2)
+                    // compares two histories' declarations through this.
+                    chainIngest: ingestDecl,
                     chunking: base.manifest.corpus?.ingest?.chunking
                         ?? base.manifest.corpus?.ingest
                         ?? null,

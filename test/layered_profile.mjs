@@ -2269,6 +2269,311 @@ console.log('locator following: a chain mounts from its head alone (5.1.1)');
     fs.rmSync(elsewhere, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// rebase, through the CLI (6.2)
+// ---------------------------------------------------------------------------
+// planRebase's rules are covered above as a function. Nothing exercised the
+// COMMAND: it threw "not wired as a command yet" until now, and the first
+// working version still had a bug the function tests could not see (it
+// destructured plan.skippedEdges as [x, y] pairs when planRebase pushes bare
+// ids, so --on-conflict skip crashed). These drive the real binary.
+console.log('rebase: the command, end to end (6.2)');
+{
+    const { execFileSync } = await import('node:child_process');
+    const BIN = path.resolve('packages/pikelet/bin/pikelet.mjs');
+    const rt = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-rebase-cli-'));
+    const run = (args) => {
+        try {
+            return { ok: true, out: execFileSync(process.execPath, [BIN, ...args], { encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }) };
+        } catch (err) {
+            return { ok: false, out: String(err.stdout || '') + String(err.stderr || '') };
+        }
+    };
+
+    // Own fixtures: the chain-file block above scopes its tmpdir to itself.
+    const CDIM = 16;
+    const ENC2 = { kind: 'host-encoder-v1', model: 'test' };
+    const INGEST2 = { chunker: 'v1', targetTokens: 256 };
+    const recBytes = (i) => Buffer.from(JSON.stringify({ title: `rec ${i}`, text: `record ${i} body text` }));
+    const sketchFor = (ids, tag) => {
+        const n = ids.length;
+        const qdata = new Uint8Array(n * CDIM);
+        const scales = new Float32Array(n);
+        const offsets = new Float32Array(n);
+        for (let r = 0; r < n; r++) {
+            for (let d = 0; d < CDIM; d++) qdata[r * CDIM + d] = (ids[r] * 7 + d) % 256;
+            scales[r] = 1 / 255; offsets[r] = 0;
+        }
+        const sp = path.join(rt, `sk-${tag}.pikelet-sketch`);
+        exportSketchArtifact({ dim: CDIM, count: n, metric: 1, qdata, scales, offsets }, sp,
+            { sketchDims: CDIM, sketchBits: 8, recommendedRerank: 20 });
+        return fs.readFileSync(sp);
+    };
+    const baseIds = [0, 1, 2, 3];
+    const baseCorpus = buildCorpusSegment(baseIds.map(recBytes));
+    const baseFile = path.join(rt, 'base.pikelet');
+    const baseBuilt = assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...baseCorpus.corpus, ingest: INGEST2 }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(baseIds, 'base') },
+        { kind: 'corpus', bytes: baseCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+    ], baseFile);
+    const l1Ids = [4, 5];
+    const l1Corpus = buildCorpusSegment(l1Ids.map(recBytes));
+    const l1File = path.join(rt, 'l1.pikelet');
+    const l1Built = assemblePikeletFile({
+        profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        layer: {
+            parent: { identity: baseBuilt.identity, locator: 'base.pikelet' },
+            baseIdentity: baseBuilt.identity, depth: 1, rowBase: 4, records: 2,
+            tombstones: 1, supersessions: 0, ingest: INGEST2,
+        },
+        corpus: l1Corpus.corpus, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(l1Ids, 'l1') },
+        { kind: 'corpus', bytes: l1Corpus.bytes },
+        { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+            baseIdentity: baseBuilt.identity,
+            queryInterpSha256: baseBuilt.manifest.segments.find((x) => x.kind === 'query-interp').sha256,
+        }) },
+        { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 4, tombstonedIds: [1], records: 2 }) },
+    ], l1File);
+    check('rebase fixtures assemble', fs.existsSync(baseFile) && fs.existsSync(l1File));
+
+    // Argument validation happens before any mount, so it needs no fixtures.
+    const noLayer = run(['rebase', '--onto', baseFile, '--out', path.join(rt, 'a.pikelet')]);
+    check('rebase without --layer is refused',
+        !noLayer.ok && /requires --layer/.test(noLayer.out), noLayer.out.slice(0, 90));
+    const noOnto = run(['rebase', '--layer', l1File, '--out', path.join(rt, 'a.pikelet')]);
+    check('rebase without --onto is refused',
+        !noOnto.ok && /requires --onto/.test(noOnto.out), noOnto.out.slice(0, 90));
+    const noOut = run(['rebase', '--layer', l1File, '--onto', baseFile]);
+    check('rebase without --out is refused',
+        !noOut.ok && /requires --out/.test(noOut.out), noOut.out.slice(0, 90));
+    const badConflict = run(['rebase', '--layer', l1File, '--onto', baseFile,
+        '--on-conflict', 'nonsense', '--out', path.join(rt, 'a.pikelet')]);
+    check('an unknown --on-conflict is refused, naming the allowed values',
+        !badConflict.ok && /--on-conflict must be one of refuse, skip, keep-both/.test(badConflict.out),
+        badConflict.out.slice(0, 90));
+    const badForeign = run(['rebase', '--layer', l1File, '--onto', baseFile,
+        '--on-foreign', 'nonsense', '--out', path.join(rt, 'a.pikelet')]);
+    check('an unknown --on-foreign is refused',
+        !badForeign.ok && /--on-foreign must be one of refuse, drop/.test(badForeign.out),
+        badForeign.out.slice(0, 90));
+
+    // --layer must BE a layer.
+    const notALayer = run(['rebase', '--layer', baseFile, '--onto', baseFile, '--out', path.join(rt, 'a.pikelet')]);
+    check('rebase refuses a --layer that is not a layer',
+        !notALayer.ok && /is not a layer/.test(notALayer.out), notALayer.out.slice(0, 100));
+
+    // 6.2: the original parent is REQUIRED to compute what the layer itself
+    // deleted. A copy of the layer with no reachable parent must refuse, and
+    // must explain why rather than leaking an ENOENT.
+    const orphanDir = path.join(rt, 'orphan');
+    fs.mkdirSync(orphanDir);
+    fs.copyFileSync(l1File, path.join(orphanDir, 'l1.pikelet'));
+    const orphan = run(['rebase', '--layer', path.join(orphanDir, 'l1.pikelet'),
+        '--onto', baseFile, '--out', path.join(rt, 'a.pikelet')]);
+    check('a layer whose original parent cannot be opened is refused, with the reason',
+        !orphan.ok && /delta is unknowable|difference is unknowable/.test(orphan.out),
+        orphan.out.slice(0, 120));
+
+    // --old-parent pointing at a real but WRONG artifact must fail on identity,
+    // not later. A second base with different records is openable and has a
+    // different identity, which is the case that matters: a locator or operator
+    // path that resolves to something valid but unrelated.
+    const otherIds = [10, 11, 12, 13];
+    const otherCorpus = buildCorpusSegment(otherIds.map(recBytes));
+    const otherBase = path.join(rt, 'otherbase.pikelet');
+    assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...otherCorpus.corpus, ingest: INGEST2 }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(otherIds, 'other') },
+        { kind: 'corpus', bytes: otherCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+    ], otherBase);
+    const wrongParent = run(['rebase', '--layer', l1File, '--onto', baseFile,
+        '--old-parent', otherBase, '--out', path.join(rt, 'a.pikelet')]);
+    check('an --old-parent that is not the committed parent is refused on identity',
+        !wrongParent.ok && /not the parent this layer was cut against/.test(wrongParent.out),
+        wrongParent.out.slice(-140));
+
+    // A SUCCESSFUL rebase: fork the base twice, then move one layer onto the
+    // other. Both forks claim rowBase 4; the rebased one must move to 6.
+    const forkIds = [4, 5];
+    const forkCorpus = buildCorpusSegment(forkIds.map(recBytes));
+    const forkFile = path.join(rt, 'fork.pikelet');
+    const forkBuilt = assemblePikeletFile({
+        profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        layer: {
+            parent: { identity: baseBuilt.identity, locator: 'base.pikelet' },
+            baseIdentity: baseBuilt.identity, depth: 1, rowBase: 4, records: 2,
+            tombstones: 0, supersessions: 0, ingest: INGEST2,
+        },
+        corpus: forkCorpus.corpus, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(forkIds, 'fork') },
+        { kind: 'corpus', bytes: forkCorpus.bytes },
+        { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+            baseIdentity: baseBuilt.identity,
+            queryInterpSha256: baseBuilt.manifest.segments.find((x) => x.kind === 'query-interp').sha256,
+        }) },
+        { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 4, tombstonedIds: [], records: 2 }) },
+    ], forkFile);
+    check('the two forks are different artifacts claiming the same rowBase',
+        forkBuilt.identity !== baseBuilt.identity);
+
+    const outFile = path.join(rt, 'rebased.pikelet');
+    const ok = run(['rebase', '--layer', l1File, '--onto', baseFile, '--onto', forkFile, '--out', outFile]);
+    check('a rebase onto a fork sibling succeeds', ok.ok && fs.existsSync(outFile), ok.out.slice(-160));
+    check('the rebase reports the new rowBase and a verbatim copy',
+        /rowBase 4 -> 6/.test(ok.out) && /copied verbatim/.test(ok.out), ok.out.slice(-200));
+    check('chain-level goldens are dropped, never copied (6.2)',
+        /goldenQueriesDropped/.test(ok.out));
+
+    // The rebased layer must mount as depth 2 on the new history and serve both
+    // forks' records.
+    const { openPikeletChain: openChain2 } = await import('../packages/pikelet-wasm/complete/layer-reader.mjs');
+    const rebasedChain = await openChain2([baseFile, forkFile, outFile]);
+    const ri = rebasedChain.info();
+    check('the rebased chain mounts as a valid three-member chain',
+        ri.layers === 3 && ri.records === 8, JSON.stringify({ layers: ri.layers, records: ri.records }));
+    check('the rebased layer sits at depth 2 with its own range',
+        ri.members[2].identity !== l1Built.identity && ri.members[2].depth === 2 && ri.members[2].records === 2,
+        JSON.stringify(ri.members.map((m) => m.depth)));
+    // The layer tombstoned base id 1; that deletion must survive the move.
+    const moved = await rebasedChain.record(1);
+    check('a deletion the layer introduced survives the rebase', moved.tombstoned === true, JSON.stringify(moved.tombstoned));
+    await rebasedChain.close();
+
+    // Terminal rule: a tombstone-only layer whose every deletion the target
+    // history already performed emits NOTHING (6.2).
+    const tombOnly = (name) => {
+        const at = path.join(rt, name);
+        assemblePikeletFile({
+            profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+            layer: {
+                parent: { identity: baseBuilt.identity, locator: 'base.pikelet' },
+                baseIdentity: baseBuilt.identity, depth: 1, rowBase: 4, records: 0,
+                tombstones: 1, supersessions: 0, ingest: INGEST2,
+            },
+            // 4.1: a tombstone-only layer has no index segment, so it must omit
+            // the index object entirely rather than carry an empty one.
+            corpus: { records: 0 },
+        }, [
+            { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+                baseIdentity: baseBuilt.identity,
+                queryInterpSha256: baseBuilt.manifest.segments.find((x) => x.kind === 'query-interp').sha256,
+            }) },
+            { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 4, tombstonedIds: [2], records: 0 }) },
+        ], at);
+        return at;
+    };
+    const tombA = tombOnly('tomb-a.pikelet');
+    const tombB = tombOnly('tomb-b.pikelet');
+    const emptyOut = path.join(rt, 'empty.pikelet');
+    const empty = run(['rebase', '--layer', tombA, '--onto', baseFile, '--onto', tombB, '--out', emptyOut]);
+    check('a rebase whose operation the target already represents emits nothing',
+        empty.ok && /Nothing to emit/.test(empty.out) && !fs.existsSync(emptyOut),
+        `exit ${empty.ok}, file ${fs.existsSync(emptyOut)}: ${empty.out.slice(-160)}`);
+
+    // A head that is a lone base DECLARING ingest is not a legacy base. The
+    // precondition read a field __head never carried and treated every
+    // one-member head as legacy, so this rebase was always refused.
+    const bareOut = path.join(rt, 'onto-bare.pikelet');
+    const bare = run(['rebase', '--layer', l1File, '--onto', baseFile, '--old-parent', baseFile, '--out', bareOut]);
+    check('a rebase onto a lone base that declares ingest succeeds',
+        bare.ok && fs.existsSync(bareOut), bare.out.slice(-200));
+    if (fs.existsSync(bareOut)) {
+        const bc = await openChain2([baseFile, bareOut]);
+        check('the layer rebased onto a bare base mounts', bc.info().layers === 2);
+        await bc.close();
+    }
+
+    // Two depth-1 forks of a LEGACY base (no corpus.ingest) that asserted
+    // DIFFERENT declarations. The precondition compared `.canonical` on
+    // objects that had none, so undefined === undefined let this through and
+    // wrote a layer the reader then rejected (6.1, 6.2).
+    const legacyCorpus = buildCorpusSegment(baseIds.map(recBytes));
+    const legacyFile = path.join(rt, 'legacy.pikelet');
+    const legacyBuilt = assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...legacyCorpus.corpus }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(baseIds, 'legacy') },
+        { kind: 'corpus', bytes: legacyCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+    ], legacyFile);
+    const assertedFork = (name, ingest) => {
+        const at = path.join(rt, name);
+        const c = buildCorpusSegment([4, 5].map(recBytes));
+        assemblePikeletFile({
+            profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+            layer: {
+                parent: { identity: legacyBuilt.identity, locator: 'legacy.pikelet' },
+                baseIdentity: legacyBuilt.identity, depth: 1, rowBase: 4, records: 2,
+                tombstones: 0, supersessions: 0, ingest, ingestAsserted: true,
+            },
+            corpus: c.corpus, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor([4, 5], name) },
+            { kind: 'corpus', bytes: c.bytes },
+            { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+                baseIdentity: legacyBuilt.identity,
+                queryInterpSha256: legacyBuilt.manifest.segments.find((x) => x.kind === 'query-interp').sha256,
+            }) },
+            { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 4, tombstonedIds: [], records: 2 }) },
+        ], at);
+        return at;
+    };
+    const forkA = assertedFork('fork-a.pikelet', { chunker: 'A' });
+    const forkB = assertedFork('fork-b.pikelet', { chunker: 'B' });
+    const mismatchOut = path.join(rt, 'mismatch.pikelet');
+    const mismatch = run(['rebase', '--layer', forkB, '--onto', legacyFile, '--onto', forkA, '--out', mismatchOut]);
+    check('a rebase between histories that asserted different declarations is refused',
+        !mismatch.ok && /disagree on the chain ingestion declaration/.test(mismatch.out) && !fs.existsSync(mismatchOut),
+        mismatch.out.slice(-200));
+    // The same fork moved onto the bare legacy base may introduce its
+    // assertion, and the output must carry it as the new depth-1 member.
+    const legacyOut = path.join(rt, 'onto-legacy.pikelet');
+    const ontoLegacy = run(['rebase', '--layer', forkB, '--onto', legacyFile, '--out', legacyOut]);
+    check('an asserted layer rebased onto a bare legacy base succeeds',
+        ontoLegacy.ok && fs.existsSync(legacyOut), ontoLegacy.out.slice(-200));
+    if (fs.existsSync(legacyOut)) {
+        const lc = await openChain2([legacyFile, legacyOut]);
+        check('it mounts as an asserted depth-1 chain', lc.__head.chainIngest?.asserted === true,
+            JSON.stringify(lc.__head.chainIngest));
+        await lc.close();
+    }
+
+    // A segment that fails its digest must stop the copy. copyLayerSegments
+    // caught the error as "absent", so a corrupt corpus segment was silently
+    // left out and the command wrote an unmountable layer with exit 0.
+    const corruptFile = path.join(rt, 'corrupt.pikelet');
+    const cbytes = fs.readFileSync(l1File);
+    {
+        const man = cbytes.readUInt32LE(8);
+        const nseg = cbytes.readUInt32LE(12);
+        for (let i = 0; i < nseg; i++) {
+            const at = 64 + man + i * 48;
+            if (cbytes.readUInt32LE(at) !== 2) continue;   // corpus
+            cbytes[Number(cbytes.readBigUInt64LE(at + 8)) + 5] ^= 0xff;
+        }
+    }
+    fs.writeFileSync(corruptFile, cbytes);
+    const corruptOut = path.join(rt, 'from-corrupt.pikelet');
+    const corrupt = run(['rebase', '--layer', corruptFile, '--onto', baseFile, '--onto', forkFile,
+        '--old-parent', baseFile, '--out', corruptOut]);
+    check('a layer whose corpus segment fails its digest is refused, not copied without it',
+        !corrupt.ok && /corpus segment fails its manifest digest/.test(corrupt.out) && !fs.existsSync(corruptOut),
+        corrupt.out.slice(-200));
+
+    fs.rmSync(rt, { recursive: true, force: true });
+}
+
 console.log('lineage: a compacted base translates citations through the reader');
 {
     const linTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-lineage-'));

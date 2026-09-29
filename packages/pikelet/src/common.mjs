@@ -52,6 +52,88 @@ async function resolveChainMembers(locations, log = () => {}) {
   return resolved;
 }
 
+/**
+ * Read ONE segment's raw bytes out of a .pikelet, digest-verified, without
+ * opening it as a searchable reader.
+ *
+ * `rebase` (LAYERED_PROFILE.md 6.2) needs this: it copies a layer's index,
+ * corpus, lexical and query-interp segments verbatim, and a layer with records
+ * cannot be opened alone (4.1 refuses it) nor read through
+ * readChainMemberShell, which returns a tier only for the tombstone-only case.
+ *
+ * Returns null when the segment is absent. Throws if it is present but fails
+ * its digest, so a copy never carries corrupt bytes forward.
+ */
+async function readChainMemberShellBytes(filePath, kind) {
+  const crypto = await import('node:crypto');
+  // Header and table geometry come from the format module, never from a literal
+  // here: TABLE_ENTRY_BYTES is 48, and a hardcoded 24 reads garbage offsets
+  // while still parsing, which is the worst possible failure for a byte copy.
+  const { MAGIC, HEADER_BYTES, TABLE_ENTRY_BYTES, KINDS, KIND_NAMES } = await import('pikelet-wasm/complete/format.mjs');
+  if (typeof filePath !== 'string') {
+    throw new CliError('rebase copies a layer\'s bytes from a local file; download the layer first');
+  }
+  const fh = await (await import('node:fs/promises')).open(filePath, 'r');
+  // A short read leaves zero-filled bytes that still parse; refuse it instead.
+  const readExact = async (length, position, what) => {
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await fh.read(buf, 0, length, position);
+    if (bytesRead !== length) throw new CliError(`${filePath}: truncated ${what} (${bytesRead} of ${length} bytes)`);
+    return buf;
+  };
+  try {
+    const fileBytes = (await fh.stat()).size;
+    const head = await readExact(HEADER_BYTES, 0, 'header');
+    if (head.readUInt32LE(0) !== MAGIC) throw new CliError(`${filePath}: not a .pikelet file (bad magic)`);
+    const manifestBytes = head.readUInt32LE(8);
+    const segmentCount = head.readUInt32LE(12);
+    if (HEADER_BYTES + manifestBytes + segmentCount * TABLE_ENTRY_BYTES > fileBytes) {
+      throw new CliError(`${filePath}: header declares a manifest and segment table larger than the file`);
+    }
+    const manifestBuf = await readExact(manifestBytes, HEADER_BYTES, 'manifest');
+    // The manifest digest IS the identity; the per-segment digests below are
+    // only as good as this check.
+    const identity = head.subarray(24, 56).toString('hex');
+    if (crypto.createHash('sha256').update(manifestBuf).digest('hex') !== identity) {
+      throw new CliError(`${filePath}: manifest fails identity verification; refusing to copy from it`);
+    }
+    const manifest = JSON.parse(manifestBuf.toString('utf8'));
+    if (!Array.isArray(manifest.segments) || manifest.segments.length !== segmentCount) {
+      throw new CliError(`${filePath}: segment table disagrees with the manifest`);
+    }
+    const table = await readExact(segmentCount * TABLE_ENTRY_BYTES, HEADER_BYTES + manifestBytes, 'segment table');
+    let found = null;
+    for (let i = 0; i < segmentCount; i++) {
+      const at = i * TABLE_ENTRY_BYTES;
+      const tableKind = KIND_NAMES[table.readUInt32LE(at)];
+      const declared = manifest.segments[i];
+      // An extension kind unknown to both sides is skipped (spec 3.3).
+      if (tableKind === undefined && !Object.hasOwn(KINDS, declared.kind)) continue;
+      // The table sits outside the identity; the manifest's kind is what the
+      // identity commits to, so the two must agree before bytes are trusted.
+      if (tableKind !== declared.kind) {
+        throw new CliError(`${filePath}: segment ${i} is ${tableKind} in the table but ${declared.kind} in the manifest`);
+      }
+      if (tableKind !== kind) continue;
+      if (found) throw new CliError(`${filePath}: carries more than one ${kind} segment`);
+      const offset = Number(table.readBigUInt64LE(at + 8));
+      const length = Number(table.readBigUInt64LE(at + 16));
+      if (length !== declared.bytes || offset + length > fileBytes) {
+        throw new CliError(`${filePath}: the ${kind} segment's extent disagrees with the manifest`);
+      }
+      const bytes = await readExact(length, offset, `${kind} segment`);
+      const actual = crypto.createHash('sha256').update(bytes).digest('hex');
+      if (declared.sha256 !== actual) {
+        throw new CliError(`${filePath}: the ${kind} segment fails its manifest digest; refusing to copy it`);
+      }
+      found = new Uint8Array(bytes);
+    }
+    return found;
+  } finally {
+    await fh.close();
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -114,6 +196,7 @@ export {
   completeModulesPromise,
   loadCompleteModules,
   resolveChainMembers,
+  readChainMemberShellBytes,
   __filename,
   __dirname,
   PACKAGE_ROOT,

@@ -99,6 +99,9 @@ Usage:
   pikelet doctor <url>   # probe artifact hosting: Range/206, cache-key ranges, h2, ETag, RTT
   pikelet append --parent <file|url> [--source <path|url> ...] [--remove <id> ...] --out layer.pikelet
   pikelet compact --head <base> [--head <layer> ...] --out compacted.pikelet [--no-refit]
+  pikelet rebase --layer <file> --onto <base> [--onto <layer> ...] --out rebased.pikelet
+                 [--old-parent <file> ...] [--on-conflict refuse|skip|keep-both]
+                 [--on-foreign refuse|drop]
   pikelet mcp --pack <file-or-url> [--pack ... | --shelf <file-or-url>]
   pikelet mcp install --pack <file-or-url> [--client claude-code|claude-desktop]
 
@@ -220,7 +223,10 @@ function parseArgs(args) {
   const repeated = new Set(['include', 'exclude', 'include-url', 'exclude-url', 'pack',
     'remove', 'supersede',
     // compact takes a chain, listed base-first, so --head repeats.
-    'head', 'parent']);
+    'head', 'parent',
+    // rebase (6.2) names two chains: the new head and the layer's ORIGINAL
+    // parent, each base-first.
+    'onto', 'old-parent']);
   const positionals = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
