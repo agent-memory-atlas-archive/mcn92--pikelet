@@ -303,6 +303,13 @@ export async function openPikeletChain(members, options = {}) {
                     supersessions: supersessions.size,
                     dim: base.dim,
                     metric: base.manifest.metric,
+                    // 4.5: a chain's encoder IS the base's — a layer carries no
+                    // encoder bytes and inherits by commitment. Omitting it here
+                    // made every consumer that reads info().encoder report null
+                    // on a chain: `list_packs` advertised "encoder": null for a
+                    // pack whose base is MiniLM, so a model asking what embedded
+                    // the corpus got nothing.
+                    encoder: base.encoderInfo ?? null,
                     calibrationDrift: calibration.drift,
                     calibrationStatus: calibration.status,
                     driftLimit: calibration.effectiveLimit,

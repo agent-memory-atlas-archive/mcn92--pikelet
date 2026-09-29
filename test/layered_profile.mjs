@@ -1398,6 +1398,18 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
     check('drift is (appended + tombstoned) / base records', Math.abs(i1.calibrationDrift - 0.1) < 1e-9);
     check('an absent producer envelope leaves the reader limit in force',
         i1.driftLimit === 0.2 && i1.producerEnvelope === Infinity);
+    // 4.5: a chain's encoder is the base's. This was omitted from the chain's
+    // info(), so every consumer reading info().encoder saw undefined -- the MCP
+    // list_packs tool advertised "encoder": null for a pack whose base is
+    // MiniLM, which is what a model reads to know what embedded the corpus.
+    // Shape varies by query-interp kind (a kind-2 base's encoderInfo is shaped
+    // by the host declaration, a kind-3's carries model/pooling), so this
+    // asserts only that SOMETHING is reported and that it is the base's own.
+    check('a chain reports the base\'s encoder, not nothing',
+        !!i1.encoder && typeof i1.encoder === 'object'
+        && Object.keys(i1.encoder).length > 0,
+        JSON.stringify(i1.encoder));
+
     check('the union bloom carries base and layer bits', (() => {
         const u = c1.chainBloom();
         const set = (i) => ((u[i >> 3] >> (i & 7)) & 1) === 1;
