@@ -21,6 +21,59 @@ const log = (line) => console.log(line);
 /**
  * @param {object} flags parsed CLI flags
  */
+/**
+ * Resolve each `--supersede <oldId>=<path>` target to the local index of the
+ * chunk that path produced (LAYERED_PROFILE.md 3.5).
+ *
+ * Exported for testing: this lived inline in appendLayer, where the only way
+ * to exercise it was to run the whole command -- so the test for supersede
+ * resolution drove planLayer directly, never this, and missed that a chunk's
+ * `sourcePath` is RELATIVE to the root it was ingested from ("pricing.md")
+ * rather than absolute. Comparing against a cwd-resolved target therefore
+ * matched nothing, and `--supersede 2=/abs/v2/pricing.md` failed on a path
+ * that plainly existed.
+ *
+ * Accepts the target as written, as an absolute path, and resolved against
+ * each --source root, so `2=pricing.md`, `2=v2/pricing.md` and
+ * `2=/abs/v2/pricing.md` all name the same record. Basename alone is
+ * deliberately NOT accepted: two sources can each hold a `pricing.md`, and
+ * guessing between them is the silent wrong edge this resolution prevents.
+ *
+ * @param {Array<[number, string]>} pairs   parsed --supersede pairs
+ * @param {Array<{sourcePath?: string}>} chunks  this layer's chunks, in order
+ * @param {string[]} sources                the --source roots
+ * @returns {Array<[number, number]>}  [oldId, local chunk index]
+ */
+export function resolveSupersedeTargets(pairs, chunks, sources) {
+  return pairs.map(([oldId, target]) => {
+    if (!sources.length) {
+      throw new CliError(`--supersede ${oldId}=${target} needs a --source: the path names which new record replaces id ${oldId}`);
+    }
+    const candidates = new Set([target, path.resolve(process.cwd(), target)]);
+    const matches = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const sp = chunks[i].sourcePath;
+      if (!sp) continue;
+      if (candidates.has(sp)) { matches.push(i); continue; }
+      const hit = sources.some((src) => {
+        const root = /^https?:\/\//i.test(src) ? null : path.resolve(process.cwd(), src);
+        return root !== null && candidates.has(path.resolve(root, sp));
+      });
+      if (hit) matches.push(i);
+    }
+    if (!matches.length) {
+      throw new CliError(`--supersede ${oldId}=${target} matched no ingested record; `
+        + `the path must be one the --source ingested (${chunks.length} chunk(s) produced)`);
+    }
+    if (matches.length > 1) {
+      throw new CliError(`--supersede ${oldId}=${target} matched ${matches.length} records `
+        + `(local ids ${matches.join(', ')}); a supersession edge names exactly one successor, `
+        + 'so split the source or supersede by resolved id');
+    }
+    return [oldId, matches[0]];
+  });
+}
+
 export async function appendLayer(flags) {
   if (!flags.parent) throw new CliError('append requires --parent <file|url>[#identity]');
   if (!flags.out) throw new CliError('append requires --out <file>');
@@ -106,35 +159,10 @@ export async function appendLayer(flags) {
       }
     }
 
-    // Resolve each --supersede path to the local index of the chunk it
-    // produced. The path was parsed and then thrown away, so supersession
-    // edges were assigned by the order the pairs happened to appear rather
-    // than by which file replaced which record. A path that ingested to
-    // exactly one chunk resolves to it; anything else is refused rather than
-    // guessed, because a silently wrong edge points readers at the wrong
-    // successor.
-    const resolvedSupersede = supersedePairs.map(([oldId, target]) => {
-      if (!sources.length) {
-        throw new CliError(`--supersede ${oldId}=${target} needs a --source: the path names which new record replaces id ${oldId}`);
-      }
-      const wanted = path.resolve(process.cwd(), target);
-      const matches = [];
-      for (let i = 0; i < chunks.length; i++) {
-        const sp = chunks[i].sourcePath;
-        if (!sp) continue;
-        if (sp === target || path.resolve(process.cwd(), sp) === wanted) matches.push(i);
-      }
-      if (!matches.length) {
-        throw new CliError(`--supersede ${oldId}=${target} matched no ingested record; `
-          + `the path must be one the --source ingested (${chunks.length} chunk(s) produced)`);
-      }
-      if (matches.length > 1) {
-        throw new CliError(`--supersede ${oldId}=${target} matched ${matches.length} records `
-          + `(local ids ${matches.join(', ')}); a supersession edge names exactly one successor, `
-          + 'so split the source or supersede by resolved id');
-      }
-      return [oldId, matches[0]];
-    });
+    // Which new record replaces which old one (3.5). planLayer used to receive
+    // the raw pairs and destructure the path away, assigning targets by
+    // argument order; see resolveSupersedeTargets for what that cost.
+    const resolvedSupersede = resolveSupersedeTargets(supersedePairs, chunks, sources);
 
     // --- 4-5. Plan ids, mask and supersessions (6.1 steps 4-5) --------------
     const plan = planLayer({

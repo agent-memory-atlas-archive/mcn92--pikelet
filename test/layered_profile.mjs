@@ -1605,6 +1605,50 @@ console.log('append: id assignment, mask and supersessions (6.1 steps 4-5)');
         () => planLayer({ ...common, newRecordCount: 3, supersede: [[10, 1], [20, 1]] }),
         /each new record supersedes at most one predecessor/);
 
+    // --supersede path resolution, through the real resolver. The checks below
+    // drive planLayer directly with already-resolved indices, which is how a
+    // resolver bug survived them: a chunk's sourcePath is RELATIVE to its
+    // ingest root, and comparing it against a cwd-resolved target matched
+    // nothing, so `--supersede 2=/abs/dir/page.md` failed on a path that
+    // plainly existed. Exercised here against the shapes a caller actually
+    // types.
+    {
+        const { resolveSupersedeTargets } = await import('../packages/pikelet/src/append.mjs');
+        const root = path.join(os.tmpdir(), 'pikelet-sup-root');
+        const chunks = [
+            { sourcePath: 'install.md' },
+            { sourcePath: 'pricing.md' },
+            { sourcePath: 'guide/setup.md' },
+        ];
+        const sources = [root];
+        // Caught, not thrown: a resolver that cannot match one of these forms
+        // raises rather than returning, and a bare call would abort the run
+        // instead of reporting which form it failed on.
+        const one = (target) => {
+            try { return resolveSupersedeTargets([[2, target]], chunks, sources)[0][1]; }
+            catch (err) { return `threw: ${err.message.slice(0, 60)}`; }
+        };
+        check('a bare relative path resolves', one('pricing.md') === 1, String(one('pricing.md')));
+        check('an absolute path under a --source root resolves',
+            one(path.join(root, 'pricing.md')) === 1, String(one(path.join(root, 'pricing.md'))));
+        check('a nested relative path resolves', one('guide/setup.md') === 2, String(one('guide/setup.md')));
+        check('a nested absolute path resolves',
+            one(path.join(root, 'guide', 'setup.md')) === 2, String(one(path.join(root, 'guide', 'setup.md'))));
+        rejects('a path no source ingested is refused',
+            () => resolveSupersedeTargets([[2, 'nosuch.md']], chunks, sources),
+            /matched no ingested record/);
+        rejects('--supersede without a --source is refused',
+            () => resolveSupersedeTargets([[2, 'pricing.md']], chunks, []),
+            /needs a --source/);
+        // Two roots each holding the same filename: basename matching would
+        // silently pick one, which is the wrong edge this refuses to guess.
+        const rootB = path.join(os.tmpdir(), 'pikelet-sup-root-b');
+        rejects('an ambiguous path across two source roots is refused, not guessed',
+            () => resolveSupersedeTargets([[2, 'pricing.md']],
+                [{ sourcePath: 'pricing.md' }, { sourcePath: 'pricing.md' }], [root, rootB]),
+            /matched 2 records/);
+    }
+
     rejects('removing an id at or above rowBase is refused',
         () => planLayer({ ...common, newRecordCount: 5, remove: [100] }),
         /cannot retract its own records/);
