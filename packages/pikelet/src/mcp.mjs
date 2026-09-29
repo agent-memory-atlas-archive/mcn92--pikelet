@@ -450,7 +450,10 @@ async function mountChain(packs, spec, { httpRangeSource, log }) {
   const search = {
     info: () => chain.info(),
     async query(text, queryOptions = {}) {
-      const vector = await encoder.embed(String(text ?? ''));
+      // The query side of the encoder's prefix contract: embed() applies the
+      // passage prefix, which on e5/arctic/bge puts the query in the wrong
+      // space for both retrieval and the abstention scorer.
+      const vector = await encoder.embedQuery(String(text ?? ''));
       return chain.query(vector, queryOptions.k ?? 5, { ...queryOptions, text: String(text ?? '') });
     },
     record: (id) => chain.record(id),

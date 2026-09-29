@@ -2776,5 +2776,108 @@ console.log('lineage: a compacted base translates citations through the reader')
     fs.rmSync(linTmp, { recursive: true, force: true });
 }
 
+console.log('mcp: a mounted chain embeds queries with the query prefix');
+{
+    // A real kind-3 base from the packaged inline MiniLM, compiled with an
+    // asymmetric prefix. The MCP chain adapter embedded queries through the
+    // passage side (embed), which on e5/arctic/bge puts every query in the
+    // wrong space; with a prefix set the two sides give different vectors, so
+    // the served distance says which one was used.
+    const { execFileSync } = await import('node:child_process');
+    const { PassThrough } = await import('node:stream');
+    const { runMcpServer } = await import('../packages/pikelet/src/mcp.mjs');
+    const { openPikeletFile } = await import('../packages/pikelet-wasm/complete/index.mjs');
+    const { openPikeletChain } = await import('../packages/pikelet-wasm/complete/layer-reader.mjs');
+    const mt = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-mcp-chain-'));
+    const docs = path.join(mt, 'docs');
+    fs.mkdirSync(docs);
+    // Chunking drops documents under 25 whitespace tokens.
+    const body = (title, line) => `# ${title}\n\n${Array(4).fill(line).join('\n')}\n`;
+    fs.writeFileSync(path.join(docs, 'tides.md'), body('Tides', 'The moon pulls the ocean and makes tides twice a day.'));
+    fs.writeFileSync(path.join(docs, 'volcanoes.md'), body('Volcanoes', 'Magma rises through the crust and erupts as lava.'));
+    fs.writeFileSync(path.join(docs, 'bread.md'), body('Bread', 'Yeast ferments sugar so dough rises before baking.'));
+    const basePath = path.join(mt, 'base.pikelet');
+    execFileSync(process.execPath, [path.resolve('packages/pikelet/bin/pikelet.mjs'), 'compile',
+        '--source', docs, '--out', basePath, '--skip-calibration', '--encoder-query-prefix', 'query: '],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+    const readManifestOf = (p) => {
+        const buf = fs.readFileSync(p);
+        return JSON.parse(buf.subarray(64, 64 + buf.readUInt32LE(8)).toString('utf8'));
+    };
+    const bm = readManifestOf(basePath);
+    const baseRef = await openPikeletFile(basePath);
+    const baseId = baseRef.info().identity;
+    await baseRef.close();
+    // A tombstone-only layer: the chain needs a member below the head for
+    // the shelf lineage, and this one needs no encoder to build.
+    const layerPath = path.join(mt, 'l1.pikelet');
+    const layerBuilt = assemblePikeletFile({
+        profile: PROFILE_LAYER, dim: bm.dim, metric: bm.metric, encoder: bm.encoder,
+        layer: {
+            parent: { identity: baseId, locator: 'base.pikelet' },
+            baseIdentity: baseId, depth: 1, rowBase: bm.corpus.records, records: 0,
+            tombstones: 1, supersessions: 0,
+            // compile records no corpus.ingest, so depth 1 asserts one (6.1).
+            ...(bm.corpus.ingest ? { ingest: bm.corpus.ingest } : { ingest: { chunker: 'test' }, ingestAsserted: true }),
+        },
+        corpus: { records: 0 },
+    }, [
+        { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+            baseIdentity: baseId,
+            queryInterpSha256: bm.segments.find((x) => x.kind === 'query-interp').sha256,
+        }) },
+        { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: bm.corpus.records, tombstonedIds: [2], records: 0 }) },
+    ], layerPath);
+
+    const QUERY = 'why does the sea rise and fall';
+    const direct = await openPikeletChain([basePath, layerPath]);
+    const enc = await direct.__head.passageEmbedder();
+    const asQuery = await direct.query(await enc.embedQuery(QUERY), 1, { text: QUERY });
+    const asPassage = await direct.query(await enc.embed(QUERY), 1, { text: QUERY });
+    await direct.close();
+    check('the fixture separates the two sides of the prefix contract',
+        asQuery.results[0].distance !== asPassage.results[0].distance,
+        `${asQuery.results[0].distance} vs ${asPassage.results[0].distance}`);
+
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const replies = [];
+    let buffer = '';
+    stdout.on('data', (d) => {
+        buffer += d;
+        let idx;
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+            replies.push(JSON.parse(buffer.slice(0, idx)));
+            buffer = buffer.slice(idx + 1);
+        }
+    });
+    const done = runMcpServer({
+        packPaths: [{ location: layerPath, identity: layerBuilt.identity, lineage: [{ location: basePath, identity: baseId }] }],
+        openPikeletFile,
+        httpRangeSource: () => { throw new Error('no network'); },
+        stdin, stdout, log: () => {},
+    });
+    const waitFor = (id) => new Promise((resolve, reject) => {
+        const deadline = Date.now() + 60000;
+        const timer = setInterval(() => {
+            const hit = replies.find((r) => r.id === id);
+            if (hit) { clearInterval(timer); resolve(hit); }
+            else if (Date.now() > deadline) { clearInterval(timer); reject(new Error(`no reply for ${id}`)); }
+        }, 5);
+    });
+    try {
+        stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search', arguments: { query: QUERY, k: 1 } } })}\n`);
+        const reply = (await waitFor(1)).result;
+        const served = JSON.parse(reply.content[0].text).sections[0].results[0];
+        check('MCP search over a chain serves the query-prefixed distance',
+            served?.distance === asQuery.results[0].distance,
+            `served ${served?.distance}, query-side ${asQuery.results[0].distance}, passage-side ${asPassage.results[0].distance}`);
+    } finally {
+        stdin.end();
+        await done;
+        fs.rmSync(mt, { recursive: true, force: true });
+    }
+}
+
 console.log(`\nLayered profile conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
