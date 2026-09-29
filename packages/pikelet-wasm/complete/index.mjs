@@ -79,7 +79,7 @@ const SKETCH_HEADER_BYTES = 256;
 // Hybrid retrieval: BM25 candidates fetched from the lexical segment per
 // query; the fusion rule and its constants live in fusion.mjs, shared with
 // the calibrator so fit-time rankings match what is served.
-const LEXICAL_CANDIDATES = 24;
+export const LEXICAL_CANDIDATES = 24;
 // scoreQuality's coverage term hydrates the fused top passagesNeeded
 // records (asset.coverage.topK, 5 by default — see calibrate.mjs's
 // COVERAGE_TOP_PASSAGES) once retrieval returns. The scorer that knows
@@ -98,7 +98,7 @@ const COVERAGE_BATCH_COUNT = 5;
 // a technicality. Kept identical to pikelet/src/calibrate.mjs's
 // LEXICAL_CUTOFF so calibration is fit against the same fusion the reader
 // actually serves.
-const LEXICAL_CUTOFF = 1.5;
+export const LEXICAL_CUTOFF = 1.5;
 // Query-interpretation segments above this size open lazily (kind 3's
 // inline encoder is ~25 MiB); smaller ones keep the one-read eager path.
 const LAZY_QI_BYTES = 4 * 1024 * 1024;

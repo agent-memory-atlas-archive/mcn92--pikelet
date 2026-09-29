@@ -40,6 +40,19 @@ const tokenize = (text) => (String(text).toLowerCase().match(/[a-z0-9']+/g) || [
 // is committed via the manifest digest but lazy reads are not individually
 // verified (the eager opener verifies the whole segment; per-page digests
 // are the format-v2 path if this gap needs closing).
+// The df a term is scored with: the chain-global one from options.df when the
+// caller supplied it (LAYERED_PROFILE.md 5.4), else the index's own. A global
+// df below the local one is impossible for a real sum, so it is refused rather
+// than producing a negative-count idf.
+function globalDf(options, term, localDf) {
+    const g = options.df instanceof Map ? options.df.get(term) : undefined;
+    if (g === undefined) return localDf;
+    if (!Number.isSafeInteger(g) || g < localDf) {
+        throw new Error(`lexical options.df for "${term}" (${g}) is below this index's own df (${localDf})`);
+    }
+    return g;
+}
+
 export async function openLexicalIndexLazy(read, segLength) {
     const headerBytes = await read(0, 64);
     if (!(headerBytes instanceof Uint8Array) || headerBytes.length < 64 || segLength < 64) {
@@ -134,6 +147,16 @@ export async function openLexicalIndexLazy(read, segLength) {
         termCount,
         totalTokens,
         lazy: true,
+        // This index's df for each of the query's terms (absent terms omitted).
+        async documentFrequencies(text) {
+            const terms = [...new Set(tokenize(text))];
+            const out = new Map();
+            await Promise.all(terms.map(async (t) => {
+                const e = await findTerm(fnv1a32(t, 0), fnv1a32(t, 0x9e3779b9));
+                if (e) out.set(t, e.df);
+            }));
+            return out;
+        },
         // `options.exclude(id)` drops a row BEFORE the cap, and
         // `options.stats` supplies chain-global {docCount, avgdl} for IDF and
         // length normalization. Both exist for the layered profile
@@ -141,7 +164,10 @@ export async function openLexicalIndexLazy(read, segLength) {
         // and mask afterwards, so a tier whose top-n were all tombstoned
         // contributed nothing while live rows below the cap were discarded;
         // and each tier scored BM25 against its own docCount, making scores
-        // from different tiers incomparable before fusion.
+        // from different tiers incomparable before fusion. `options.df`
+        // (Map term -> df) is the chain-global df summed over tiers from each
+        // tier's documentFrequencies(); a term absent from it keeps this
+        // index's own df.
         async search(text, n, options = {}) {
             const exclude = typeof options.exclude === 'function' ? options.exclude : null;
             const statDocCount = Number.isFinite(options.stats?.docCount) && options.stats.docCount > 0
@@ -150,14 +176,17 @@ export async function openLexicalIndexLazy(read, segLength) {
                 ? options.stats.avgdl : avgdl;
             const terms = [...new Set(tokenize(text))];
             if (!terms.length || docCount === 0) return [];
-            const found = (await Promise.all(terms.map((t) => findTerm(fnv1a32(t, 0), fnv1a32(t, 0x9e3779b9)))))
-                .filter(Boolean);
+            const found = (await Promise.all(terms.map(async (t) => {
+                const e = await findTerm(fnv1a32(t, 0), fnv1a32(t, 0x9e3779b9));
+                return e && { ...e, term: t };
+            }))).filter(Boolean);
             if (!found.length) return [];
             const postings = await Promise.all(found.map((e) => read(postingsOffset + e.postingsRel, e.postingsLen)));
             const scores = new Map();
             found.forEach((e, i) => {
                 const bytes = postings[i];
-                const idf = Math.log(1 + (statDocCount - e.df + 0.5) / (e.df + 0.5));
+                const df = globalDf(options, e.term, e.df);
+                const idf = Math.log(1 + (statDocCount - df + 0.5) / (df + 0.5));
                 const cursor = { at: 0, end: bytes.length };
                 const readVarint = () => {
                     let value = 0;
@@ -244,6 +273,15 @@ export function openLexicalIndex(bytes) {
         docCount,
         termCount,
         totalTokens,
+        // This index's df for each of the query's terms (absent terms omitted).
+        documentFrequencies(text) {
+            const out = new Map();
+            for (const term of new Set(tokenize(text))) {
+                const i = findTerm(fnv1a32(term, 0), fnv1a32(term, 0x9e3779b9));
+                if (i >= 0) out.set(term, view.getUint32(entryAt(i) + 20, true));
+            }
+            return out;
+        },
         // BM25 over the query's unique tokens; returns [{id, score}] sorted
         // by score descending (ties by id), at most n entries.
         // `options.exclude(id)` drops a row BEFORE the cap, and
@@ -253,7 +291,10 @@ export function openLexicalIndex(bytes) {
         // and mask afterwards, so a tier whose top-n were all tombstoned
         // contributed nothing while live rows below the cap were discarded;
         // and each tier scored BM25 against its own docCount, making scores
-        // from different tiers incomparable before fusion.
+        // from different tiers incomparable before fusion. `options.df`
+        // (Map term -> df) is the chain-global df summed over tiers from each
+        // tier's documentFrequencies(); a term absent from it keeps this
+        // index's own df.
         search(text, n, options = {}) {
             const exclude = typeof options.exclude === 'function' ? options.exclude : null;
             const statDocCount = Number.isFinite(options.stats?.docCount) && options.stats.docCount > 0
@@ -270,7 +311,8 @@ export function openLexicalIndex(bytes) {
                 const len = view.getUint32(entryAt(i) + 16, true);
                 const df = view.getUint32(entryAt(i) + 20, true);
                 if (rel + len > postingsBytes) throw new Error('.pikelet lexical postings out of bounds');
-                const idf = Math.log(1 + (statDocCount - df + 0.5) / (df + 0.5));
+                const scoringDf = globalDf(options, term, df);
+                const idf = Math.log(1 + (statDocCount - scoringDf + 0.5) / (scoringDf + 0.5));
                 const cursor = { at: postingsOffset + rel, end: postingsOffset + rel + len };
                 let docId = 0;
                 for (let p = 0; p < df; p++) {

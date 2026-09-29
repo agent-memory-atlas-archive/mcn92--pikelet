@@ -25,7 +25,7 @@
 // module did not import layer-locator.mjs at all, so every ancestor had to be
 // named by the caller and a published chain could not be mounted from its head.
 
-import { openPikeletFile, readChainMemberShell, readMemberManifest, base64Bytes } from './index.mjs';
+import { openPikeletFile, readChainMemberShell, readMemberManifest, base64Bytes, LEXICAL_CANDIDATES, LEXICAL_CUTOFF } from './index.mjs';
 import { resolveParentLocation } from './layer-locator.mjs';
 import { fuseCandidates, FUSION_DEFAULTS } from './fusion.mjs';
 import { parseTombstoneSegment, firstSupersetViolation } from './tombstones.mjs';
@@ -331,25 +331,75 @@ export async function openPikeletChain(members, options = {}) {
              */
             async query(vector, k = 5, queryOptions = {}) {
                 assertOpen();
+                if (!Number.isSafeInteger(k) || k < 1) throw new Error('chain query() k must be a positive integer');
                 const retrieval = queryOptions.retrieval ?? 'hybrid';
+                if (!['hybrid', 'vector', 'lexical', 'augmented'].includes(retrieval)) {
+                    throw new Error(`query() retrieval must be hybrid, vector, lexical, or augmented, got ${retrieval}`);
+                }
+
+                // --- 2. Lexical candidates (5.3 step 2, 5.4) -------------------
+                // df is summed across tiers per query term, so a term common in
+                // the base and rare in a layer scores with one idf everywhere;
+                // each tier scoring with its own df made layer records outrank
+                // base records on the same term. With comparable scores every
+                // tier's own top LEXICAL_CANDIDATES contains its share of the
+                // merged top LEXICAL_CANDIDATES, so the cutoff and cap below are
+                // exact over the merged, live-only list.
+                let lexicalHits = [];
+                const lexTiers = searchTiers.map((t, j) => ({ lex: t.reader.lexicalIndex, j }))
+                    .filter((x) => x.lex);
+                if (retrieval !== 'vector' && queryOptions.text && lexTiers.length) {
+                    const perTierDf = await Promise.all(lexTiers.map(({ lex }) => lex.documentFrequencies(queryOptions.text)));
+                    const df = new Map();
+                    for (const m of perTierDf) for (const [term, n] of m) df.set(term, (df.get(term) || 0) + n);
+                    const merged = [];
+                    for (const { lex, j } of lexTiers) {
+                        const tierMask = masks[j];
+                        // The mask goes into search() so a tombstoned row never
+                        // takes a slot before the cap (5.3); lazy openers
+                        // return a promise, which await covers.
+                        const hits = await lex.search(queryOptions.text, LEXICAL_CANDIDATES, {
+                            exclude: maskCounts[j] > 0 ? (id) => bitAt(tierMask, id) : undefined,
+                            // globalLexicalStats names the corpus size `N`;
+                            // search() takes `docCount`.
+                            stats: { docCount: lexStats.N, avgdl: lexStats.avgdl },
+                            df,
+                        });
+                        for (const h of hits) {
+                            merged.push({ id: searchTiers[j].rowBase + h.id, localId: h.id, tier: j, score: h.score });
+                        }
+                    }
+                    merged.sort((a, b) => (b.score - a.score) || (a.id - b.id));
+                    lexicalHits = merged.length
+                        ? merged.filter((h) => h.score >= merged[0].score / LEXICAL_CUTOFF).slice(0, LEXICAL_CANDIDATES)
+                        : [];
+                }
+
+                // --- 3. Vector candidates (5.3 step 3) -------------------------
                 const perTier = await Promise.all(searchTiers.map(async (t, j) => {
+                    // The lexical hits this tier owns join its exact rerank, so
+                    // a known-item match the sketch scan's top-C missed is still
+                    // scored by true distance (the single-file reader's rule).
+                    // They were masked while postings scored; the check here is
+                    // belt and braces, since extraCandidates bypass the mask.
+                    const extra = lexicalHits.filter((h) => h.tier === j && !(maskCounts[j] > 0 && bitAt(masks[j], h.localId)))
+                        .map((h) => h.localId);
                     // An all-zero mask is equivalent to no mask, and passing one
-                    // is expensive: a mask disables the WASM scan kernel (it
-                    // cannot honour an exclusion set), forcing a JS scan over
-                    // every row of the tier. On a 456k-record base with three
-                    // tombstones that was a 9x slowdown to skip three rows, so
-                    // the mask is omitted entirely when the tier has no live
-                    // deletion. maskCounts is computed once at mount.
-                    const out = await t.reader.sketch.search(vector, Math.min(k * 4, t.records), {
+                    // makes the sketch reader over-fetch; it is omitted when the
+                    // tier has no live deletion (maskCounts, computed at mount).
+                    const out = await t.reader.sketch.search(vector, Math.min(k, t.records), {
                         rerank: queryOptions.rerank,
                         ...(maskCounts[j] > 0 ? { exclude: masks[j] } : {}),
                         // The tier's own staged scan kernel. Read per query, not
                         // captured at mount: staging finishes in the background
-                        // after the member's open returns. With a mask present
-                        // the sketch reader over-fetches and filters, so the
-                        // kernel stays usable (5.3's no-post-truncation rule is
-                        // kept by construction, not by skipping the kernel).
+                        // after the member's open returns.
                         ...(t.reader.scanner ? { scanner: t.reader.scanner } : {}),
+                        ...(extra.length ? { extraCandidates: extra } : {}),
+                        // Every reranked candidate, not the top k: abstention is
+                        // fit at a fixed top-10 window whatever the caller's k,
+                        // and a k-sized window biased mean10 and could flip the
+                        // verdict (the single-file reader's k-mismatch fix).
+                        fullRerankOutput: true,
                     });
                     return out.results.map((r) => ({
                         id: t.rowBase + r.id, localId: r.id, tier: j,
@@ -359,49 +409,26 @@ export async function openPikeletChain(members, options = {}) {
                 const searched = perTier.flat()
                     .sort((a, b) => (a.distance - b.distance) || (a.id - b.id));
 
-                let lexicalIds = [];
-                if (retrieval !== 'vector' && queryOptions.text) {
-                    const merged = [];
-                    for (let j = 0; j < searchTiers.length; j++) {
-                        const lex = searchTiers[j].reader.lexicalIndex;
-                        if (!lex) continue;
-                        // openLexicalIndex's search is sync; the LAZY opener
-                        // used for a large segment (the wiki pack's is 69 MB)
-                        // returns a promise. Awaiting covers both.
-                        // 5.3: a tombstoned row must not occupy a lexical
-                        // slot BEFORE the cap. The mask goes into search() so
-                        // it is applied while postings score; filtering the
-                        // returned hits instead capped first and masked after,
-                        // so a tier whose top-24 were all tombstoned
-                        // contributed nothing while live rows ranked 25+ were
-                        // thrown away.
-                        //
-                        // 5.4: the chain-global {docCount, avgdl} drive IDF and
-                        // length normalization, so scores from different tiers
-                        // are comparable before fusion. These were computed at
-                        // mount, reported in info().lexical, and never applied.
-                        const tierMask = masks[j];
-                        const hits = await lex.search(queryOptions.text, 24, {
-                            exclude: maskCounts[j] > 0 ? (id) => bitAt(tierMask, id) : undefined,
-                            // globalLexicalStats names the corpus size `N`;
-                            // search() takes `docCount`. Mapping it here
-                            // rather than reading `stats.docCount` off
-                            // lexStats, which is undefined and would fall
-                            // back to the tier's own count without a word.
-                            stats: { docCount: lexStats.N, avgdl: lexStats.avgdl },
-                        });
-                        for (const h of hits) {
-                            merged.push({ id: searchTiers[j].rowBase + h.id, score: h.score });
-                        }
-                    }
-                    merged.sort((a, b) => (b.score - a.score) || (a.id - b.id));
-                    lexicalIds = merged.map((h) => h.id);
+                // --- 4. Fuse (5.3 step 4) --------------------------------------
+                // fusedFull is the full-window order (not k-truncated): coverage
+                // grounds its verdict in what fusion ranks first, exactly as the
+                // calibrator fit it. Null where the mode keeps distance order.
+                let fusedFull = null;
+                if (retrieval === 'lexical') {
+                    const byId = new Map(searched.map((hit) => [hit.id, hit]));
+                    fusedFull = lexicalHits.map((h) => byId.get(h.id)).filter(Boolean);
+                } else if (retrieval === 'hybrid' && lexicalHits.length) {
+                    const lexRank = new Map(lexicalHits.map((h, i) => [h.id, i]));
+                    fusedFull = fuseCandidates(searched, lexicalHits.map((h) => h.id), queryOptions.fusion);
+                    const vecRank = new Map(searched.map((h, i) => [h.id, i]));
+                    fusedFull = fusedFull.map((hit, i) => ({
+                        ...hit,
+                        fusedRank: i + 1,
+                        lexicalRank: lexRank.has(hit.id) ? lexRank.get(hit.id) + 1 : null,
+                        vectorRank: vecRank.get(hit.id) + 1,
+                    }));
                 }
-
-                const fused = retrieval === 'vector' || !lexicalIds.length
-                    ? searched
-                    : fuseCandidates(searched, lexicalIds, queryOptions.fusion);
-                const top = fused.slice(0, k);
+                const top = (fusedFull ?? searched).slice(0, k);
                 const results = await Promise.all(top.map(async (hit) => {
                     // ownerOf searches the interval table, whose entries carry
                     // no reader; searchTiers[] is the parallel array that does.
@@ -409,7 +436,10 @@ export async function openPikeletChain(members, options = {}) {
                     if (!owner) throw new Error(`fused result id ${hit.id} owns no search tier (5.2)`);
                     const tier = searchTiers[owner.tier.tier];
                     const record = await tier.reader.hydrate(owner.localId);
-                    return { ...record, id: hit.id, distance: hit.distance, layer: tier.depth };
+                    return {
+                        ...record, id: hit.id, distance: hit.distance, layer: tier.depth,
+                        ...(hit.fusedRank ? { fusedRank: hit.fusedRank, lexicalRank: hit.lexicalRank, vectorRank: hit.vectorRank } : {}),
+                    };
                 }));
                 // 5.5: under `inherited` the base's scorer runs unchanged over
                 // the merged window. Under `drift-exceeded` matchQuality is
@@ -423,7 +453,11 @@ export async function openPikeletChain(members, options = {}) {
                 let matchQuality = 'unscored';
                 let confidence;
                 if (calibration.status === 'inherited' && base.scoreQuality) {
-                    const passages = await Promise.all(top.slice(0, 3).map(async (hit) => {
+                    // Coverage reads the fit's passagesNeeded from the FULL
+                    // fused window; top.slice(0, 3) gave it one passage at k=1.
+                    const passagesNeeded = baseCal?.asset?.coverage?.topK || 5;
+                    const passageOrder = fusedFull?.length ? fusedFull : searched;
+                    const passages = await Promise.all(passageOrder.slice(0, passagesNeeded).map(async (hit) => {
                         const owner = ownerOf(table, hit.id);
                         const rec = await searchTiers[owner.tier.tier].reader.hydrate(owner.localId);
                         return rec?.text ?? '';
@@ -437,7 +471,7 @@ export async function openPikeletChain(members, options = {}) {
                     const scored = await base.scoreQuality(
                         searched,
                         { text: queryOptions.text ?? '', vector, passages },
-                        fused,
+                        fusedFull,
                         { vocabBloom: chainBloom },
                     );
                     if (scored && scored.match_quality) {

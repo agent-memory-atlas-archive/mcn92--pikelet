@@ -1255,6 +1255,48 @@ console.log('chain files: a base and two layers assemble and re-read');
 
     // 5.5: this base carries no fit, so the chain is `none`, and drift is
     // still computed and reported.
+    // 5.3 step 3: a tier's lexical hits join its exact rerank. A query vector
+    // at ladder 24 puts base record 10 fourteen rungs away; each tier used to
+    // return only its min(4k, records) nearest with no lexical extras, so at
+    // k=2 the base tier offered 12..19 and the exact-match record 10 was not a
+    // vector candidate. Fusion only reorders vector candidates, so it was
+    // dropped. (The fusion guard keeps the vector top hit first; the lexical
+    // match lands second.)
+    const known = await chain.query(ladderVector(24), 2, { text: '10' });
+    check('a lexical-only hit outside the vector window is still returned',
+        known.results.some((r) => r.id === 10 && r.lexicalRank === 1),
+        JSON.stringify(known.results.map((r) => [r.id, r.lexicalRank, r.vectorRank])));
+
+    // 5.4: df is summed across tiers. "record" and "body" occur in every
+    // record (base 20, layer 5) with identical tf and length, so under one
+    // global idf every live record ties and the tie breaks by ascending id:
+    // the base's records lead. Per-tier df gave the layer's 5 records a far
+    // larger idf and they took the top of the lexical list.
+    const flat = await chain.query(ladderVector(0), 22, { text: 'record body' });
+    const lexFirst = flat.results.find((r) => r.lexicalRank === 1);
+    check('global df: the lexical list is led by the base, not inflated layer scores',
+        lexFirst?.id === 0 && lexFirst?.layer === 0, JSON.stringify(lexFirst && [lexFirst.id, lexFirst.layer]));
+    const lexOnly = await chain.query(ladderVector(0), 3, { text: 'record body', retrieval: 'lexical' });
+    check('retrieval lexical returns lexical order',
+        JSON.stringify(lexOnly.results.map((r) => r.id)) === JSON.stringify([0, 1, 2]),
+        JSON.stringify(lexOnly.results.map((r) => r.id)));
+    const baseLexIdx = openLexicalIndexFor(baseLex.bytes);
+    const layerLexIdx = openLexicalIndexFor(l1Lex.bytes);
+    const gdf = new Map([['record', 25]]);
+    const gstats = { docCount: 25, avgdl: stats.avgdl };
+    check('documentFrequencies reports a tier\'s own df per query term',
+        baseLexIdx.documentFrequencies('record zzz').get('record') === 20
+        && !baseLexIdx.documentFrequencies('record zzz').has('zzz'));
+    // Records 10..24 all have four tokens (the tokenizer drops one-character
+    // ones, so 0..9 have three); compare base 10 with layer 20.
+    const scoreOf = (idx, id) => idx.search('record', 25, { stats: gstats, df: gdf }).find((h) => h.id === id)?.score;
+    check('with options.df both tiers score an identical record identically',
+        scoreOf(baseLexIdx, 10) !== undefined && scoreOf(baseLexIdx, 10) === scoreOf(layerLexIdx, 0));
+    rejects('a global df below the tier\'s own is refused',
+        () => baseLexIdx.search('record', 1, { df: new Map([['record', 3]]) }), /below this index's own df/);
+    await rejectsAsync('an unknown retrieval mode is refused, not treated as hybrid',
+        () => chain.query(ladderVector(0), 1, { text: 'x', retrieval: 'bogus' }), /retrieval must be/);
+
     check('a base with no fit yields calibrationStatus none', ci.calibrationStatus === 'none');
     check('drift is reported even when unscored', Math.abs(ci.calibrationDrift - 0.4) < 1e-9);
     check('the effective limit is the reader\'s finite default', ci.driftLimit === 0.2);
@@ -1416,6 +1458,42 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
         return u && set(1) && set(2) && set(3) && set(4) && set(5);
     })());
     await c1.close();
+
+    // 5.5 k-mismatch: the fit reads mean10 over the top-10 window whatever
+    // the caller's k. Each tier searched only min(4k, records) rows, so at
+    // k=1 the scorer saw a handful of hits and a different mean10 than at
+    // k=10: the same query got a different confidence depending on k.
+    {
+        const ids = Array.from({ length: 100 }, (_, i) => i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const cal = {
+            kind: 'retrieval-signals-v1',
+            asset: {
+                features: ['mean10'], weights: [-5], bias: 0,
+                standardize: { mean: { mean10: 0.01 }, std: { mean10: 0.01 } },
+                thresholds: { hard: 0.01, weak: 0.02 },
+                vocabBloom: { bits: BLOOM_BITS, hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'] },
+            },
+            vocabBloomBase64: bloomB64([1, 2, 3]),
+        };
+        const mb = assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC,
+            corpus: { ...corpus.corpus, ingest: ING }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, 'mean10') },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify(cal))) },
+        ], path.join(calTmp, 'base-mean10.pikelet'));
+        const ml = buildLayer(mb, 5, 'mean10');
+        const mc = await openPikeletChain([mb.outPath, ml.outPath]);
+        const at1 = await mc.query(ladderVector(50), 1, { showAbstained: true });
+        const at10 = await mc.query(ladderVector(50), 10, { showAbstained: true });
+        check('the abstention verdict does not depend on the caller\'s k',
+            Number.isFinite(at1.confidence) && at1.confidence === at10.confidence
+            && at1.matchQuality === at10.matchQuality,
+            `k=1 ${at1.matchQuality}/${at1.confidence}, k=10 ${at10.matchQuality}/${at10.confidence}`);
+        await mc.close();
+    }
 
     // 5.3/5.4: the tombstone mask must reach the lexical index BEFORE its cap,
     // and the chain-global stats must actually drive scoring. Both were
