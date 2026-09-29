@@ -210,17 +210,17 @@ const BOOLEAN_FLAGS = new Set([
   'no-refit',
 ]);
 
-function parseArgs(args) {
+export function parseArgs(args) {
   const flags = {};
   // Flags that may appear more than once collect into an array. A flag that is
   // repeatable in spirit but missing here silently keeps only the LAST value,
   // which for append's --remove would drop deletions without a word.
   //
-  // `source` is deliberately NOT here: compile and create take a single
-  // --source and read it as a string (`new URL(flags.source)`,
-  // `path.resolve(..., flags.source)`), so making it an array globally breaks
-  // both. append accepts several and normalizes with [].concat() itself.
-  const repeated = new Set(['include', 'exclude', 'include-url', 'exclude-url', 'pack',
+  // `source` collects like these, then collapses back to a string below for
+  // every command but append: compile and create read it as a string
+  // (`new URL(flags.source)`, `path.resolve(..., flags.source)`), while append
+  // takes several. Leaving it out of this set kept only the last --source.
+  const repeated = new Set(['include', 'exclude', 'include-url', 'exclude-url', 'pack', 'source',
     'remove', 'supersede',
     // compact takes a chain, listed base-first, so --head repeats.
     'head', 'parent',
@@ -254,6 +254,13 @@ function parseArgs(args) {
     } else {
       flags[name] = value;
     }
+  }
+  if (flags.source && positionals[0] !== 'append') {
+    if (flags.source.length > 1) {
+      throw new CliError(`--source may be given once${positionals[0] ? ` for ${positionals[0]}` : ''}; `
+        + `got ${flags.source.length}`);
+    }
+    flags.source = flags.source[0];
   }
   return { flags, positionals };
 }

@@ -2355,6 +2355,18 @@ console.log('locator following: a chain mounts from its head alone (5.1.1)');
 // working version still had a bug the function tests could not see (it
 // destructured plan.skippedEdges as [x, y] pairs when planRebase pushes bare
 // ids, so --on-conflict skip crashed). These drive the real binary.
+console.log('cli: repeated --source (6.1)');
+{
+    const { parseArgs } = await import('../packages/pikelet/src/cli.mjs');
+    const a = parseArgs(['append', '--source', 'a', '--source', 'b']);
+    check('append keeps every --source, not only the last',
+        Array.isArray(a.flags.source) && a.flags.source.join() === 'a,b', JSON.stringify(a.flags.source));
+    const c = parseArgs(['compile', '--source', 'docs']);
+    check('compile still reads a single --source as a string', c.flags.source === 'docs');
+    rejects('compile refuses a second --source rather than keeping the last',
+        () => parseArgs(['compile', '--source', 'a', '--source', 'b']), /--source may be given once/);
+}
+
 console.log('rebase: the command, end to end (6.2)');
 {
     const { execFileSync } = await import('node:child_process');
