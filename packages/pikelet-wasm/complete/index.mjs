@@ -384,6 +384,46 @@ export async function readMemberManifest(input, options = {}) {
     }
 }
 
+/**
+ * Validate a segment table against the identity-committed manifest and return
+ * kind -> {offset, length, sha256}. The table sits OUTSIDE the identity, so
+ * every entry must agree with the manifest entry at the same index: length,
+ * digest shape, contiguous 16-aligned placement inside the file, and kind. A
+ * known kind appears at most once. Unknown kinds are skipped (spec 3.3), but
+ * the manifest must not name them as a kind this reader knows. Shared by the
+ * full open and the chain-member shell so neither can drift from the other.
+ */
+function parseSegmentTable(table, manifest, segmentCount, manifestBytes, fileBytes) {
+    const tableView = viewOf(table);
+    const segments = new Map();
+    let expectedOffset = align16(HEADER_BYTES + manifestBytes + segmentCount * TABLE_ENTRY_BYTES);
+    for (let i = 0; i < segmentCount; i++) {
+        const entry = i * TABLE_ENTRY_BYTES;
+        const kindNumber = tableView.getUint32(entry, true);
+        const kind = KIND_NAMES[kindNumber];
+        const offset = u64(tableView, entry + 8, `segment ${i} offset`);
+        const length = u64(tableView, entry + 16, `segment ${i} length`);
+        const declared = manifest.segments[i];
+        if (!declared || typeof declared !== 'object' || declared.bytes !== length || !isSha256Hex(declared.sha256)
+            || offset !== expectedOffset || !Number.isSafeInteger(offset + length) || offset + length > fileBytes) {
+            throw new Error(`.pikelet segment table disagrees with manifest at entry ${i}`);
+        }
+        if (kind === undefined) {
+            if (typeof declared.kind !== 'string' || declared.kind in KINDS) {
+                throw new Error(`.pikelet segment table entry ${i} has unknown kind ${kindNumber} but the manifest names it ${declared.kind}`);
+            }
+        } else {
+            if (declared.kind !== kind) {
+                throw new Error(`.pikelet segment table disagrees with manifest at entry ${i}`);
+            }
+            if (segments.has(kind)) throw new Error(`.pikelet carries more than one ${kind} segment`);
+            segments.set(kind, { offset, length, sha256: declared.sha256 });
+        }
+        expectedOffset = align16(offset + length);
+    }
+    return segments;
+}
+
 export async function readChainMemberShell(input, options = {}) {
     const source = typeof input === 'string' ? await fileSource(input) : input;
     const owned = typeof input === 'string';
@@ -399,6 +439,10 @@ export async function readChainMemberShell(input, options = {}) {
         const identity = [...new Uint8Array(header.buffer, header.byteOffset + 24, 32)]
             .map((b) => b.toString(16).padStart(2, '0')).join('');
         const fileBytes = u64(hv, 16, 'header fileBytes');
+        if (manifestBytes < 2 || manifestBytes > MAX_MANIFEST_BYTES || segmentCount < 1 || segmentCount > MAX_SEGMENTS
+            || HEADER_BYTES + manifestBytes + segmentCount * TABLE_ENTRY_BYTES > fileBytes) {
+            throw new Error('.pikelet header is implausible');
+        }
         const manifestBuf = await readChecked(source, HEADER_BYTES, manifestBytes, 'manifest', maxReadBytes, fileBytes);
         if (await sha256hex(manifestBuf) !== identity) {
             throw new Error('.pikelet manifest failed identity verification');
@@ -410,25 +454,23 @@ export async function readChainMemberShell(input, options = {}) {
         if (manifest.layer?.records !== 0) {
             return { tombstoneOnly: false, tier: null, close };
         }
-        const table = await readChecked(source, HEADER_BYTES + manifestBytes, segmentCount * TABLE_ENTRY_BYTES, 'segment table', maxReadBytes, fileBytes);
-        const tv = viewOf(table);
-        const segments = new Map();
-        let expectedOffset = align16(HEADER_BYTES + manifestBytes + segmentCount * TABLE_ENTRY_BYTES);
-        for (let i = 0; i < segmentCount; i++) {
-            const entry = i * TABLE_ENTRY_BYTES;
-            const kind = KIND_NAMES[tv.getUint32(entry, true)];
-            const offset = u64(tv, entry + 8, `segment ${i} offset`);
-            const length = u64(tv, entry + 16, `segment ${i} length`);
-            const declared = manifest.segments[i];
-            if (!declared || declared.bytes !== length || !isSha256Hex(declared.sha256)
-                || offset !== expectedOffset || offset + length > fileBytes) {
-                throw new Error(`.pikelet segment table disagrees with manifest at entry ${i}`);
-            }
-            if (kind !== undefined) segments.set(kind, { offset, length, sha256: declared.sha256 });
-            expectedOffset = align16(offset + length);
+        if (!Array.isArray(manifest.segments) || manifest.segments.length !== segmentCount) {
+            throw new Error('.pikelet manifest segment list disagrees with the header segment count');
         }
+        // The same table checks as the full open. This path used to keep only
+        // length and digest shape: it never compared the table's kind with the
+        // manifest's and let a later duplicate overwrite an earlier one, so
+        // whoever controls the table bytes (a mirror) could relabel another
+        // committed segment as the tombstone mask without changing identity.
+        const table = await readChecked(source, HEADER_BYTES + manifestBytes, segmentCount * TABLE_ENTRY_BYTES, 'segment table', maxReadBytes, fileBytes);
+        const segments = parseSegmentTable(table, manifest, segmentCount, manifestBytes, fileBytes);
         for (const required of ['query-interp', 'tombstones']) {
             if (!segments.has(required)) throw new Error(`a tombstone-only layer is missing the ${required} segment`);
+        }
+        // 4.3: a tombstone-only layer carries no records, so it MUST NOT carry
+        // the segments that would hold them.
+        for (const forbidden of ['index', 'corpus', 'lexical']) {
+            if (segments.has(forbidden)) throw new Error(`a tombstone-only layer must not carry a ${forbidden} segment (4.3)`);
         }
         return {
             tombstoneOnly: true,
@@ -561,36 +603,7 @@ export async function openPikeletFile(input, options = {}) {
         }
 
         const table = await readChecked(source, HEADER_BYTES + manifestBytes, tableBytes, 'segment table', maxReadBytes, fileBytes);
-        const tableView = viewOf(table);
-        const segments = new Map();
-        let expectedOffset = align16(HEADER_BYTES + manifestBytes + tableBytes);
-        for (let i = 0; i < segmentCount; i++) {
-            const entry = i * TABLE_ENTRY_BYTES;
-            const kindNumber = tableView.getUint32(entry, true);
-            const kind = KIND_NAMES[kindNumber];
-            const offset = u64(tableView, entry + 8, `segment ${i} offset`);
-            const length = u64(tableView, entry + 16, `segment ${i} length`);
-            const declared = manifest.segments[i];
-            if (!declared || typeof declared !== 'object' || declared.bytes !== length || !isSha256Hex(declared.sha256)
-                || offset !== expectedOffset || !Number.isSafeInteger(offset + length) || offset + length > fileBytes) {
-                throw new Error(`.pikelet segment table disagrees with manifest at entry ${i}`);
-            }
-            if (kind === undefined) {
-                // Unknown kinds are skipped, not failed (spec 3.3); they are
-                // still committed through the manifest, so the declared name
-                // must at least not claim to be a kind this reader knows.
-                if (typeof declared.kind !== 'string' || declared.kind in KINDS) {
-                    throw new Error(`.pikelet segment table entry ${i} has unknown kind ${kindNumber} but the manifest names it ${declared.kind}`);
-                }
-            } else {
-                if (declared.kind !== kind) {
-                    throw new Error(`.pikelet segment table disagrees with manifest at entry ${i}`);
-                }
-                if (segments.has(kind)) throw new Error(`.pikelet carries more than one ${kind} segment`);
-                segments.set(kind, { offset, length, sha256: declared.sha256 });
-            }
-            expectedOffset = align16(offset + length);
-        }
+        const segments = parseSegmentTable(table, manifest, segmentCount, manifestBytes, fileBytes);
         // The evaluation segment, read and hash-verified. Named so both the
         // reader's own evaluation() and the __chainTier seam can reach it: a
         // chain has no evaluation segment of its own, and `verify_pack` called

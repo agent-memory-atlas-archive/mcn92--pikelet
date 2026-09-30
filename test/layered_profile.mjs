@@ -2664,6 +2664,68 @@ console.log('rebase: the command, end to end (6.2)');
     fs.rmSync(rt, { recursive: true, force: true });
 }
 
+console.log('tombstone-only layers: the segment table must agree with the manifest (4.3)');
+{
+    // The segment table sits outside the identity. readChainMemberShell, the
+    // path a tombstone-only layer is read through, used to keep only length
+    // and digest shape per entry: it never compared the table's kind with the
+    // manifest's, and a later entry of the same kind overwrote an earlier one.
+    // Relabelling a committed evaluation segment as kind 6 (tombstones) in
+    // the table therefore swapped which bytes served as the deletion mask,
+    // and the identity still verified.
+    const { readChainMemberShell } = await import('../packages/pikelet-wasm/complete/index.mjs');
+    const tt = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-shell-'));
+    const BASE = 'c'.repeat(64);
+    const QISHA = 'd'.repeat(64);
+    const qi = buildInheritedQuerySegment({ baseIdentity: BASE, queryInterpSha256: QISHA });
+    const layerFields = {
+        profile: PROFILE_LAYER, dim: 16, metric: 'cosine', encoder: { kind: 'host-encoder-v1', model: 'test' },
+        layer: {
+            parent: { identity: BASE }, baseIdentity: BASE, depth: 1, rowBase: 10, records: 0,
+            tombstones: 1, supersessions: 0, ingest: { chunker: 'v1' },
+        },
+        corpus: { records: 0 },
+    };
+    const mask = buildTombstoneSegment({ rowBase: 10, tombstonedIds: [3], records: 0 });
+    // An evaluation segment that happens to parse as a DIFFERENT mask.
+    const decoy = buildTombstoneSegment({ rowBase: 10, tombstonedIds: [1, 2, 4], records: 0 });
+    const good = path.join(tt, 'good.pikelet');
+    assemblePikeletFile(layerFields, [
+        { kind: 'query-interp', bytes: qi },
+        { kind: 'tombstones', bytes: mask },
+        { kind: 'evaluation', bytes: decoy },
+    ], good);
+    const shell = await readChainMemberShell(good);
+    check('an untampered tombstone-only layer reads through the shell', shell.tombstoneOnly === true);
+    await shell.close();
+
+    // Rewrite table entry `i`'s kind number on a copy; the manifest, and so
+    // the identity, are untouched.
+    const relabel = (name, i, kindNumber) => {
+        const buf = fs.readFileSync(good);
+        buf.writeUInt32LE(kindNumber, 64 + buf.readUInt32LE(8) + i * 48);
+        const at = path.join(tt, name);
+        fs.writeFileSync(at, buf);
+        return at;
+    };
+    await rejectsAsync('a table that relabels the evaluation segment as tombstones is refused',
+        () => readChainMemberShell(relabel('swap.pikelet', 2, 6)), /segment table disagrees with manifest at entry 2/);
+    await rejectsAsync('a table kind the manifest does not name is refused',
+        () => readChainMemberShell(relabel('mislabel.pikelet', 1, 4)), /segment table disagrees with manifest at entry 1/);
+
+    // 4.3: a tombstone-only layer MUST NOT carry index, corpus or lexical.
+    const withLex = path.join(tt, 'withlex.pikelet');
+    assemblePikeletFile(layerFields, [
+        { kind: 'query-interp', bytes: qi },
+        { kind: 'tombstones', bytes: mask },
+        { kind: 'lexical', bytes: buildLexSeg(['stray text']).bytes },
+    ], withLex);
+    await rejectsAsync('a tombstone-only layer carrying a lexical segment is refused',
+        () => readChainMemberShell(withLex), /must not carry a lexical segment/);
+
+    fs.rmSync(tt, { recursive: true, force: true });
+}
+
 console.log('lineage: a compacted base translates citations through the reader');
 {
     const linTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-lineage-'));
