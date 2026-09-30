@@ -8,6 +8,14 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## Unreleased
+
+### Fixed
+
+- **`pikelet-wasm` now exports `./package.json`.** `require.resolve('pikelet-wasm/package.json')`
+  and JSON imports of it threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, which
+  tooling that reads the installed version relies on.
+
 ## pikelet-wasm 0.9.0 / pikelet 0.9.0 — 2026-09-29
 
 Everything merged to `main` since 0.8.0 that the 0.8.1 and 0.8.2 point

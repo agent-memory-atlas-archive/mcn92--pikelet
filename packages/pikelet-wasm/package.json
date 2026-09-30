@@ -101,7 +101,8 @@
     "./complete/layer-compact.mjs": {
       "default": "./complete/layer-compact.mjs"
     },
-    "./engine.wasm": "./dist/engine.wasm"
+    "./engine.wasm": "./dist/engine.wasm",
+    "./package.json": "./package.json"
   },
   "files": [
     "src",
