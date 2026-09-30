@@ -40,6 +40,8 @@ first.
   5.1.1 requires; lineage and host-resolver locations are the operator's
   choice and are not confined. `httpRangeSource` gains `url` and a
   `redirectGuard` option.
+- **`pikelet --help` documents `append`, `compact` and `rebase`**, including
+  `--supersede`, `--allow-drift`, `--max-depth` and pins.
 
 ## pikelet-wasm 0.9.0 / pikelet 0.9.0 — 2026-09-29
 

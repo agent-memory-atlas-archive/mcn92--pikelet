@@ -97,7 +97,8 @@ Usage:
   pikelet compile --source <path|url> --out search.pikelet
   pikelet rebuild --yes
   pikelet doctor <url>   # probe artifact hosting: Range/206, cache-key ranges, h2, ETag, RTT
-  pikelet append --parent <file|url> [--source <path|url> ...] [--remove <id> ...] --out layer.pikelet
+  pikelet append --parent <file|url> [--parent ...] [--source <path|url> ...]
+                 [--remove <id> ...] [--supersede <id>=<path> ...] --out layer.pikelet
   pikelet compact --head <base> [--head <layer> ...] --out compacted.pikelet [--no-refit]
   pikelet rebase --layer <file> --onto <base> [--onto <layer> ...] --out rebased.pikelet
                  [--old-parent <file> ...] [--on-conflict refuse|skip|keep-both]
@@ -116,6 +117,23 @@ either form takes '#<sha256>' to pin the manifest identity (mismatches
 refuse to serve). --shelf mounts every pack on a static packs.json listing
 (see packs/README.md). mcp install writes the MCP client config instead of
 running the server (--server-name names the entry, --force replaces it).
+
+append, compact and rebase work on layered chains (LAYERED_PROFILE.md).
+append writes a small layer on top of a pack: new records from --source,
+tombstones from --remove (one id per flag), and replacements from
+--supersede <oldId>=<path>, which retires oldId in favour of the record
+ingested from that source path. --parent names the chain base-first, or
+just its head, whose ancestors are found by locator. It refuses when the
+chain's calibration would drift past its limit unless --allow-drift (the
+chain then serves unscored); --max-depth caps the chain depth. compact folds a
+chain into one fresh base (--no-refit skips recalibration and ships it
+unscored). rebase moves a layer onto a different head, replaying only what
+that layer itself did; its original parent is found by the layer's locator
+or named with --old-parent. Every chain-member flag (--parent, --head,
+--onto, --old-parent, --layer) takes '#<sha256>' to pin that member's
+manifest identity. A new layer records where its parent lives, as
+--parent-locator <relative path> or, by default, the parent's path relative
+to --out when the parent is a local file under the output directory.
 
 compile builds a complete kind-3 .pikelet artifact from the source and stops:
 no project, no Worker, no Cloudflare. The file carries the corpus, index,
