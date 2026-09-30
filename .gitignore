@@ -144,11 +144,17 @@ examples/legacy/range-artifact-demo/static/dist/
 /benchmark_nytimes.js
 /docs-search-student/
 
-# BEIR benchmark — downloaded datasets, converted records/packs, raw+scored
-# results. Commit the adapter scripts and config.json, not the data.
+# BEIR benchmark — downloaded datasets and converted records/packs. Commit
+# the adapter scripts and config.json, not the data.
 benchmarks/beir/cache/
 benchmarks/beir/work/
-benchmarks/beir/results/
+# results/ IS tracked: 42 files, 36 KB of metrics and run config, no paths or
+# corpora. It was ignored through 2026-09-27, which left the README as the
+# only committed record of the ladder — so a partial table refresh (e4b826b)
+# published an inverted conclusion for four days with nothing in git able to
+# catch the drift. Tracking the scored runs makes the README checkable
+# against them in review.
+!benchmarks/beir/results/
 # Exported Arctic-XS weight blob + vocab (export_encoder_blob.py) — same
 # convention as examples/one-file-search/encoder-spike/real/: a locally
 # regenerable export, not source.

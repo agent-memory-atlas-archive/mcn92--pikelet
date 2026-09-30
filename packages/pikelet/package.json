@@ -1,6 +1,6 @@
 {
   "name": "pikelet",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "mcpName": "io.github.mcn92/pikelet",
   "description": "Compile docs into a complete .pikelet search artifact, or scaffold a Pikelet-backed search app.",
   "type": "module",

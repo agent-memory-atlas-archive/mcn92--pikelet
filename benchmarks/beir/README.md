@@ -154,11 +154,11 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | Dataset | Config | nDCG@10 | Recall@10 | Recall@100 | median ms/query |
 |---|---|---|---|---|---|
 | SciFact (300q) | A upstream float exhaustive | 0.6451 | 0.7833 | 0.9250 | 3.6 |
-| SciFact | B Pikelet encoder / float exhaustive | 0.6535 | 0.7997 | 0.9317 | 3.6 |
-| SciFact | C Pikelet encoder / affine-u8 exhaustive | 0.6576 | 0.8031 | 0.9317 | 3.6 |
-| SciFact | D Pikelet encoder / affine-u8, dense only | 0.6580 | 0.8031 | 0.9317 | 0.2 |
-| SciFact | **E MiniLM / hybrid (production default)** | **0.7028** | **0.8431** | 0.9450 | 7.4 |
-| SciFact | F BM25 lexical only | 0.6591 | 0.7816 | 0.8726 | 0.6 |
+| SciFact | B Pikelet encoder / float exhaustive | 0.6554 | 0.8086 | 0.9317 | 3.7 |
+| SciFact | C Pikelet encoder / affine-u8 exhaustive | 0.6560 | 0.8086 | 0.9317 | 3.7 |
+| SciFact | D Pikelet encoder / affine-u8, dense only | 0.6562 | 0.8086 | 0.9317 | 0.2 |
+| SciFact | **E MiniLM / hybrid (production default)** | **0.7011** | **0.8466** | 0.9400 | 7.6 |
+| SciFact | F BM25 lexical only | 0.6591 | 0.7816 | 0.8726 | 0.7 |
 | SciFact | G Arctic-XS / dense only | 0.6427 | 0.7700 | 0.8620 | 7.8 |
 | SciFact | G-noprefix (Arctic-XS, no query prefix) | 0.4791 | 0.6154 | 0.7363 | 7.7 |
 | SciFact | H Arctic-XS / hybrid | 0.6879 | 0.8077 | 0.9103 | 8.4 |
@@ -167,20 +167,20 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | SciFact | I BGE-small / affine-u8, dense only | 0.7044 | 0.8246 | 0.9400 | 0.2 |
 | SciFact | **I BGE-small / hybrid** | **0.7298** | **0.8496** | 0.9417 | 8.2 |
 | NFCorpus (323q) | A upstream float exhaustive | 0.3159 | 0.1550 | 0.3115 | 2.6 |
-| NFCorpus | B Pikelet encoder / float exhaustive | 0.3103 | 0.1548 | 0.3057 | 2.9 |
-| NFCorpus | C Pikelet encoder / affine-u8 exhaustive | 0.3104 | 0.1551 | 0.3055 | 3.0 |
-| NFCorpus | D Pikelet encoder / affine-u8, dense only | 0.3049 | 0.1511 | 0.3034 | 0.2 |
-| NFCorpus | **E MiniLM / hybrid (production default)** | **0.3328** | 0.1618 | 0.3163 | 5.0 |
+| NFCorpus | B Pikelet encoder / float exhaustive | 0.3173 | 0.1562 | 0.3088 | 2.8 |
+| NFCorpus | C Pikelet encoder / affine-u8 exhaustive | 0.3174 | 0.1563 | 0.3089 | 2.8 |
+| NFCorpus | D Pikelet encoder / affine-u8, dense only | 0.3164 | 0.1572 | 0.3080 | 0.2 |
+| NFCorpus | **E MiniLM / hybrid (production default)** | **0.3391** | 0.1655 | 0.3100 | 4.9 |
 | NFCorpus | F BM25 lexical only | 0.3063 | 0.1435 | 0.2337 | 0.1 |
 | NFCorpus | G Arctic-XS / dense only | 0.3085 | 0.1462 | 0.2607 | 5.9 |
 | NFCorpus | G-noprefix (Arctic-XS, no query prefix) | 0.1546 | 0.0777 | 0.1818 | 5.5 |
 | NFCorpus | H Arctic-XS / hybrid | 0.3283 | 0.1558 | 0.2729 | 5.6 |
 | ArguAna (1406q) | A upstream float exhaustive | 0.3698 | 0.7653 | 0.9772 | 7.8 |
-| ArguAna | B Pikelet encoder / float exhaustive | 0.3582 | 0.7461 | 0.9737 | 5.9 |
-| ArguAna | C Pikelet encoder / affine-u8 exhaustive | 0.3578 | 0.7454 | 0.9737 | 6.0 |
-| ArguAna | D Pikelet encoder / affine-u8, dense only | 0.3578 | 0.7454 | 0.9737 | 0.1 |
-| ArguAna | **E MiniLM / hybrid (production default)** | **0.3577** | 0.7454 | 0.9737 | 16.9 |
-| ArguAna | F BM25 lexical only | 0.3273 | 0.6920 | 0.9324 | 6.1 |
+| ArguAna | B Pikelet encoder / float exhaustive | 0.3612 | 0.7546 | 0.9772 | 6.1 |
+| ArguAna | C Pikelet encoder / affine-u8 exhaustive | 0.3613 | 0.7532 | 0.9772 | 6.3 |
+| ArguAna | D Pikelet encoder / affine-u8, dense only | 0.3613 | 0.7532 | 0.9772 | 0.1 |
+| ArguAna | **E MiniLM / hybrid (production default)** | **0.3613** | 0.7532 | 0.9772 | 16.7 |
+| ArguAna | F BM25 lexical only | 0.3273 | 0.6920 | 0.9324 | 6.0 |
 | ArguAna | **G Arctic-XS / dense only** | **0.3788** | 0.7681 | 0.9566 | 10.5 |
 | ArguAna | G-noprefix (Arctic-XS, no query prefix) | 0.3795 | 0.7639 | 0.9381 | 10.4 |
 | ArguAna | **H Arctic-XS / hybrid** | **0.3788** | 0.7681 | 0.9566 | 17.5 |
@@ -209,9 +209,18 @@ B-F row measured before then was encoded with 128-token windows and
 windowed mean pooling, while the CLI has shipped a 512-token window since
 2026-09-11. The SciFact, NFCorpus and ArguAna B-F rows above are re-encoded
 at 512 (the H rows and the FiQA rows are still the 128-window vectors).
+**The NFCorpus B-E rows were left at their 128-window values in this table
+until 2026-09-27**, although the re-encode had rewritten
+`results/nfcorpus-{B..F}.json` on 2026-09-23: `e4b826b` refreshed only the
+SciFact and ArguAna rows. They now match the files on disk. The correction
+raised the published figures (D 0.3049 -> 0.3164, E 0.3328 -> 0.3391), so the
+512-window effect on NFCorpus is smaller than the -0.005 stated below, not
+larger.
 128 -> 512 moved nDCG@10 by +0.008 on ArguAna and +0.002..+0.008 on SciFact
-(long passages, previously 2-3 windows each), and -0.005 on NFCorpus (short
-abstracts; inside the noise of 323 graded queries); recall@100 dipped
+(long passages, previously 2-3 windows each). The NFCorpus figure was reported
+as -0.005 from the stale rows; against the corrected ones the 512 encode is
+slightly BETTER there too, so the claim that NFCorpus regressed does not
+survive the correction. Recall@100 dipped
 0.6-1.0 points on the two long-document sets while recall@10 rose. Corpus
 encoding costs 5-15% more (one long pass instead of several short ones).
 FiQA was encoded after the change and is the one dataset the rule was never
@@ -230,10 +239,14 @@ on these tasks — this is not a benchmark that happens to favor Pikelet, it
 reproduces known-hard and known-easy cases correctly.
 
 **Per-dataset A→B (encoder-quantization) deltas differ meaningfully:**
-SciFact +0.0061 (net positive), NFCorpus -0.0005 (negligible), ArguAna
-**-0.0192** (real, not noise at n=1406). ArguAna was chosen specifically to
-stress semantic discrimination, and it's the first dataset where quantizing
-the encoder shows a measurable cost. B→C (corpus quantization) and C→D
+SciFact **+0.0103** (net positive), NFCorpus **+0.0014** (net positive),
+ArguAna **-0.0087** (still the only negative here, and outside noise at
+n=1406). All three were restated on 2026-09-27 against the scored runs on
+disk; they had read +0.0061, -0.0005 and -0.0192, computed from B rows the
+512-token re-encode had already superseded. The shape of the finding
+survives — ArguAna is the one dataset where quantizing the encoder costs
+anything — but the cost is less than half what was published, and NFCorpus
+moved from straddling zero to net positive. B→C (corpus quantization) and C→D
 (dense-only sketch artifact search) stay small and roughly flat relative to
 B on all three datasets — the loss so far, where it exists, concentrates in
 the encoder step, not the storage or search-approximation steps. Do not
@@ -248,29 +261,43 @@ lookup plus a wider exact-rerank candidate set — still well under exhaustive
 search's cost and nowhere near a latency-sensitive regime at these corpus
 sizes.
 
-### Hybrid RRF vs. dense only (E vs. D): mostly a no-op on this suite, not a bug
+### Hybrid RRF vs. dense only (E vs. D): a real gain since the 2026-09-23 fusion change
 
-E matches D's nDCG@10 exactly on SciFact and ArguAna, and beats it by
-0.0019 on NFCorpus. This is not hybrid retrieval failing to do anything —
-`LEXICAL_CUTOFF=1.5` (kept identical to `complete/index.mjs`'s production
-constant) is deliberately conservative: only BM25 hits within a factor of
-1.5 of the top lexical score join the fusion, so a corpus/query mix where
-the top vector hit is already lexically well-supported produces no
-reordering. F (lexical-only) is markedly worse than D on all three datasets
-(-0.0 on none, up to -0.025 on ArguAna, -0.010 on NFCorpus), which is what
-makes E's near-parity with D meaningful rather than vacuous: BM25 alone is
-not a strong signal on this suite, and the cutoff is correctly declining to
-let a weak signal disturb a strong one. This ladder does not yet include a
+**This section's original premise no longer holds.** It was written when E
+reproduced D almost exactly, and that is what the old heading claimed.
+Against the runs on disk, E now *beats* D by **+0.0449** on SciFact and
+**+0.0227** on NFCorpus, and ties it on ArguAna (-0.0000). Hybrid fusion is
+not a no-op on this suite; it is the largest single gain on the ladder
+outside the encoder step.
+
+What changed is the fusion rule, not the data. These E rows were scored with
+`rrfK: 60, lexicalWeight: 0.5, guardMargin: 0.05` (recorded in each run's
+`system.fusion`), the weighted fusion that became the default on 2026-09-23.
+The text below described the older unweighted RRF, where an
+`LEXICAL_CUTOFF=1.5` gate admitted few enough BM25 hits that the vector
+ranking usually survived untouched. Under the weighted rule the lexical
+ranking carries real weight and the guard margin, not the cutoff, is what
+protects a strong vector hit.
+
+ArguAna's tie is still explained the old way: its "queries" are full
+argument passages, so BM25 and the vector ranking largely agree and there is
+nothing for fusion to reorder. F (lexical-only) vs. D is no longer uniformly
+negative either — F beats D by +0.0029 on SciFact, and trails it by 0.0101
+on NFCorpus and 0.0340 on ArguAna — so "BM25 alone is a weak signal on this
+suite" holds on two of three datasets, not all three.
+
+This ladder does not yet include a
 dataset where the two rankings meaningfully disagree at the top (that would
 be the interesting case to add next — a corpus with real known-item/keyword
 lookups, closer to what surfaced the calibration-side lexical blind spot;
 see `packages/pikelet/src/calibrate.mjs`'s `fusedTop`/`LEXICAL_CUTOFF`).
 
-**`config.json`'s `hybridWeight: 0.35` field is stale/unused dead config.**
-Production's RRF (`complete/index.mjs`) has no weight term — it's an
-unweighted sum of `1/(RRF_K+rank)` over the two rankings, and E/H reproduce
-that exactly. Do not read `hybridWeight` as documenting a real knob; nothing
-in the shipped reader consults it.
+**`config.json`'s `hybridWeight: 0.35` field is still stale/unused dead
+config**, but the reason has changed: production's fusion does now carry a
+weight term, just not that one. `fuseCandidates()` takes `lexicalWeight`
+(0.5 by default) and a `guardMargin`, which is what these E/H rows were
+scored with. `hybridWeight` predates that rule and nothing in the shipped
+reader consults it; do not read it as documenting the knob that exists.
 
 ### Query-prefix ablation: Arctic-XS's asymmetric prefix is real and large — where queries are short
 
@@ -304,17 +331,25 @@ Wikipedia scale (there Arctic-XS "rescued" 16/18 false-abstention cases, but by 
 a calibration blind spot, not by being a better encoder in general) does not
 reproduce as a general win here:
 
+Every MiniLM figure in this comparison was restated on 2026-09-27 against the
+scored runs on disk. The G/H rows were written before the E rows were rescored
+in vector order (see the note under the table) and before the 512-token
+re-encode, so this section had been comparing Arctic-XS against MiniLM numbers
+that no longer appeared anywhere in the table — SciFact hybrid was cited as
+0.6500 where the run scores 0.7011. The verdict below is unchanged; the margins
+are not.
+
 - **SciFact**: Arctic-XS trails MiniLM on every metric, dense (0.6427 vs.
-  0.6500) and hybrid (0.6473 vs. 0.6500).
+  0.6562, -0.0135) and hybrid (0.6879 vs. 0.7011, -0.0132).
 - **NFCorpus**: Arctic-XS trails MiniLM on every metric, dense (0.3085 vs.
-  0.3135) and hybrid (0.3103 vs. 0.3154) — though the two are close enough
-  here that the gap could plausibly narrow or flip with a larger query
-  sample.
-- **ArguAna**: Arctic-XS **beats** MiniLM, dense (0.3788 vs. 0.3496,
-  +0.0292) and hybrid (0.3788 vs. 0.3496, +0.0292 — identical to dense here,
+  0.3164, -0.0079) and hybrid (0.3283 vs. 0.3391, -0.0108) — though the two
+  are close enough here that the gap could plausibly narrow or flip with a
+  larger query sample.
+- **ArguAna**: Arctic-XS **beats** MiniLM, dense (0.3788 vs. 0.3613,
+  +0.0176) and hybrid (0.3788 vs. 0.3613, +0.0176 — identical to dense here,
   since hybrid is a near-no-op on ArguAna for either encoder). ArguAna is
   also the one dataset in the existing A→B row where MiniLM's own
-  quantization already showed a real, measured cost (-0.0192) — the dataset
+  quantization shows a real, measured cost (-0.0087) — the dataset
   chosen specifically to stress semantic discrimination is the one place a
   different encoder pulls ahead.
 

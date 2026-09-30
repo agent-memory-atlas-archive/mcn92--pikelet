@@ -8,6 +8,68 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## 0.8.2 — `pikelet`
+
+### Fixed
+
+- **`pikelet mcp` answers `initialize` without waiting for its packs to
+  mount.** The server mounted every pack before replying to the MCP
+  handshake, and a URL mount fetches the pack's resident prefix first: about
+  5.6 s for the rust-book pack and 9.2 s for the 649 MiB Simple English
+  Wikipedia one. The published three-pack shelf took **10.2 s** to answer
+  `initialize`, past the point most MCP clients give up — so the documented
+  `mcp --shelf` command timed out for a new user.
+
+  Mounting now runs concurrently with the protocol loop. `initialize` returns
+  in about **0.6 s**; `tools/call` and `tools/list` await the mounts, so a
+  client gets a fast handshake and pays the mount cost on its first real call.
+  `tools/list` waits deliberately: it advertises the mounted pack names, and
+  answering early would name fewer packs than the server goes on to serve.
+
+### Documentation
+
+- The install instructions lead with `npm install -g pikelet --omit=optional`.
+  Measured on a clean project, that is 2 packages / 1.8 MB / "found 0
+  vulnerabilities" against 82 packages / 257 MB / "6 vulnerabilities (5 high,
+  1 critical)" — every advisory is inside `@xenova/transformers`, which only
+  the `create` scaffold path loads. The previous README put the flag in a
+  mid-paragraph aside and estimated its cost at "~140 MB".
+- README carries an upgrade note for the `pikelet-wasm@0.8.1` heap-overflow
+  fix, which shipped without one.
+
+## 0.8.1 — `pikelet-wasm`
+
+Security release, cut from `main` ahead of the rest of the unreleased
+backlog below. `pikelet` is unchanged at 0.8.1 and picks this up through its
+`^0.8.0` dependency range.
+
+### Security
+
+- **A `.pikelet` can no longer overflow the encoder's WASM heap through an
+  out-of-range `maxTokens`.** `complete/inline-transformer.mjs` sized the
+  kernel's ids and hidden-state buffers from the artifact's own encoder
+  declaration, clamped with `Math.min(declaration.maxTokens || 512, 512)` —
+  an upper bound only. A pack declaring `maxTokens: 1` made the windowing
+  arithmetic (`windowLen = maxSeq - 2`) negative, so `interior.slice(w *
+  windowLen, (w + 1) * windowLen)` returned nearly the whole token sequence
+  and the forward pass wrote past both allocations: a 60-token query wrote
+  about 92 KB into a 1,536-byte buffer. `maxTokens` is now validated as an
+  integer in `[8, 512]` at parse, before anything is allocated, `maxSeq` is
+  clamped on both sides, and both call sites assert the window fits.
+
+  This fired at **mount**, before any query: the reader awaits the encoder
+  for a non-deferred query-interp segment (and prefetches it otherwise), and
+  the declaration's own `testVectors` are verified after the buffers exist,
+  so a long test vector was itself a trigger. Every integrity check passed,
+  because the attacker authored the file and its digests bind their bytes.
+
+  Affects anyone who mounts a `.pikelet` they did not compile — the format's
+  intended use, since packs are distributed and range-read from URLs. The
+  write is confined to the encoder's WASM linear memory and does not reach
+  host JavaScript objects, which is why it is rated high rather than
+  critical. Upgrade to get the bound; there is no workaround short of not
+  mounting third-party packs.
+
 ## Unreleased
 
 ### Breaking / compatibility

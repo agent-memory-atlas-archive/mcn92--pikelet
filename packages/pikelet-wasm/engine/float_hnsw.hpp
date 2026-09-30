@@ -138,6 +138,7 @@ public:
         , num_deleted_(0)
         , entry_point_(UINT32_MAX)
         , max_level_(0)
+        , seed_(config.seed)
         , rng_(config.seed)
         , use_heuristic_(config.use_heuristic)
         , cached_query_(nullptr)
@@ -458,6 +459,7 @@ public:
             config.max_elements = max_elements_;
             config.metric = metric_;
             config.use_heuristic = use_heuristic_;
+            config.seed = seed_;
             FloatHNSW rebuilt(dims_, config);
 
             for (uint32_t new_id = 0; new_id < live_id; ++new_id) {
@@ -1235,6 +1237,9 @@ private:
     uint32_t entry_point_;
     int max_level_;
     double level_mult_;
+    // Retained so compact()'s rebuild path can reseed the replacement graph
+    // with the seed the caller created this index with, not the struct default.
+    uint32_t seed_;
     std::mt19937 rng_;
     bool use_heuristic_;
     std::vector<float> vectors_;

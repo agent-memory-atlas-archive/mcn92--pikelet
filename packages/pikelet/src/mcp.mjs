@@ -697,20 +697,43 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
     const hash = /^(.*)#([0-9a-f]{64})$/i.exec(raw);
     specs.push(hash ? { location: hash[1], identity: hash[2].toLowerCase() } : { location: raw });
   }
-  for (const spec of specs) {
-    await mountPack(packs, spec, { openPikeletFile, httpRangeSource, log });
-  }
-  // Warm every pack in the background so the first tool call pays for
-  // retrieval, not for staging: the query forces the deferred encoder,
-  // kernel init, and (URL mounts) the first rerank round trips. Failures
-  // surface on real queries, not here.
-  for (const [, mounted] of packs) {
-    // Defensive: an older pack (or a reader that does not report them) may
-    // carry no sampleQueries at all, and warmup must not be the thing that
-    // fails a mount.
-    const probe = mounted.search.info().sampleQueries?.[0] || 'what is this about';
-    mounted.warmup = mounted.search.query(probe, { k: 1 }).catch(() => {});
-  }
+  // Mounting runs CONCURRENTLY with the protocol loop below, not before it.
+  // A URL mount fetches the pack's resident prefix: ~5.6 s for the rust-book
+  // pack and ~9.2 s for the 649 MiB Wikipedia one, and a shelf of three took
+  // 10.2 s before `initialize` was answered — past the point most MCP clients
+  // give up. The handshake needs no pack to be ready, so it no longer waits.
+  //
+  // Tool calls DO need them, so each awaits `mountsReady` first. A client sees
+  // a fast handshake and pays the mount cost on its first real call, the same
+  // trade the warmup below already makes for encoder staging.
+  const mountsReady = (async () => {
+    for (const spec of specs) {
+      await mountPack(packs, spec, { openPikeletFile, httpRangeSource, log });
+    }
+    // Warm every pack in the background so the first tool call pays for
+    // retrieval, not for staging: the query forces the deferred encoder,
+    // kernel init, and (URL mounts) the first rerank round trips. Failures
+    // surface on real queries, not here.
+    for (const [, mounted] of packs) {
+      // Defensive: an older pack (or a reader that does not report them) may
+      // carry no sampleQueries at all, and warmup must not be the thing that
+      // fails a mount.
+      const probe = mounted.search.info().sampleQueries?.[0] || 'what is this about';
+      mounted.warmup = mounted.search.query(probe, { k: 1 }).catch(() => {});
+    }
+  })();
+  // A mount failure must reach the operator rather than becoming an unhandled
+  // rejection; tool calls re-await it and surface it per call. It is also
+  // recorded so the process can still exit non-zero once the protocol loop
+  // drains: a supervisor or install script that pins `#sha256` and checks the
+  // status would otherwise read a refused mount as success. Recorded, not
+  // rethrown here, because the server must keep serving the packs that did
+  // mount -- that is the trade this concurrent mounting buys.
+  let mountFailure = null;
+  mountsReady.catch((err) => {
+    mountFailure = err;
+    log(`mount failed: ${err?.message || err}`);
+  });
 
   const serverInfo = { name: 'pikelet-knowledge-packs', version: serverVersion };
   const supportedVersions = [...MODERN_VERSIONS, ...LEGACY_VERSIONS];
@@ -779,9 +802,18 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
         // caller who sends it anyway gets a well-formed empty result.
         if (isRequest) reply(id, {});
       } else if (method === 'tools/list') {
+        // Awaits the mounts: the tool definitions name the mounted packs, and
+        // answering early would advertise a shorter list than the server ends
+        // up serving. `initialize` is the only handshake step that does not
+        // wait, which is the point — see mountsReady above.
+        await mountsReady;
         // Deterministic order (mount order) per the modern caching rules.
         reply(id, { tools: toolDefinitions(packs), ...(modern ? CACHE_HINTS : {}) });
       } else if (method === 'tools/call') {
+        // Every tool reads the packs map, so a call made while mounting is
+        // still in flight waits for it rather than seeing an empty server. A
+        // mount failure surfaces here, per call, instead of being swallowed.
+        await mountsReady;
         const toolName = params?.name;
         const args = params?.arguments ?? {};
         let result;
@@ -810,5 +842,20 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
     }
   }
 
+  // Settle the mounts before reporting. A client that closes stdin without
+  // calling a tool (or any run whose input drains faster than a URL mount's
+  // `source.init()` round trip) reaches here while `mountsReady` is still
+  // pending, so checking `mountFailure` first would read null and exit 0 on a
+  // pack that was in fact refused. Awaiting is safe: the promise is already
+  // caught above, so this observes the outcome without a second rejection.
+  await mountsReady.catch(() => {});
+
   for (const mounted of packs.values()) await mounted.search.close();
+
+  // Exit non-zero if any pack never mounted. Deferred to here so the
+  // handshake stays fast and the surviving packs stay queryable for the
+  // session's life; `bin/pikelet.mjs` maps `exitCode` onto the status.
+  if (mountFailure) {
+    throw Object.assign(new Error(`mount failed: ${mountFailure?.message || mountFailure}`), { exitCode: 1 });
+  }
 }
