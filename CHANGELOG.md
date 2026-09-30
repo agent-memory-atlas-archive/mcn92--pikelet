@@ -31,6 +31,15 @@ first.
   When the parent is a local file under the output's directory, its relative
   path is now recorded. An explicit `--parent-locator` is validated up front
   instead of being written as-is and refused by every reader.
+- **A URL chain mounts from its head alone, and locator redirects are
+  confined.** Walking up from a URL head failed at the first hop ("a locator
+  needs the child's own location") because a range source carried no URL,
+  and a parent's URL would then have been read as a file path. The walk now
+  resolves each parent over HTTP. A parent named by a publisher's locator is
+  confined to the child's origin and directory at every redirect hop, as
+  5.1.1 requires; lineage and host-resolver locations are the operator's
+  choice and are not confined. `httpRangeSource` gains `url` and a
+  `redirectGuard` option.
 
 ## pikelet-wasm 0.9.0 / pikelet 0.9.0 — 2026-09-29
 

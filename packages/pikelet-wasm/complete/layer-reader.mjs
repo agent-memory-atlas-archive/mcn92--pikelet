@@ -26,7 +26,8 @@
 // named by the caller and a published chain could not be mounted from its head.
 
 import { openPikeletFile, readChainMemberShell, readMemberManifest, base64Bytes, LEXICAL_CANDIDATES, LEXICAL_CUTOFF } from './index.mjs';
-import { resolveParentLocation } from './layer-locator.mjs';
+import { resolveParentLocation, assertConfined } from './layer-locator.mjs';
+import { httpRangeSource } from './sources.mjs';
 import { fuseCandidates, FUSION_DEFAULTS } from './fusion.mjs';
 import { parseTombstoneSegment, firstSupersetViolation } from './tombstones.mjs';
 import { validateAgainstParent, chainIngestDeclaration, validateIngestAgainstChain, LAYER_PROFILE, MAX_DEPTH } from './layer-manifest.mjs';
@@ -83,10 +84,15 @@ async function walkToBase(head, options) {
         }
         if (!peek.isLayer) return chain;          // reached the base
         if (!peek.parent) throw new Error('a layer manifest carries no layer.parent (3.2)');
+        // A child is a URL whether it arrived as a range source or, one hop
+        // up, as the URL string a locator resolved to. Classifying every
+        // string as a file path sent that second hop to fileSource.
+        const childLocation = typeof cursor === 'string' ? cursor : (cursor.url ?? cursor.location ?? null);
+        const childIsFile = typeof cursor === 'string' && !isHttpUrl(cursor);
         const located = await resolveParentLocation(peek.parent, {
             lineage,
-            childLocation: typeof cursor === 'string' ? cursor : (cursor.url ?? cursor.location ?? null),
-            kind: typeof cursor === 'string' ? 'file' : 'url',
+            childLocation,
+            kind: childIsFile ? 'file' : 'url',
             resolveParents: options.resolveParents !== false,
             hostResolver: options.hostResolver || null,
             // A file-path locator needs realpath/dirname/join to confine
@@ -95,15 +101,27 @@ async function walkToBase(head, options) {
             // runtime-agnostic, so the Node implementation is supplied here
             // and only when a file path is actually being resolved -- a
             // browser or Worker mount is URL-only and never loads node:fs.
-            fsops: options.fsops || (typeof cursor === 'string' ? await nodeFsops() : null),
+            fsops: options.fsops || (childIsFile ? await nodeFsops() : null),
         });
         expectIdentity = peek.parent.identity;
         cursor = located.location;
+        if (typeof cursor === 'string' && isHttpUrl(cursor)) {
+            // A publisher's locator is confined to the child's origin and
+            // directory, and so is every redirect on the way to it (5.1.1).
+            // A lineage listing or host resolver is the operator's choice and
+            // may name any origin, so its redirects are not confined.
+            const confineTo = located.via === 'locator' ? childLocation : null;
+            cursor = httpRangeSource(cursor, {
+                ...(confineTo ? { redirectGuard: (target) => assertConfined(target, confineTo) } : {}),
+            });
+            await cursor.init();
+        }
         chain.unshift(cursor);
     }
     throw new Error(`walking to the base exceeded the depth limit ${maxDepth} (2.7): a layer.parent cycle or an over-deep chain`);
 }
 
+const isHttpUrl = (loc) => /^https?:\/\//i.test(loc);
 const describeLocation = (loc) => (typeof loc === 'string' ? loc : (loc?.url ?? loc?.location ?? '<source>'));
 
 // Lazily imported so a URL-only mount in a runtime without node:fs never

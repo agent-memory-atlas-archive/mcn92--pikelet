@@ -2687,6 +2687,72 @@ console.log('rebase: the command, end to end (6.2)');
     check('an explicit --parent-locator that escapes the directory is refused',
         !badLocator.ok && /--parent-locator .*dot segment/.test(badLocator.out), badLocator.out.slice(-160));
 
+    // 5.1.1 over HTTP: the walk up from a URL head. The first hop had no child
+    // location (a range source carried no url), and a parent URL string was
+    // then read as a file path, so no URL chain could be mounted from its head.
+    // Every redirect on the way to a locator-named parent is confined too.
+    {
+        const http = await import('node:http');
+        const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/index.mjs');
+        let redirectFork = null; // null | where /packs/fork.pikelet redirects to
+        const host = http.createServer((req, res) => {
+            const u = new URL(req.url, 'http://x');
+            if (u.pathname === '/packs/fork.pikelet' && redirectFork) {
+                res.writeHead(302, { location: redirectFork });
+                res.end();
+                return;
+            }
+            const m = /^\/(?:packs|packs\/v2|elsewhere)\/([a-z-]+\.pikelet)$/.exec(u.pathname);
+            const file = m && path.join(rt, m[1]);
+            if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
+            const payload = fs.readFileSync(file);
+            const range = req.headers.range && /^bytes=(\d+)-(\d+)$/.exec(req.headers.range);
+            if (!range) {
+                res.writeHead(200, { 'accept-ranges': 'bytes', 'content-length': payload.length });
+                res.end(req.method === 'HEAD' ? undefined : payload);
+                return;
+            }
+            const from = Number(range[1]);
+            const to = Math.min(Number(range[2]), payload.length - 1);
+            res.writeHead(206, { 'content-range': `bytes ${from}-${to}/${payload.length}`, 'content-length': to - from + 1 });
+            res.end(payload.subarray(from, to + 1));
+        });
+        await new Promise((resolve) => host.listen(0, '127.0.0.1', resolve));
+        const origin = `http://127.0.0.1:${host.address().port}`;
+        const headAt = async () => {
+            const src = httpRangeSource(`${origin}/packs/rebased.pikelet`);
+            await src.init();
+            return src;
+        };
+        try {
+            try {
+                const urlChain = await openChain2([await headAt()]);
+                const ui = urlChain.info();
+                check('a URL head mounts by walking its locators over HTTP',
+                    ui.layers === 3 && ui.records === 8, JSON.stringify({ layers: ui.layers, records: ui.records }));
+                await urlChain.close();
+            } catch (err) {
+                check('a URL head mounts by walking its locators over HTTP', false, err.message.slice(0, 160));
+            }
+
+            redirectFork = '/packs/v2/fork.pikelet';
+            try {
+                const inDir = await openChain2([await headAt()]);
+                check('a redirect that stays under the child\'s directory is followed', inDir.info().layers === 3);
+                await inDir.close();
+            } catch (err) {
+                check('a redirect that stays under the child\'s directory is followed', false, err.message.slice(0, 160));
+            }
+
+            redirectFork = '/elsewhere/fork.pikelet';
+            await rejectsAsync('a redirect out of the child\'s directory is refused before it is followed',
+                async () => { const c = await openChain2([await headAt()]); await c.close(); },
+                /refused redirect .*not under the child's directory/);
+        } finally {
+            host.close();
+        }
+    }
+
     // Terminal rule: a tombstone-only layer whose every deletion the target
     // history already performed emits NOTHING (6.2).
     const tombOnly = (name) => {

@@ -22,6 +22,13 @@ export function httpRangeSource(url, options = {}) {
         : (options.cacheKeyParam === null || options.cacheKeyParam === false) ? null
             : String(options.cacheKeyParam);
     let full = null;
+    // A parent reached through a publisher-supplied locator is confined to the
+    // child's origin and directory, and 5.1.1 applies that rule to EVERY
+    // redirect hop before it is followed. The guard throws to refuse a hop.
+    // With a guard set, reads never auto-follow: only the HEAD walk below,
+    // which checks each hop, may move the target.
+    const redirectGuard = typeof options.redirectGuard === 'function' ? options.redirectGuard : null;
+    const readInit = (headers) => (redirectGuard ? { headers, redirect: 'error' } : { headers });
 
     // Redirect memoization. A host that answers with a redirect (GitHub
     // release assets: github.com 302s every hit to a signed CDN URL) would
@@ -46,7 +53,13 @@ export function httpRangeSource(url, options = {}) {
                     const probe = await fetch(target, { method: 'HEAD', redirect: 'manual' });
                     const location = probe.headers.get('location');
                     if (probe.status >= 300 && probe.status < 400 && location) {
-                        target = new URL(location, target).href;
+                        const next = new URL(location, target).href;
+                        if (redirectGuard) {
+                            try { redirectGuard(next); } catch (err) {
+                                throw Object.assign(new Error(`refused redirect to ${next}: ${err.message}`), { redirectRefused: true });
+                            }
+                        }
+                        target = next;
                         viaRedirect = true;
                         stats.redirects += 1;
                         continue;
@@ -64,7 +77,13 @@ export function httpRangeSource(url, options = {}) {
                     }
                     break;
                 }
-            } catch {
+            } catch (err) {
+                // A refused hop is a verdict, not a probe failure: falling back
+                // to the original URL would retry the same redirect.
+                if (redirectGuard && err?.redirectRefused) {
+                    resolving = null;
+                    throw err;
+                }
                 // HEAD unsupported or blocked: fall back to auto-follow.
                 target = url;
                 viaRedirect = false;
@@ -78,6 +97,9 @@ export function httpRangeSource(url, options = {}) {
 
     return {
         stats,
+        // The location as given, before any redirect: what a child's parent
+        // locator resolves against (5.1.1).
+        url,
         size: undefined,
         preferredParallelism: options.preferredParallelism ?? 32,
         preferredGapBytes: options.preferredGapBytes ?? 16 * 1024,
@@ -108,18 +130,18 @@ export function httpRangeSource(url, options = {}) {
             const targetFor = ({ target, viaRedirect }) => (cacheKeyParam && !viaRedirect
                 ? `${target}${target.includes('?') ? '&' : '?'}${cacheKeyParam}=${offset}-${end}`
                 : target);
-            let response = await fetch(targetFor(pinned), { headers });
+            let response = await fetch(targetFor(pinned), readInit(headers));
             if ((response.status === 401 || response.status === 403) && pinned.viaRedirect) {
                 // The pinned signed URL expired; resolve a fresh one once
                 // and retry. Concurrent reads share the re-resolution.
                 if (resolvedTarget === pinned) resolvedTarget = null;
                 stats.retries += 1;
-                response = await fetch(targetFor(await resolveTarget()), { headers });
+                response = await fetch(targetFor(await resolveTarget()), readInit(headers));
             }
             for (let attempt = 0; RETRYABLE.has(response.status) && attempt < maxRetries; attempt++) {
                 stats.retries += 1;
                 await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt, response)));
-                response = await fetch(targetFor(resolvedTarget || pinned), { headers });
+                response = await fetch(targetFor(resolvedTarget || pinned), readInit(headers));
             }
 
             if (response.status === 206) {

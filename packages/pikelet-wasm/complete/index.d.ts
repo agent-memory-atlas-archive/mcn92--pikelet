@@ -34,6 +34,8 @@ export interface HttpRangeSourceStats {
 
 export interface HttpRangeSource extends CompleteRangeSource {
   stats: HttpRangeSourceStats;
+  /** The URL as given, before any redirect; a layer's parent locator resolves against it. */
+  url: string;
   init(): Promise<void>;
 }
 
@@ -55,6 +57,13 @@ export declare function httpRangeSource(url: string, options?: {
    * disables. CDNs rate-limit the parallel range bursts a query issues.
    */
   maxRetries?: number;
+  /**
+   * Called with each redirect target before it is followed; throw to refuse
+   * the hop. When set, range reads never auto-follow redirects. A chain walk
+   * sets it for a parent named by a layer's locator, confining every hop to
+   * the child's origin and directory (LAYERED_PROFILE.md 5.1.1).
+   */
+  redirectGuard?: (target: string) => void;
 }): HttpRangeSource;
 
 export interface CompleteQueryResult {
