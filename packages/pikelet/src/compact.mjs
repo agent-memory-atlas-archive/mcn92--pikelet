@@ -61,12 +61,14 @@ export async function compactChain(flags) {
     // The live records' own fields, kept for a refit (6.3 step 4), which needs
     // titles as well as text to generate its verified positives.
     const liveChunks = [];
-    for (const oldId of plan.liveIds) {
-      const rec = await chain.record(oldId);
-      // record() adds chain-level fields (id, layer, tombstoned, successors);
-      // the corpus segment carries the record's own bytes, so strip them.
-      const { id, layer, tombstoned, supersededBy, successors, currentSuccessor, distance, ...own } = rec;
-      records.push(Buffer.from(JSON.stringify(own), 'utf8'));
+    // The stored bytes, not record(): record() lays chain fields over the
+    // parsed record, including a global `id` that replaces the record's own,
+    // so stripping them and re-serializing dropped every record's own id and
+    // could reorder keys or reformat numbers.
+    const liveBytes = await chain.__recordBytes(plan.liveIds);
+    for (const bytes of liveBytes) {
+      records.push(Buffer.from(bytes));
+      const own = JSON.parse(Buffer.from(bytes).toString('utf8'));
       texts.push(own.text || '');
       liveChunks.push(own);
     }

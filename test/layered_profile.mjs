@@ -2820,6 +2820,85 @@ console.log('tombstone-only layers: the segment table must agree with the manife
     fs.rmSync(tt, { recursive: true, force: true });
 }
 
+console.log('compact: live records are copied byte for byte (6.3)');
+{
+    // compact read each record through chain.record(), which lays chain
+    // fields over the parsed record -- including a global `id` that replaces
+    // the record's own -- then stripped those fields and re-serialized. Every
+    // compacted record lost its own id, and key order and number formatting
+    // were whatever JSON.stringify produced. 6.3 says the compacted base's
+    // records are the old head's live records, bytes unchanged.
+    const { execFileSync } = await import('node:child_process');
+    const { openPikeletFile } = await import('../packages/pikelet-wasm/complete/index.mjs');
+    const ct = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-compact-bytes-'));
+    const CDIM = 16;
+    const ENC2 = { kind: 'host-encoder-v1', model: 'test' };
+    const INGEST2 = { chunker: 'v1', targetTokens: 256 };
+    // Deliberately not what JSON.stringify would write: the record's own id
+    // first, spaces after separators, and a number with a trailing zero.
+    const raw = (i) => Buffer.from(`{"id": "chunk-${i}", "weight": 1.50, "title": "rec ${i}", "text": "record ${i} body text"}`);
+    const sketchFor = (ids, tag) => {
+        const qdata = new Uint8Array(ids.length * CDIM);
+        for (let r = 0; r < ids.length; r++) for (let d = 0; d < CDIM; d++) qdata[r * CDIM + d] = (ids[r] * 7 + d) % 256;
+        const sp = path.join(ct, `sk-${tag}.pikelet-sketch`);
+        exportSketchArtifact({ dim: CDIM, count: ids.length, metric: 1, qdata,
+            scales: new Float32Array(ids.length).fill(1 / 255), offsets: new Float32Array(ids.length) }, sp,
+        { sketchDims: CDIM, sketchBits: 8, recommendedRerank: 20 });
+        return fs.readFileSync(sp);
+    };
+    const baseIds = [0, 1, 2, 3];
+    const baseCorpus = buildCorpusSegment(baseIds.map(raw));
+    const basePath = path.join(ct, 'base.pikelet');
+    const baseBuilt = assemblePikeletFile({
+        profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        corpus: { ...baseCorpus.corpus, ingest: INGEST2 }, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(baseIds, 'base') },
+        { kind: 'corpus', bytes: baseCorpus.bytes },
+        { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+    ], basePath);
+    const layerIds = [4, 5];
+    const layerCorpus = buildCorpusSegment(layerIds.map(raw));
+    const layerPath = path.join(ct, 'l1.pikelet');
+    assemblePikeletFile({
+        profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC2,
+        layer: {
+            parent: { identity: baseBuilt.identity }, baseIdentity: baseBuilt.identity,
+            depth: 1, rowBase: 4, records: 2, tombstones: 1, supersessions: 0, ingest: INGEST2,
+        },
+        corpus: layerCorpus.corpus, index: {},
+    }, [
+        { kind: 'index', bytes: sketchFor(layerIds, 'l1') },
+        { kind: 'corpus', bytes: layerCorpus.bytes },
+        { kind: 'query-interp', bytes: buildInheritedQuerySegment({
+            baseIdentity: baseBuilt.identity,
+            queryInterpSha256: baseBuilt.manifest.segments.find((x) => x.kind === 'query-interp').sha256,
+        }) },
+        { kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase: 4, tombstonedIds: [1], records: 2 }) },
+    ], layerPath);
+
+    const outPath = path.join(ct, 'compacted.pikelet');
+    let out = '';
+    try {
+        out = execFileSync(process.execPath, [path.resolve('packages/pikelet/bin/pikelet.mjs'), 'compact',
+            '--head', basePath, '--head', layerPath, '--out', outPath, '--no-refit'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) { out = String(err.stdout || '') + String(err.stderr || ''); }
+    check('compact over a chain whose records carry their own ids succeeds', fs.existsSync(outPath), out.slice(-200));
+    if (fs.existsSync(outPath)) {
+        const compacted = await openPikeletFile(outPath);
+        const liveOld = [0, 2, 3, 4, 5];
+        const got = await Promise.all(liveOld.map((_, i) => compacted.__chainTier.readRecordBytes(i)));
+        const same = liveOld.every((old, i) => Buffer.compare(Buffer.from(got[i]), raw(old)) === 0);
+        check('every live record is byte-identical to the one it was compacted from', same,
+            same ? '' : Buffer.from(got[0]).toString('utf8'));
+        const first = await compacted.record(0);
+        check('a compacted record keeps its own id field', first.id === 'chunk-0', JSON.stringify(first));
+        await compacted.close();
+    }
+    fs.rmSync(ct, { recursive: true, force: true });
+}
+
 console.log('lineage: a compacted base translates citations through the reader');
 {
     const linTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-lineage-'));

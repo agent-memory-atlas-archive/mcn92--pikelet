@@ -1186,15 +1186,12 @@ export async function openPikeletFile(input, options = {}) {
             return record;
         };
 
-        const hydrate = async (id) => {
+        // One record's stored bytes, read and (on format 2) verified against
+        // its per-record digest. hydrate() parses these; `compact` (6.3)
+        // copies them verbatim through the chain's __recordBytes seam.
+        const readRecordBytes = async (id) => {
             if (!Number.isSafeInteger(id) || id < 0 || id >= recordCount) {
                 throw new Error(`.pikelet result id ${id} is outside the corpus`);
-            }
-            if (recordCache.has(id)) {
-                const cached = recordCache.get(id);
-                recordCache.delete(id);
-                recordCache.set(id, cached);
-                return cached;
             }
             const start = recordOffsets[id];
             const end = recordOffsets[id + 1];
@@ -1207,6 +1204,20 @@ export async function openPikeletFile(input, options = {}) {
                     throw new Error(`.pikelet corpus record ${id} failed integrity verification`);
                 }
             }
+            return bytes;
+        };
+
+        const hydrate = async (id) => {
+            if (!Number.isSafeInteger(id) || id < 0 || id >= recordCount) {
+                throw new Error(`.pikelet result id ${id} is outside the corpus`);
+            }
+            if (recordCache.has(id)) {
+                const cached = recordCache.get(id);
+                recordCache.delete(id);
+                recordCache.set(id, cached);
+                return cached;
+            }
+            const bytes = await readRecordBytes(id);
             let record;
             try { record = JSON.parse(decoder.decode(bytes)); } catch (err) {
                 throw new Error(`.pikelet corpus record ${id} is not valid JSON`, { cause: err });
@@ -1547,6 +1558,7 @@ export async function openPikeletFile(input, options = {}) {
                     sketch,
                     lexicalIndex,
                     hydrate,
+                    readRecordBytes,
                     encoderInfo,
                     segments,
                     // The query-interpretation kind, verbatim from the

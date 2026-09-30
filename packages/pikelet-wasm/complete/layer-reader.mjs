@@ -572,6 +572,22 @@ export async function openPikeletChain(members, options = {}) {
             chainBloom() { assertOpen(); return chainBloom; },
 
             /**
+             * The stored bytes of each id's record, from its owning tier's
+             * corpus segment and verified per record, in the order ids were
+             * given. `compact` (6.3) copies these verbatim: record() returns
+             * the parsed record with chain fields laid over it, and
+             * re-serializing that is not the original bytes.
+             */
+            async __recordBytes(ids) {
+                assertOpen();
+                return Promise.all(ids.map(async (id) => {
+                    const owner = ownerOf(table, id);
+                    if (!owner) throw new Error(`id ${id} is outside every search tier's interval (5.2)`);
+                    return searchTiers[owner.tier.tier].reader.readRecordBytes(owner.localId);
+                }));
+            },
+
+            /**
              * 6.3's verbatim row copy: the quantized bytes and per-row
              * scale/offset for a set of chain ids, read back from whichever
              * tier owns each one. Producer seam, like __head.
