@@ -74,6 +74,16 @@ backlog below. `pikelet` is unchanged at 0.8.1 and picks this up through its
 
 ### Breaking / compatibility
 
+- **The layered profile needs `pikelet-wasm` 0.9.0, released together
+  with the `pikelet` that uses it.** `pikelet`'s `append`, `compact`,
+  `rebase` and chain mounts import `pikelet-wasm/complete/layer-*.mjs` and
+  `complete/format.mjs`, which no published 0.8.x carries. The release that
+  ships this section must bump `pikelet-wasm` to 0.9.0 and `pikelet`'s
+  dependency to `^0.9.0`; publishing `pikelet` alone against `^0.8.0` would
+  fail those commands with `ERR_PACKAGE_PATH_NOT_EXPORTED`. A layer's profile
+  string, `pikelet-layer-v1`, is refused by every earlier reader by design:
+  a layer opened alone would serve a fraction of a corpus.
+
 - **The `PANCAKE_ENCODER_WEIGHTS_URL`, `PANCAKE_SEARCH_EMBED_WORKERS`,
   `PANCAKE_SEARCH_STUB_EMBEDDINGS`, and `PANCAKE_SEARCH_PYTHON`
   environment variable fallbacks are removed.** 0.7.0 introduced
@@ -87,6 +97,42 @@ backlog below. `pikelet` is unchanged at 0.8.1 and picks this up through its
   `complete/sources.mjs` uses the global `fetch`, which Node 16 does not
   have; CI tests 18, 20 and 22. The `pikelet` CLI is unchanged at
   `>=20`.
+
+### Added
+
+- **Layered search artifacts** (`LAYERED_PROFILE.md`, Draft 4). A pack can
+  be updated by appending a small `pikelet-layer-v1` file instead of
+  recompiling: a layer carries only its new records plus a cumulative
+  tombstone mask and supersession edges, and commits to its parent's
+  identity, so a chain's head identity pins every byte a query can touch.
+  `openPikeletChain` (`pikelet-wasm/complete/layer-reader.mjs`) mounts base
+  and layers, verifies every parent commitment and spec rule at mount, and
+  queries them as one corpus: masked candidate generation per tier,
+  chain-global BM25 statistics, one fusion, and the base's abstention fit
+  inherited until calibration drift passes the reader's limit (0.20 by
+  default), after which results ship `unscored`. Records carry the layer
+  that owns them; `record()` reports tombstoned records and their
+  successors; `citation()` resolves ids against any head on the mounted
+  history. A chain of local files mounts from its head alone through parent
+  locators; URL chains mount from a shelf `lineage`.
+- **`pikelet append`** writes a layer over a base or chain: new documents
+  from `--source` (repeatable), deletions with `--remove`, and replacements
+  with `--supersede <id>=<path>`, reusing the base's own encoder, chunking
+  and vocabulary-bloom geometry. It refuses a layer that would push
+  calibration drift past the limit unless `--allow-drift` is given.
+- **`pikelet compact`** collapses a chain into a fresh depth-0 base: live
+  records and quantized rows copied byte for byte, ids renumbered densely,
+  exact lexical statistics, and a refit abstention calibration (`--no-refit`
+  ships unscored). A lineage segment lets the compacted base translate
+  citations made against the chain.
+- **`pikelet rebase`** moves a layer onto a different head (for instance a
+  fork sibling), replaying only what the layer itself did, with
+  `--on-conflict refuse|skip|keep-both` and `--on-foreign refuse|drop`.
+- **MCP serves chains.** A shelf entry with a `lineage` mounts a chain,
+  pinned by its head identity; `list_packs` reports `chain`, `layers`,
+  `tombstones` and `calibrationStatus`, and counts live records; `get_record`
+  and search results carry `tombstoned`, `layer`, `supersededBy` and
+  `currentSuccessor`.
 
 ### Changed
 
