@@ -281,7 +281,7 @@ export async function rebaseLayer(flags) {
   const onConflict = flags['on-conflict'] || 'refuse';
   const onForeign = flags['on-foreign'] || 'refuse';
 
-  const { loadCompleteModules, resolveChainMembers } = await import('./common.mjs');
+  const { loadCompleteModules, resolveChainMembers, parentLocatorFor } = await import('./common.mjs');
   const { builder } = await loadCompleteModules();
   const { openPikeletChain } = await import('pikelet-wasm/complete/layer-reader.mjs');
   const { readMemberManifest } = await import('pikelet-wasm/complete');
@@ -343,7 +343,9 @@ export async function rebaseLayer(flags) {
     log(`Original parent: ${oldInfo.layers} member(s), ${oldInfo.records} rows, depth ${oldInfo.layers - 1}`);
 
     // --- 3. The new head ----------------------------------------------------
-    head = await openPikeletChain(await resolveChainMembers([].concat(flags.onto), log));
+    const ontoMembers = await resolveChainMembers([].concat(flags.onto), log);
+    const parentLocator = await parentLocatorFor(flags, ontoMembers[ontoMembers.length - 1], outPath, log);
+    head = await openPikeletChain(ontoMembers);
     const headInfo = head.info();
     const H = head.__head;
     log(`New head: ${headInfo.layers} member(s), ${headInfo.records} rows, depth ${headInfo.layers - 1}`);
@@ -418,7 +420,7 @@ export async function rebaseLayer(flags) {
       baseIdentity: headInfo.baseIdentity,
       parentIdentity: headInfo.identity,
       baseQueryInterpSha256: H.baseQueryInterpSha256,
-      parentLocator: flags['parent-locator'] || null,
+      parentLocator,
       // What the precondition resolved against the NEW history, not the
       // layer's own flags: a layer rebased from depth 2 onto a legacy base
       // becomes the depth-1 member and must carry the assertion.

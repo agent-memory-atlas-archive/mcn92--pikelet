@@ -33,23 +33,86 @@ function loadCompleteModules() {
  * open -- while `mcp` had mounted remote chains this way all along. The
  * capability was the reader's; only the producers were local-only.
  *
- * `#sha256` pins are not stripped here: a producer names members it is about
- * to build on, and the head identity it reports is what a consumer pins.
+ * `location#<sha256>` pins that member's manifest identity, the same form
+ * `mcp --pack` takes and every producer's usage line advertises. Pins used to
+ * pass through untouched: a local `x.pikelet#<sha>` failed as a missing file,
+ * and a URL's fragment never reached the wire, so the pin was silently
+ * ignored. Each pinned member's manifest is now read and compared before the
+ * caller opens anything. Chain links commit to parent identities, so pinning
+ * the last member pins the whole chain.
  */
 async function resolveChainMembers(locations, log = () => {}) {
   const { reader } = await loadCompleteModules();
   const resolved = [];
-  for (const loc of locations) {
+  for (const raw of locations) {
+    const pin = /^(.*)#([0-9a-f]{64})$/i.exec(raw);
+    const loc = pin ? pin[1] : raw;
+    // A malformed pin must not degrade to "unpinned": a URL fragment never
+    // reaches the server, and a short hex suffix on a path reads as a typo'd
+    // pin, not a filename.
+    if (!pin && (/^https?:\/\/[^#]*#/i.test(raw) || /#[0-9a-f]+$/i.test(raw))) {
+      throw new CliError(`${raw}: a '#' pin must be the full 64-hex sha256 manifest identity`);
+    }
+    let member;
     if (/^https?:\/\//i.test(loc)) {
       const source = reader.httpRangeSource(loc);
       await source.init();
       log(`Reading ${loc} over HTTP range requests`);
-      resolved.push(source);
+      member = source;
     } else {
-      resolved.push(path.resolve(process.cwd(), loc));
+      member = path.resolve(process.cwd(), loc);
     }
+    if (pin) {
+      const expected = pin[2].toLowerCase();
+      let identity;
+      try {
+        ({ identity } = await reader.readMemberManifest(member));
+      } catch (err) {
+        throw new CliError(`${loc}: ${err.message}`);
+      }
+      if (identity !== expected) {
+        throw new CliError(`${loc}: identity mismatch: pinned ${expected}, found ${identity}; `
+          + 'refusing to build on a member that is not the one named');
+      }
+      log(`Pinned ${path.basename(loc)} at ${expected.slice(0, 12)}…`);
+    }
+    resolved.push(member);
   }
   return resolved;
+}
+
+/**
+ * The `parent.locator` a new layer records (LAYERED_PROFILE.md 5.1.1): the
+ * explicit --parent-locator, validated here rather than written blind and
+ * refused by every reader later; else, when the parent is a local file at or
+ * below the output's directory, its relative path. Producers wrote no locator
+ * unless told to, so a layer from `append` or `rebase` could not be walked
+ * from its head, and the next rebase of it needed --old-parent spelled out.
+ * A URL parent, or one outside the output directory, gets none: a locator is
+ * a relative reference under the child and cannot name either.
+ */
+async function parentLocatorFor(flags, parentMember, outPath, log = () => {}) {
+  const { validateLocatorShape } = await import('pikelet-wasm/complete/layer-locator.mjs');
+  const explicit = flags['parent-locator'];
+  if (explicit) {
+    try {
+      validateLocatorShape(explicit);
+    } catch (err) {
+      throw new CliError(`--parent-locator ${explicit}: ${err.message} (5.1.1)`);
+    }
+    return explicit;
+  }
+  if (typeof parentMember !== 'string') return null;
+  const rel = path.relative(path.dirname(outPath), parentMember).split(path.sep).join('/');
+  try {
+    validateLocatorShape(rel);
+  } catch {
+    log(`No parent locator recorded: ${parentMember} is not under the output directory `
+      + '(pass --parent-locator to name one)');
+    return null;
+  }
+  log(`Parent locator: ${rel}`);
+  return rel;
 }
 
 /**
@@ -196,6 +259,7 @@ export {
   completeModulesPromise,
   loadCompleteModules,
   resolveChainMembers,
+  parentLocatorFor,
   readChainMemberShellBytes,
   __filename,
   __dirname,

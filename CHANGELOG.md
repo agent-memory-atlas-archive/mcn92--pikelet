@@ -18,6 +18,19 @@ first.
 - **`pikelet append` parses `--remove` and `--supersede` ids strictly.**
   `--remove 1,2,3` used to tombstone record 1 alone, and `--remove 12abc`
   record 12, without an error; each flag now takes exactly one decimal id.
+- **`#<sha256>` pins on chain members are enforced.** Every layered
+  producer's usage line advertised `--parent <file|url>[#identity]`, but
+  nothing parsed the pin: a local path failed as a missing file, and a URL
+  dropped the fragment and built on whatever the server returned. `--parent`,
+  `--head`, `--onto`, `--old-parent` and `--layer` now verify each pinned
+  member's manifest identity before opening anything, and refuse a
+  truncated pin.
+- **`append` and `rebase` record a parent locator by default.** They wrote
+  one only when given `--parent-locator`, so a rebased layer could not be
+  mounted from its head alone and its next rebase needed `--old-parent`.
+  When the parent is a local file under the output's directory, its relative
+  path is now recorded. An explicit `--parent-locator` is validated up front
+  instead of being written as-is and refused by every reader.
 
 ## pikelet-wasm 0.9.0 / pikelet 0.9.0 — 2026-09-29
 

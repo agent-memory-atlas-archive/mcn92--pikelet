@@ -2649,6 +2649,44 @@ console.log('rebase: the command, end to end (6.2)');
     check('a deletion the layer introduced survives the rebase', moved.tombstoned === true, JSON.stringify(moved.tombstoned));
     await rebasedChain.close();
 
+    // 5.1.1: rebase wrote no parent.locator unless told to, so the rebased
+    // layer could not be walked from its head and its next rebase needed
+    // --old-parent. A local parent under the output directory now gets one.
+    const { readMemberManifest: peekManifest } = await import('../packages/pikelet-wasm/complete/index.mjs');
+    const rebasedPeek = await peekManifest(outFile);
+    check('the rebased layer records its new parent\'s locator',
+        rebasedPeek.manifest.layer.parent.locator === 'fork.pikelet',
+        JSON.stringify(rebasedPeek.manifest.layer.parent));
+    const walked = await openChain2([outFile]);
+    check('the rebased layer mounts alone, walking up by locator',
+        walked.info().layers === 3 && walked.info().records === 8, JSON.stringify(walked.info().layers));
+    await walked.close();
+
+    // `#<sha256>` pins on chain members. They were advertised in every usage
+    // line but never parsed: a local path failed as a missing file and a URL
+    // dropped its fragment, so the pin was silently ignored.
+    const pinnedOut = path.join(rt, 'rebased-pinned.pikelet');
+    const pinned = run(['rebase', '--layer', `${l1File}#${l1Built.identity}`, '--onto', baseFile,
+        '--onto', `${forkFile}#${forkBuilt.identity}`, '--out', pinnedOut]);
+    check('correct #identity pins are accepted', pinned.ok && fs.existsSync(pinnedOut), pinned.out.slice(-160));
+    const misPinned = run(['rebase', '--layer', l1File, '--onto', baseFile,
+        '--onto', `${forkFile}#${baseBuilt.identity}`, '--out', path.join(rt, 'mis.pikelet')]);
+    check('a pin naming a different artifact is refused on identity',
+        !misPinned.ok && /identity mismatch/.test(misPinned.out) && !fs.existsSync(path.join(rt, 'mis.pikelet')),
+        misPinned.out.slice(-160));
+    const shortPin = run(['rebase', '--layer', l1File, '--onto', baseFile,
+        '--onto', `${forkFile}#${forkBuilt.identity.slice(0, 12)}`, '--out', path.join(rt, 'short.pikelet')]);
+    check('a truncated pin is refused, not read as a filename',
+        !shortPin.ok && /full 64-hex/.test(shortPin.out), shortPin.out.slice(-160));
+    const urlPin = run(['append', '--parent', 'https://example.invalid/x.pikelet#abc', '--remove', '1',
+        '--out', path.join(rt, 'url.pikelet')]);
+    check('a malformed pin on a URL is refused before any request',
+        !urlPin.ok && /full 64-hex/.test(urlPin.out), urlPin.out.slice(-160));
+    const badLocator = run(['rebase', '--layer', l1File, '--onto', baseFile, '--onto', forkFile,
+        '--parent-locator', '../fork.pikelet', '--out', path.join(rt, 'badloc.pikelet')]);
+    check('an explicit --parent-locator that escapes the directory is refused',
+        !badLocator.ok && /--parent-locator .*dot segment/.test(badLocator.out), badLocator.out.slice(-160));
+
     // Terminal rule: a tombstone-only layer whose every deletion the target
     // history already performed emits NOTHING (6.2).
     const tombOnly = (name) => {
