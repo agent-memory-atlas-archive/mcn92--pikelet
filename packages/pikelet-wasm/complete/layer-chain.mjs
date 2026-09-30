@@ -211,8 +211,10 @@ export function calibrationStatus({ drift, producerEnvelope, readerLimit, baseHa
     if (!baseHasFit) {
         return { status: 'none', drift, effectiveLimit, producerEnvelope: envelope, readerLimit };
     }
-    // A layer whose calibration region is `none` while the base carries a fit
-    // degrades the chain to unscored (4.5, 5.5).
+    // A layer WITH RECORDS whose calibration region is `none` while the base
+    // carries a fit degrades the chain to unscored (4.5, 5.5). The caller
+    // leaves tombstone-only layers out of everyLayerShipsBloom: they have no
+    // vocabulary for a bloom to carry.
     const status = (drift <= effectiveLimit && everyLayerShipsBloom) ? 'inherited' : 'drift-exceeded';
     return { status, drift, effectiveLimit, producerEnvelope: envelope, readerLimit };
 }

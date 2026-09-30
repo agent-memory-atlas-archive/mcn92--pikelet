@@ -242,8 +242,13 @@ export async function openPikeletChain(members, options = {}) {
             if (inherited.bloomBytes && !baseBloomGeometry) {
                 throw new Error(`layer at depth ${rel.depth} ships a vocabulary bloom but the base carries none whose geometry it could match (4.5)`);
             }
+            // A missing bloom degrades the chain because it hides a layer's
+            // vocabulary from known_frac (4.5). A tombstone-only layer has no
+            // records and so no vocabulary to hide: its `none` region is the
+            // empty bloom, not a gap. Counting it took a chain that deleted 3
+            // of 3,255 records to drift-exceeded, unscoring every query.
             if (inherited.bloomBytes) layerBlooms.push(inherited.bloomBytes);
-            else everyLayerShipsBloom = false;
+            else if (!rel.tombstoneOnly) everyLayerShipsBloom = false;
 
             if (!rel.tombstoneOnly && tier.segments.has('lexical') !== baseHasLexical) {
                 throw new Error(baseHasLexical

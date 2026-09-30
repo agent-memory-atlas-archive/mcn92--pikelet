@@ -521,7 +521,10 @@ The calibration region is UTF-8 JSON, one of:
 
 or `{ "kind": "none" }`. A layer's bloom is over its own records'
 vocabulary, built with the base's `vocabBloom.bits`, hashes and `minCount`
-(from `retrieval-signals-v1`'s asset).
+(from `retrieval-signals-v1`'s asset). A tombstone-only layer has no
+records and therefore no vocabulary; its `none` region is equivalent to an
+empty bloom, and a producer SHOULD ship `none` there rather than an
+all-zero bloom the size of the base's.
 
 **What the union means.** The chain's vocabulary bloom is the bitwise OR
 of the base's and every layer's bloom, which the identical geometry makes
@@ -569,9 +572,12 @@ section 13's first measurement, not a theorem of this profile.
 
 A reader MUST compute the union before scoring: without it the signal
 under-reads every query about a layer's content, and the scorer abstains
-on exactly the records the layer was published to add. A layer whose
-calibration region is `none` while the base carries a fit degrades the
-chain to `unscored` (5.5), so a producer SHOULD always ship the bloom.
+on exactly the records the layer was published to add. A layer **with
+records** whose calibration region is `none` while the base carries a fit
+degrades the chain to `unscored` (5.5), so a producer SHOULD always ship
+the bloom on such a layer. A tombstone-only layer's `none` does not
+degrade the chain: it hides no vocabulary. (Drafts 1-4 applied the rule to
+every layer, so a single deletion unscored the whole chain.)
 
 ### 4.6 Index, corpus and lexical segments
 
@@ -804,7 +810,9 @@ effectiveLimit   = min(producerEnvelope, readerLimit)
 
 calibrationStatus =
   'none'            the base carries no fit (unscored today; unchanged)
-  'inherited'       calibrationDrift <= effectiveLimit and every layer ships layer-vocab-v1
+  'inherited'       calibrationDrift <= effectiveLimit and every layer with records
+                    ships layer-vocab-v1 (a tombstone-only layer's `none` is the
+                    empty bloom, 4.5)
   'drift-exceeded'  otherwise
 ```
 

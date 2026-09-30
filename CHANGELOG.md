@@ -40,6 +40,14 @@ first.
   5.1.1 requires; lineage and host-resolver locations are the operator's
   choice and are not confined. `httpRangeSource` gains `url` and a
   `redirectGuard` option.
+- **A tombstone-only layer no longer unscores its chain.** A layer that only
+  deletes records carries no vocabulary bloom, and the reader counted that
+  as a layer hiding its vocabulary, marking the whole chain
+  `drift-exceeded`: on the astro pack, deleting 3 of 3,255 records (drift
+  0.0009 against a 0.20 limit) turned every query's verdict to `unscored`.
+  The rule now applies only to layers with records, and LAYERED_PROFILE.md
+  4.5 and 5.5 say so. Tombstone-only layers already written with 0.9.0
+  score again with no rebuild.
 - **`pikelet --help` documents `append`, `compact` and `rebase`**, including
   `--supersede`, `--allow-drift`, `--max-depth` and pins.
 

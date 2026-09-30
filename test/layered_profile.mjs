@@ -1703,7 +1703,17 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
     const realDel = craftLayer(b1, 'realdel', { n: 0, bloom: null, tombstonedIds: [5, 6], parent: withDel, depth: 2, rowBase: 110 });
     const cDel = await openPikeletChain([b1.outPath, withDel.outPath, realDel.outPath]);
     check('a tombstone-only layer that adds a deletion mounts', cDel.info().tombstones === 2);
+    // 4.5/5.5: a tombstone-only layer has no vocabulary, so its `none` region
+    // is the empty bloom, not a gap. Counting it as one unscored a real chain
+    // that deleted 3 of 3,255 records at drift 0.0009.
+    check('a tombstone-only layer shipping no bloom keeps the chain scored',
+        cDel.info().calibrationStatus === 'inherited', `status ${cDel.info().calibrationStatus}`);
     await cDel.close();
+    const tombFirst = craftLayer(b1, 'tombfirst', { n: 0, bloom: null, tombstonedIds: [7] });
+    const cTomb = await openPikeletChain([b1.outPath, tombFirst.outPath]);
+    check('a lone tombstone-only layer over a scored base stays inherited',
+        cTomb.info().calibrationStatus === 'inherited', `status ${cTomb.info().calibrationStatus}`);
+    await cTomb.close();
 
     fs.rmSync(calTmp, { recursive: true, force: true });
 }
