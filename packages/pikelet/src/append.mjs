@@ -312,10 +312,19 @@ export async function appendLayer(flags) {
 function toIdList(value, flagName) {
   if (value === undefined) return [];
   return [].concat(value).map((raw) => {
-    const n = Number.parseInt(String(raw), 10);
-    if (!Number.isSafeInteger(n) || n < 0) throw new CliError(`${flagName} takes non-negative record ids, got ${raw}`);
+    const n = parseRecordId(raw);
+    if (n === null) throw new CliError(`${flagName} takes one non-negative record id per flag, got ${raw}`);
     return n;
   });
+}
+
+// Strict: parseInt read `--remove 1,2,3` as 1 and `--remove 12abc` as 12,
+// tombstoning a different set than the one named without a word.
+function parseRecordId(raw) {
+  const text = String(raw).trim();
+  if (!/^\d+$/.test(text)) return null;
+  const n = Number(text);
+  return Number.isSafeInteger(n) ? n : null;
 }
 
 function toSupersedeList(value) {
@@ -323,8 +332,8 @@ function toSupersedeList(value) {
   return [].concat(value).map((raw) => {
     const at = String(raw).indexOf('=');
     if (at < 1) throw new CliError(`--supersede takes <oldId>=<sourcePath>, got ${raw}`);
-    const oldId = Number.parseInt(String(raw).slice(0, at), 10);
-    if (!Number.isSafeInteger(oldId) || oldId < 0) throw new CliError(`--supersede oldId must be a non-negative id, got ${raw}`);
+    const oldId = parseRecordId(String(raw).slice(0, at));
+    if (oldId === null) throw new CliError(`--supersede oldId must be a non-negative id, got ${raw}`);
     return [oldId, String(raw).slice(at + 1)];
   });
 }

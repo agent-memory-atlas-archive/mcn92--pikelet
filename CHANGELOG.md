@@ -15,6 +15,9 @@ first.
 - **`pikelet-wasm` now exports `./package.json`.** `require.resolve('pikelet-wasm/package.json')`
   and JSON imports of it threw `ERR_PACKAGE_PATH_NOT_EXPORTED`, which
   tooling that reads the installed version relies on.
+- **`pikelet append` parses `--remove` and `--supersede` ids strictly.**
+  `--remove 1,2,3` used to tombstone record 1 alone, and `--remove 12abc`
+  record 12, without an error; each flag now takes exactly one decimal id.
 
 ## pikelet-wasm 0.9.0 / pikelet 0.9.0 — 2026-09-29
 

@@ -2461,6 +2461,22 @@ console.log('cli: repeated --source (6.1)');
         () => parseArgs(['compile', '--source', 'a', '--source', 'b']), /--source may be given once/);
 }
 
+console.log('cli: --remove and --supersede ids parse strictly (6.1)');
+{
+    const { appendLayer } = await import('../packages/pikelet/src/append.mjs');
+    const out = path.join(os.tmpdir(), `pikelet-remove-parse-${process.pid}.pikelet`);
+    // parseInt read '1,2,3' as 1 and '12abc' as 12: a different tombstone set
+    // than the one named, and no error. Each must now refuse before any mount.
+    for (const bad of ['1,2,3', '12abc', '1.5', '-1', '', '1e3']) {
+        await rejectsAsync(`--remove ${JSON.stringify(bad)} is refused`,
+            () => appendLayer({ parent: 'nosuch.pikelet', out, remove: [bad] }), /--remove takes one non-negative record id/);
+    }
+    await rejectsAsync('--supersede with a non-integer old id is refused',
+        () => appendLayer({ parent: 'nosuch.pikelet', out, supersede: ['2x=a.md'] }), /--supersede oldId must be a non-negative id/);
+    await rejectsAsync('a well-formed --remove gets past parsing (fails on the parent instead)',
+        () => appendLayer({ parent: 'nosuch.pikelet', out, remove: [' 7 '] }), /^(?!.*--remove takes)/);
+}
+
 console.log('rebase: the command, end to end (6.2)');
 {
     const { execFileSync } = await import('node:child_process');
