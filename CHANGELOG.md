@@ -8,7 +8,23 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
-## Unreleased
+## pikelet-wasm 0.9.1 / pikelet 0.9.1 — 2026-09-30
+
+Fixes to the layered profile shipped in 0.9.0, headlined by a chain that
+lost its abstention verdicts as soon as a layer deleted anything. Both
+packages move to 0.9.1 together, and `pikelet` requires `pikelet-wasm`
+^0.9.1 so that `pikelet mcp` serves chains with the reader fixes.
+
+### Compatibility
+
+- **Layers from `append` and `rebase` now record a parent locator** when
+  the parent is a local file under the output's directory, so the same
+  inputs produce a layer with a different identity than under 0.9.0.
+- **`--remove` and `--supersede` refuse ids they used to truncate**
+  (`1,2,3`, `12abc`, `1.5`, `1e3`); give one id per flag.
+- **A chain-member location ending in `#` plus hex is read as a pin.** A
+  full 64-hex suffix is verified against the member's identity, and a
+  shorter one is refused; it is no longer treated as part of a filename.
 
 ### Fixed
 
