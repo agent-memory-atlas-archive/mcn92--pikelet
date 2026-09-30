@@ -185,6 +185,18 @@ export async function openPikeletChain(members, options = {}) {
         let headBitset = new Uint8Array(0);
         const layerBlooms = [];
         let everyLayerShipsBloom = true;
+        // 4.5: every layer's bloom MUST use the base asset's geometry, so the
+        // union is an exact OR. The geometry is right here in the base's fit;
+        // it used to come only from options.baseBloom, which no caller set, so
+        // the check never ran and a layer with foreign hashes was OR'd in.
+        const baseVocabBloom = base.calibrationJson?.asset?.vocabBloom;
+        const baseBloomGeometry = options.baseBloom
+            || (baseVocabBloom ? { bits: baseVocabBloom.bits, hashes: baseVocabBloom.hashes } : null);
+        // 4.3: lexical is REQUIRED on a layer with records if the base carries
+        // one, else MUST be absent. A layer that drops it leaves its records
+        // invisible to BM25 and skews the global statistics; one that adds it
+        // introduces lexical retrieval the base's fit never saw.
+        const baseHasLexical = base.segments.has('lexical');
 
         for (let i = 1; i < tiersRaw.length; i++) {
             const tier = tiersRaw[i];
@@ -206,11 +218,20 @@ export async function openPikeletChain(members, options = {}) {
                 {
                     layerBaseIdentity: rel.identityFields.baseIdentity,
                     baseQueryInterpSha256: baseQiSha,
-                    baseBloom: options.baseBloom || null,
+                    baseBloom: baseBloomGeometry,
                 },
             );
+            if (inherited.bloomBytes && !baseBloomGeometry) {
+                throw new Error(`layer at depth ${rel.depth} ships a vocabulary bloom but the base carries none whose geometry it could match (4.5)`);
+            }
             if (inherited.bloomBytes) layerBlooms.push(inherited.bloomBytes);
             else everyLayerShipsBloom = false;
+
+            if (!rel.tombstoneOnly && tier.segments.has('lexical') !== baseHasLexical) {
+                throw new Error(baseHasLexical
+                    ? `layer at depth ${rel.depth} carries no lexical segment, but the base does: a layer must not drop lexical retrieval (4.3)`
+                    : `layer at depth ${rel.depth} carries a lexical segment, but the base does not: a layer must not introduce lexical retrieval (4.3)`);
+            }
 
             // 4.4: the tombstone segment is eager and digest-verified by the
             // member's own open; here it is parsed and structurally validated.
@@ -225,6 +246,12 @@ export async function openPikeletChain(members, options = {}) {
             const violation = firstSupersetViolation(tomb.bitset, headBitset, rel.rowBase);
             if (violation !== -1) {
                 throw new Error(`layer at depth ${rel.depth} clears inherited tombstone for id ${violation}: a child's mask must be a superset of its parent's (3.4)`);
+            }
+            // 4.3: a tombstone-only layer exists only to delete, so its
+            // cumulative count MUST exceed its parent's. The producer checked
+            // this; a reader accepted a no-op layer from anyone else.
+            if (rel.tombstoneOnly && countBits(tomb.bitset) <= countBits(headBitset)) {
+                throw new Error(`tombstone-only layer at depth ${rel.depth} deletes nothing its parent had not already deleted (4.3)`);
             }
             headBitset = tomb.bitset;
             perLayerTombstones.push({ depth: rel.depth, supersessions: tomb.supersessions });

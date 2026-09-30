@@ -1611,6 +1611,100 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
         c6.info().calibrationStatus === 'drift-exceeded', `status ${c6.info().calibrationStatus}`);
     await c6.close();
 
+    // --- Read-side MUSTs a producer used to be the only one to check -------
+    // A layer over `built` with full control of its bloom, lexical segment
+    // and tombstones, so each rule can be broken on its own.
+    const GEOM = { bits: BLOOM_BITS, hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'] };
+    function craftLayer(built, tag, { n = 10, bloom = GEOM, lexical = false, tombstonedIds = [], parent = built, depth = 1, rowBase = 100 } = {}) {
+        const qiSha = built.manifest.segments.find((x) => x.kind === 'query-interp').sha256;
+        const ids = Array.from({ length: n }, (_, i) => rowBase + i);
+        const segs = [];
+        if (n) {
+            const corpus = buildCorpusSegment(ids.map(recBytes));
+            segs.push({ kind: 'index', bytes: sketchFor(ids, `x${tag}`) }, { kind: 'corpus', bytes: corpus.bytes });
+            if (lexical) segs.push({ kind: 'lexical', bytes: buildLexSeg(ids.map((i) => `record ${i} body text`)).bytes });
+            segs.corpusMeta = corpus.corpus;
+        }
+        segs.push({ kind: 'query-interp', bytes: buildInheritedQuerySegment({
+            baseIdentity: built.identity, queryInterpSha256: qiSha,
+            ...(bloom && n ? {
+                vocabBloom: bloom,
+                vocabBloomBytes: Uint8Array.from(Buffer.from(bloomB64([7]), 'base64')),
+            } : {}),
+        }) });
+        segs.push({ kind: 'tombstones', bytes: buildTombstoneSegment({ rowBase, tombstonedIds, records: n }) });
+        const order = ['index', 'corpus', 'query-interp', 'lexical', 'tombstones'];
+        return assemblePikeletFile({
+            profile: PROFILE_LAYER, dim: CDIM, metric: 'cosine', encoder: ENC,
+            layer: {
+                parent: { identity: parent.identity }, baseIdentity: built.identity,
+                depth, rowBase, records: n, tombstones: tombstonedIds.length, supersessions: 0, ingest: ING,
+            },
+            corpus: n ? segs.corpusMeta : { records: 0 }, ...(n ? { index: {} } : {}),
+        }, segs.slice().sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)), path.join(calTmp, `craft-${tag}.pikelet`));
+    }
+
+    // 4.5: the bloom geometry is checked against the base's fit. It came only
+    // from options.baseBloom, which no caller set, so a layer with the right
+    // size but foreign hashes was OR'd into the union as if exact.
+    const okBloom = craftLayer(b1, 'okbloom');
+    const cOk = await openPikeletChain([b1.outPath, okBloom.outPath]);
+    check('a layer bloom at the base\'s geometry mounts', cOk.info().calibrationStatus === 'inherited');
+    await cOk.close();
+    const evil = craftLayer(b1, 'evilhash', { bloom: { bits: BLOOM_BITS, hashes: ['evil'] } });
+    await rejectsAsync('a layer bloom with foreign hashes is refused, not OR\'d in',
+        () => openPikeletChain([b1.outPath, evil.outPath]), /bloom hashes .* differ from the base's/);
+    const noFitBase = (() => {
+        const ids = Array.from({ length: 100 }, (_, i) => i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        return assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC,
+            corpus: { ...corpus.corpus, ingest: ING }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, 'nofit') },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+        ], path.join(calTmp, 'base-nofit.pikelet'));
+    })();
+    const orphanBloom = craftLayer(noFitBase, 'orphanbloom');
+    await rejectsAsync('a layer bloom over a base with no bloom to match is refused',
+        () => openPikeletChain([noFitBase.outPath, orphanBloom.outPath]), /base carries none whose geometry it could match/);
+
+    // 4.3: a layer must neither drop nor introduce lexical retrieval.
+    const lexBase = (() => {
+        const ids = Array.from({ length: 100 }, (_, i) => i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        return assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC,
+            corpus: { ...corpus.corpus, ingest: ING }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, 'lexbase') },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
+            { kind: 'lexical', bytes: buildLexSeg(ids.map((i) => `record ${i} body text`)).bytes },
+        ], path.join(calTmp, 'base-lex.pikelet'));
+    })();
+    const lexKept = craftLayer(lexBase, 'lexkept', { bloom: null, lexical: true });
+    const cLex = await openPikeletChain([lexBase.outPath, lexKept.outPath]);
+    check('a layer carrying lexical over a hybrid base mounts', cLex.info().layers === 2);
+    await cLex.close();
+    const lexDropped = craftLayer(lexBase, 'lexdropped', { bloom: null, lexical: false });
+    await rejectsAsync('a layer that drops lexical retrieval from a hybrid base is refused',
+        () => openPikeletChain([lexBase.outPath, lexDropped.outPath]), /must not drop lexical retrieval/);
+    const lexAdded = craftLayer(noFitBase, 'lexadded', { bloom: null, lexical: true });
+    await rejectsAsync('a layer that introduces lexical retrieval is refused',
+        () => openPikeletChain([noFitBase.outPath, lexAdded.outPath]), /must not introduce lexical retrieval/);
+
+    // 4.3: a tombstone-only layer must delete something its parent had not.
+    const withDel = craftLayer(b1, 'withdel', { tombstonedIds: [5] });
+    const noop = craftLayer(b1, 'noop', { n: 0, bloom: null, tombstonedIds: [5], parent: withDel, depth: 2, rowBase: 110 });
+    await rejectsAsync('a tombstone-only layer that deletes nothing new is refused',
+        () => openPikeletChain([b1.outPath, withDel.outPath, noop.outPath]), /deletes nothing its parent had not already deleted/);
+    const realDel = craftLayer(b1, 'realdel', { n: 0, bloom: null, tombstonedIds: [5, 6], parent: withDel, depth: 2, rowBase: 110 });
+    const cDel = await openPikeletChain([b1.outPath, withDel.outPath, realDel.outPath]);
+    check('a tombstone-only layer that adds a deletion mounts', cDel.info().tombstones === 2);
+    await cDel.close();
+
     fs.rmSync(calTmp, { recursive: true, force: true });
 }
 
