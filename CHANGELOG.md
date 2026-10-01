@@ -8,6 +8,17 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## Unreleased
+
+### Fixed
+
+- **`pikelet mcp --pack` accepts the newest layer of an updated pack.** A
+  layer passed to `--pack`, or named by a shelf entry without a `lineage`,
+  failed to mount with "unsupported profile pikelet-layer-v1". It now mounts
+  the chain by walking each layer's parent locator, as LAYERED_PROFILE.md 7
+  specifies, locally or over HTTP; `#<sha256>` pins the head. Shelf entries
+  with a `lineage` mount as before.
+
 ## pikelet-wasm 0.9.1 / pikelet 0.9.1 — 2026-09-30
 
 Fixes to the layered profile shipped in 0.9.0, headlined by a chain that

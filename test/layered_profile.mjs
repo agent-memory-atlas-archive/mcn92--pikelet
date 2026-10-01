@@ -3252,6 +3252,54 @@ console.log('mcp: a mounted chain embeds queries with the query prefix');
     } finally {
         stdin.end();
         await done;
+    }
+
+    // 7: "Entries without lineage are resolved by locators." `--pack <layer>`
+    // was refused as an unsupported profile; the head alone now mounts the
+    // chain by walking its parent locator, pinned or not.
+    const serveOnce = async (packPaths, args) => {
+        const sin = new PassThrough();
+        const sout = new PassThrough();
+        let buf = '';
+        const got = [];
+        sout.on('data', (d) => {
+            buf += d;
+            let at;
+            while ((at = buf.indexOf('\n')) >= 0) { got.push(JSON.parse(buf.slice(0, at))); buf = buf.slice(at + 1); }
+        });
+        const run = runMcpServer({
+            packPaths, openPikeletFile,
+            httpRangeSource: () => { throw new Error('no network'); },
+            stdin: sin, stdout: sout, log: () => {},
+        });
+        const failed = run.then(() => null, (err) => err);
+        sin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search', arguments: args } })}\n`);
+        sin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_packs', arguments: {} } })}\n`);
+        const deadline = Date.now() + 60000;
+        while (!(got.some((r) => r.id === 1) && got.some((r) => r.id === 2)) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 5));
+        }
+        sin.end();
+        const err = await failed;
+        return { err, search: got.find((r) => r.id === 1)?.result, packs: got.find((r) => r.id === 2)?.result };
+    };
+    try {
+        for (const [label, loc] of [['bare', layerPath], ['pinned', `${layerPath}#${layerBuilt.identity}`]]) {
+            const out = await serveOnce([loc], { query: QUERY, k: 1 });
+            // A failed mount answers tool calls with plain error text, not JSON.
+            const parse = (r) => { try { return JSON.parse(r.content[0].text); } catch { return { text: r?.content?.[0]?.text }; } };
+            const sp = out.search ? parse(out.search) : null;
+            const lp = out.packs ? parse(out.packs) : null;
+            const sec = sp?.sections?.[0];
+            const listed = lp?.packs?.[0];
+            check(`mcp --pack <layer> (${label}) mounts the chain by walking its locator`,
+                !out.err && sec?.results?.[0]?.distance === asQuery.results[0].distance
+                && listed?.identity === layerBuilt.identity,
+                out.err ? out.err.message.slice(0, 140)
+                    : sp?.text ? String(sp.text).slice(0, 140)
+                        : JSON.stringify({ d: sec?.results?.[0]?.distance, id: listed?.identity?.slice(0, 12) }));
+        }
+    } finally {
         fs.rmSync(mt, { recursive: true, force: true });
     }
 }

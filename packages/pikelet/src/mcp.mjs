@@ -409,12 +409,19 @@ function callListPacks(packs) {
  * This adapts one to the other so search/get_record/verify_pack need no
  * chain-specific branch.
  */
-async function mountChain(packs, spec, { httpRangeSource, log }) {
+async function mountChain(packs, spec, { httpRangeSource, log, head = null }) {
   const { openPikeletChain } = await import('pikelet-wasm/complete/layer-reader.mjs');
-  const members = [...spec.lineage.map((m) => m.location), spec.location];
+  // Without a lineage the head alone is opened and the reader walks each
+  // layer's parent locator down to the base (5.1.1, 7: "Entries without
+  // lineage are resolved by locators"). `head` is the already-opened source
+  // or path mountPack peeked at, so the head is not fetched twice.
+  const lineage = Array.isArray(spec.lineage) ? spec.lineage : [];
+  const members = [...lineage.map((m) => m.location), spec.location];
   const opened = [];
   for (const loc of members) {
-    if (/^https?:\/\//i.test(loc)) {
+    if (loc === spec.location && head) {
+      opened.push(head);
+    } else if (/^https?:\/\//i.test(loc)) {
       const source = httpRangeSource(loc);
       await source.init();
       opened.push(source);
@@ -434,8 +441,8 @@ async function mountChain(packs, spec, { httpRangeSource, log }) {
   }
   // The listing must be exactly the chain that was reached, in order (7).
   const reached = info.members.map((m) => m.identity);
-  const listed = [...spec.lineage.map((m) => m.identity), info.identity];
-  if (reached.length !== listed.length || reached.some((id, i) => id !== listed[i])) {
+  const listed = [...lineage.map((m) => m.identity), info.identity];
+  if (lineage.length && (reached.length !== listed.length || reached.some((id, i) => id !== listed[i]))) {
     await chain.close();
     throw new Error(`${spec.location}: the chain reached by following parent commitments is not the listed `
       + `lineage (reached ${reached.length} member(s), listed ${listed.length}); refusing to serve it (7).`);
@@ -489,6 +496,8 @@ async function mountPack(packs, spec, { openPikeletFile, httpRangeSource, log })
     return mountChain(packs, spec, { httpRangeSource, log });
   }
   const isUrl = /^https?:\/\//i.test(spec.location);
+  const target = isUrl ? httpRangeSource(spec.location) : path.resolve(spec.location);
+  if (isUrl) await target.init();
   // URL packs are the format's native habitat: range-read off dumb HTTP,
   // nothing downloaded but the resident slice and per-query ranges. The
   // reader's own bounded full-download fallback covers hosts that ignore
@@ -498,14 +507,17 @@ async function mountPack(packs, spec, { openPikeletFile, httpRangeSource, log })
   const openOptions = spec.identity ? { expectedIdentity: spec.identity } : {};
   let search;
   try {
-    search = isUrl
-      ? await (async () => {
-        const source = httpRangeSource(spec.location);
-        await source.init();
-        return openPikeletFile(source, openOptions);
-      })()
-      : await openPikeletFile(path.resolve(spec.location), openOptions);
+    search = await openPikeletFile(target, openOptions);
   } catch (err) {
+    // A layer is the head of a chain, never a pack on its own, and the
+    // single-file reader refuses its profile (4.1). Mount the chain by
+    // walking its parent locators instead (5.1.1, 7), so `--pack` takes the
+    // newest layer of an updated pack exactly as it takes a base. Deciding
+    // on the refusal, not a manifest peek, costs a plain pack no extra read.
+    const { LAYER_PROFILE } = await import('pikelet-wasm/complete/layer-manifest.mjs');
+    if (String(err?.message).includes(`unsupported profile ${LAYER_PROFILE}`)) {
+      return mountChain(packs, spec, { httpRangeSource, log, head: target });
+    }
     if (/identity mismatch/.test(String(err?.message))) {
       throw new Error(`${spec.location}: ${err.message} — the pack at this location is not the `
         + 'knowledge state the mount pinned; refusing to serve it.');
