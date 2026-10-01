@@ -693,14 +693,30 @@ function normalizeText(text) {
 // 25 tokens merge into the previous chunk of the same document (their
 // content is preserved; their anchor is not a retrieval target). Documents
 // without sections (plain .txt) keep the flat token windows.
+// The ingestion declaration (LAYERED_PROFILE.md 6.1): how records were made,
+// recorded as a base's corpus.ingest so a layer cannot change record
+// granularity mid-chain. Everything chunkDocs is parameterized by goes in;
+// INGEST_CHUNKER names the algorithm and MUST change whenever chunkDocs or
+// the extraction feeding it changes how the same source splits into records.
+const INGEST_CHUNKER = 'pikelet-section-v1';
+const MIN_CHUNK_TOKENS = 25;
+function ingestDeclaration(chunking = {}) {
+  return {
+    chunker: INGEST_CHUNKER,
+    targetTokens: chunking.targetTokens || 256,
+    overlapPercent: chunking.overlapPercent || 15,
+    minTokens: MIN_CHUNK_TOKENS,
+  };
+}
+
 function chunkDocs(docs, options) {
   const chunks = [];
   chunks.dropped = [];
-  const target = options.targetTokens || 256;
-  const overlap = Math.floor(target * ((options.overlapPercent || 15) / 100));
+  const { targetTokens: target, overlapPercent } = ingestDeclaration(options);
+  const overlap = Math.floor(target * (overlapPercent / 100));
   for (const doc of docs) {
     const docTokens = tokenize(doc.text);
-    if (docTokens.length < 25) {
+    if (docTokens.length < MIN_CHUNK_TOKENS) {
       chunks.dropped.push({
         id: doc.id,
         title: doc.title,
@@ -724,7 +740,7 @@ function chunkDocs(docs, options) {
     if (!Array.isArray(doc.sections) || !doc.sections.length) {
       for (let start = 0; start < docTokens.length; start += Math.max(1, target - overlap)) {
         const slice = docTokens.slice(start, start + target);
-        if (slice.length < 25 && chunks.length) {
+        if (slice.length < MIN_CHUNK_TOKENS && chunks.length) {
           chunks[chunks.length - 1].text += ` ${slice.join(' ')}`;
           continue;
         }
@@ -804,7 +820,7 @@ function chunkDocs(docs, options) {
     for (let i = 0; i < doc.sections.length; i++) {
       const raw = doc.sections[i];
       const next = doc.sections[i + 1];
-      const undersized = tokenize(raw.text).length < 25;
+      const undersized = tokenize(raw.text).length < MIN_CHUNK_TOKENS;
       if (undersized && next && isChildOf(raw.headingPath, next.headingPath)) {
         // Carry onto the child next iteration rather than falling into the
         // backward-merge branch below. Works whether or not a previous
@@ -837,7 +853,7 @@ function chunkDocs(docs, options) {
     for (const section of sections) {
       const tokens = tokenize(section.text);
       if (!tokens.length) continue;
-      if (tokens.length < 25) {
+      if (tokens.length < MIN_CHUNK_TOKENS) {
         if (chunks.length > docStart) {
           const prev = chunks[chunks.length - 1];
           prev.contributors.push(...section.contributors);
@@ -966,6 +982,8 @@ export {
   decodeEntities,
   normalizeText,
   chunkDocs,
+  ingestDeclaration,
+  INGEST_CHUNKER,
   tokenize,
   dedupeChunks,
   applySourceRoutes,

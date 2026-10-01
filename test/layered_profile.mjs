@@ -2821,6 +2821,22 @@ console.log('rebase: the command, end to end (6.2)');
         { kind: 'corpus', bytes: legacyCorpus.bytes },
         { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'none' }))) },
     ], legacyFile);
+
+    // 6.1 through the CLI: a legacy base's refusal says what to assert, and a
+    // declared chunker this pikelet does not implement is refused before any
+    // source is chunked under the wrong rules.
+    // The literal, not ingestDeclaration(): every compiled pack carries these
+    // bytes, so a change to them must fail here rather than pass silently.
+    const DECL = '{"chunker":"pikelet-section-v1","targetTokens":256,"overlapPercent":15,"minTokens":25}';
+    const legacyAppend = run(['append', '--parent', legacyFile, '--remove', '1', '--out', path.join(rt, 'la.pikelet')]);
+    check('append on a base without corpus.ingest prints the declaration to assert',
+        !legacyAppend.ok && legacyAppend.out.includes(DECL),
+        legacyAppend.out.slice(-200));
+    const foreign = run(['append', '--parent', baseFile, '--remove', '1', '--out', path.join(rt, 'fc.pikelet')]);
+    check('append refuses a chain declared with a chunker this pikelet does not implement',
+        !foreign.ok && /made by chunker "v1", but this pikelet chunks with "pikelet-section-v1"/.test(foreign.out)
+        && !fs.existsSync(path.join(rt, 'fc.pikelet')),
+        foreign.out.slice(-200));
     const assertedFork = (name, ingest) => {
         const at = path.join(rt, name);
         const c = buildCorpusSegment([4, 5].map(recBytes));
@@ -3182,6 +3198,10 @@ console.log('mcp: a mounted chain embeds queries with the query prefix');
         return JSON.parse(buf.subarray(64, 64 + buf.readUInt32LE(8)).toString('utf8'));
     };
     const bm = readManifestOf(basePath);
+    check('compile records its ingestion declaration as corpus.ingest (6.1)',
+        canonicalJson(bm.corpus.ingest ?? null)
+            === canonicalJson({ chunker: 'pikelet-section-v1', targetTokens: 256, overlapPercent: 15, minTokens: 25 }),
+        JSON.stringify(bm.corpus.ingest));
     const baseRef = await openPikeletFile(basePath);
     const baseId = baseRef.info().identity;
     await baseRef.close();

@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { sha256, loadCompleteModules, CliError, loadArtifactContract } from './common.mjs';
-import { publicChunk } from './ingest.mjs';
+import { publicChunk, ingestDeclaration } from './ingest.mjs';
 import { calibrateRetrievalAbstention } from './calibrate.mjs';
 
 async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, chunks, snapshot, vectors, log = () => {} }) {
@@ -194,6 +194,9 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
     profile: PROFILE_V2,
     corpus: {
       ...corpusSegment.corpus,
+      // How the records were made (LAYERED_PROFILE.md 6.1): with it a layer
+      // can append without --assert-ingest, and cannot re-chunk mid-chain.
+      ingest: ingestDeclaration(config.chunking),
       provenance: {
         source: config.source.type,
         name: config.name,

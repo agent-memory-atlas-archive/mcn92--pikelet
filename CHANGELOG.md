@@ -10,6 +10,16 @@ first.
 
 ## Unreleased
 
+### Changed
+
+- **`compile` records how a pack's records were made, so `append` works on
+  it with no flag.** New packs carry `corpus.ingest` (the chunker and its
+  parameters). Packs compiled before it still need `--assert-ingest`, and
+  `append`'s error now prints the exact JSON to assert. `append` refuses a
+  chain whose declaration names a chunker this `pikelet` does not
+  implement. The new manifest field means a pack compiled from the same
+  source gets a different identity than under 0.9.1.
+
 ### Fixed
 
 - **`pikelet mcp --pack` accepts the newest layer of an updated pack.** A

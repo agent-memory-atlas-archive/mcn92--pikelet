@@ -96,6 +96,9 @@ fields:
   "corpus": {
     "records": 208,
     "provenance": { "source": "folder", "name": "docs", "license": "CC-BY-4.0" },  // contract 4.3; license set by compile --license, omitted otherwise; null in pre-0.7.0 files
+    // OPTIONAL: how the records were made (LAYERED_PROFILE.md 6.1); written by compile since 0.9.2, absent before.
+    // A layer appended to this base must chunk under it. Readers that do not append ignore it.
+    "ingest": { "chunker": "pikelet-section-v1", "targetTokens": 256, "overlapPercent": 15, "minTokens": 25 },
     // format 2 only (layout v2, section 3.5); absent on format 1:
     "layout": "records-v2",
     "pageRecords": 256,

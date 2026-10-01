@@ -14,7 +14,7 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { CliError, loadCompleteModules, DEFAULT_CONFIG } from './common.mjs';
-import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks } from './ingest.mjs';
+import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, ingestDeclaration, INGEST_CHUNKER } from './ingest.mjs';
 
 const log = (line) => console.log(line);
 
@@ -120,11 +120,31 @@ export async function appendLayer(flags) {
     const assertIngest = flags['assert-ingest']
       ? JSON.parse(await fs.readFile(path.resolve(process.cwd(), flags['assert-ingest']), 'utf8'))
       : null;
+    if (head.corpusIngest == null && !assertIngest) {
+      // A base compiled before compile recorded corpus.ingest. Say what to
+      // assert rather than only that something must be: this CLI's own
+      // declaration, which is right when the base came from compile with its
+      // default chunking.
+      throw new CliError('the base carries no corpus.ingest (it predates compile recording one), so record '
+        + 'granularity cannot be checked (6.1). If it was compiled by pikelet with default chunking, assert '
+        + 'that declaration:\n'
+        + `  echo '${JSON.stringify(ingestDeclaration(DEFAULT_CONFIG.chunking))}' > ingest.json\n`
+        + '  pikelet append ... --assert-ingest ingest.json\n'
+        + 'The assertion is your statement, recorded in every layer of the chain.');
+    }
     const plan0 = planAppendability({
       qiKind: head.qiKind,
       corpusIngest: head.corpusIngest,
       assertIngest,
     });
+    // A declaration naming another chunker describes records this CLI cannot
+    // reproduce; chunking new sources anyway would change record granularity
+    // mid-chain, which is the thing the declaration exists to prevent.
+    if (plan0.ingest.chunker !== undefined && plan0.ingest.chunker !== INGEST_CHUNKER) {
+      throw new CliError(`the chain's records were made by chunker ${JSON.stringify(plan0.ingest.chunker)}, `
+        + `but this pikelet chunks with ${JSON.stringify(INGEST_CHUNKER)}; appending would change record `
+        + 'granularity mid-chain (6.1). Use the pikelet version that compiled the base, or compile a new base.');
+    }
     log(`Base is appendable: encoder from the ${plan0.encoderSource === 'pack' ? 'pack itself' : 'host'}`
       + `${plan0.ingestAsserted ? ', ingestion declaration asserted by the operator' : ''}`);
 
