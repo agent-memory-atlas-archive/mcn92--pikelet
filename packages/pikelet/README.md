@@ -101,7 +101,7 @@ package copy is absent — registry installs ship without it), on a worker
 pool sized to your cores — roughly 3 minutes for a ~570-chunk docs site on
 8 cores. Each worker holds its own kernel and weight copy, so the pool
 trades a few hundred MB of build-time memory for the near-linear speedup;
-`PIKELET_SEARCH_EMBED_WORKERS` overrides the pool size (0 forces
+`PIKELET_EMBED_WORKERS` overrides the pool size (0 forces
 sequential). `compile` accepts `--source` (folder or URL), `--out`,
 `--name` (corpus name recorded in the artifact), and `--force` to
 overwrite the output file. Folder sources take `--include`/`--exclude`
@@ -204,10 +204,12 @@ pack name, the pack's immutable manifest identity (sha256), title,
 heading path, anchor, and source — so an answer can cite the exact
 knowledge state it was derived from, and a pinned identity means the
 citation survives pack rebuilds detectably. Calibrated abstention
-crosses the protocol intact: a pack that cannot answer says
-`matchQuality: "none"` with zero results, and the tool result tells the
-model to say so rather than guess — the property a grounding layer needs
-most. `list_packs` reports names, identities, record counts, licenses,
+crosses the protocol intact: a pack whose passages do not restate the
+question says `matchQuality: "none"`, and the tool result tells the model
+the support is at best indirect. The results still ship under `none` by
+default, because the calibrator can misjudge a paraphrase; pass
+`showAbstained: false` to withhold them. (The library's `query()` does the
+reverse: it withholds under `none` unless asked.) `list_packs` reports names, identities, record counts, licenses,
 and each pack's sample queries; `get_record` hydrates one full chunk
 (integrity-verified from the pack) by the id a search result reported.
 `verify_pack` runs the tests the pack carries inside itself — golden
@@ -227,6 +229,47 @@ mount with an explanation. Set `compile --license <SPDX-id>` on anything
 meant for redistribution — it is recorded in the pack manifest, surfaced
 by `list_packs`, and result provenance carries attribution through to
 answers.
+
+## Updating a pack: `append`, `compact`, `rebase`
+
+A pack does not have to be recompiled when a few documents change.
+`append` writes a small layer on top of it, and the base plus its layers
+(a chain) is searched as one pack:
+
+```bash
+npx pikelet append --parent docs.pikelet --source ./changed-docs --out docs.0001.pikelet
+npx pikelet append --parent docs.0001.pikelet --remove 412 --out docs.0002.pikelet
+npx pikelet append --parent docs.0002.pikelet --source ./auth-v2 --supersede 87=./auth-v2/auth.md --out docs.0003.pikelet
+npx pikelet mcp --pack docs.0003.pikelet
+```
+
+A layer adds records (`--source`, ingested and chunked exactly as the base
+was), deletes them (`--remove <id>`, one id per flag), or replaces one
+(`--supersede <oldId>=<path>` retires `oldId` in favour of the record
+ingested from that file, which must come from a `--source` of the same
+command and produce exactly one record). Ids are the ones search results and
+`get_record` report. `--parent` names the newest member; a layer records
+its parent's identity and, when the parent is a local file in the same
+directory or below, its relative path (`--parent-locator` sets it
+explicitly), so opening or mounting the newest layer walks down to the base,
+locally or over HTTP, verifying each link. `#<sha256>` on any member flag
+pins it, and pinning the newest layer pins the whole chain.
+
+The base's encoder and calibration carry over. The chain keeps the base's
+abstention fit until the records added plus deleted exceed the drift limit
+(20% of the base's records by default); `append` refuses to cross it unless
+`--allow-drift`, after which the chain serves `unscored`. `compact
+--head <base> --head <layer> ... --out new.pikelet` folds a chain into one
+fresh base with live records copied byte for byte and the calibration refit
+(`--no-refit` skips the refit). `rebase --layer <file> --onto <chain> ...`
+moves a layer onto a different parent, replaying only what that layer did.
+
+`append` needs to know how the base's records were made, so new records
+match them. Packs from this version of `compile` record it; for a pack
+compiled earlier, `append` stops and prints the declaration to pass with
+`--assert-ingest`. Shelves can list a chain's members as a `lineage` so a
+mount does not have to walk locators. The format is specified in
+`LAYERED_PROFILE.md` in the main repo.
 
 ## Where this sits
 
@@ -300,15 +343,21 @@ skip redirects, and cap HTML response bodies before parsing.
 ## Package layout
 
 `bin/pikelet.mjs` calls `main()` in `src/cli.mjs`, which owns
-argument parsing and the `create` / `rebuild` / `doctor` commands and the
-config a scaffold is generated from. The work lives beside it:
+argument parsing, dispatches every command, and holds the config a
+scaffold is generated from. The work lives beside it:
 
 | module | responsibility |
 | --- | --- |
 | `src/common.mjs` | package paths and version, config defaults, the model table, `CliError`, loaders that resolve `pikelet-wasm` (engine, `/artifact`, `/complete`) from npm or the monorepo |
 | `src/ingest.mjs` | folder walk and URL crawl, HTML/Markdown/MDX extraction, chunking, dedupe, Docusaurus route mapping, the public chunk shape |
 | `src/embed.mjs` | build-time embeddings: transformers.js, the student trainer, the inline transformer, precomputed vectors, the deterministic stub, self-recall |
+| `src/embed-worker.mjs` | the worker thread `embed.mjs` fans passage embedding out to |
+| `src/student-embedder.mjs` | the corpus-distilled student query encoder used by `--mode student` |
 | `src/complete-build.mjs` | kind-3 complete artifact assembly, the inline-encoder declaration, the pinned weights download |
+| `src/calibrate.mjs` | build-time abstention calibration: probe generation, the retrieval-signals fit, its acceptance gates |
+| `src/mcp.mjs` | the MCP server (`search`, `list_packs`, `get_record`, `verify_pack`), pack and chain mounting, shelves, `mcp install` |
+| `src/append.mjs` | `append`: a layer of new, deleted or superseded records over a chain |
+| `src/compact.mjs` | `compact` and `rebase` |
 | `src/scaffold.mjs` | generated-project files: runtime modules, templates, `wrangler.toml` / `package.json`, student input staging, deploy |
 | `src/build.mjs` | `buildAssets` (ingest → chunk → embed → index → artifact), config validation, `manifest.json`, student asset publishing, bundle sizing |
 | `src/doctor.mjs` | the `doctor <url>` hosting probe |

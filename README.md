@@ -10,15 +10,6 @@ A `.pikelet` can carry the source text, semantic index, keyword index, query enc
 
 The `pikelet` CLI requires Node 20+; the `pikelet-wasm` library runs on Node 18+ (CI tests 18, 20, 22), browsers, and Cloudflare Workers.
 
-> **Upgrade to `pikelet-wasm@0.8.1` if you mount packs you did not compile.**
-> 0.8.0 and earlier sized the inline encoder's WASM buffers from the
-> artifact's own `maxTokens` with an upper bound only, so a pack declaring an
-> out-of-range value could overflow them — at mount, before any query, and
-> with every integrity check passing, because the pack's author is the one who
-> signed it. 0.8.1 validates the bound. Packs the toolchain produces were
-> never affected. `pikelet@0.8.1` picks the fix up through its dependency
-> range; see the CHANGELOG for the detail.
-
 ```bash
 npx pikelet compile --source ./docs --out docs.pikelet
 ```
@@ -228,9 +219,21 @@ All three packs derive from the same small synthetic Station Veyra corpus, with 
 
 ---
 
+## Update a pack without rebuilding it
+
+A pack doesn't have to be recompiled when a few documents change. `append` writes a small **layer** on top of it — new records, deletions, or replacements — and the chain of base plus layers is searched as one pack:
+
+```bash
+npx pikelet append --parent docs.pikelet --source ./changed-docs --out docs.0001.pikelet
+npx pikelet append --parent docs.0001.pikelet --remove 412 --out docs.0002.pikelet
+npx pikelet mcp --pack docs.0002.pikelet
+```
+
+A layer records its parent's identity, and its location when the parent sits in the same directory, so mounting the newest layer finds the rest of the chain — locally or over HTTP — and verifies every link. `#<sha256>` on the newest layer pins the whole chain. The base's encoder and calibration carry over: layers keep scoring with the base's fit until the change outgrows the drift limit (20% of the base's records by default), after which the chain serves `unscored` until it is compacted. `compact` folds a chain back into one fresh base, and `rebase` moves a layer onto a different parent. The format is specified in [`LAYERED_PROFILE.md`](LAYERED_PROFILE.md); `npx pikelet --help` lists every flag.
+
 ## Match quality and abstention
 
-A nearest neighbour is not automatically evidence that a corpus answers a question. Pikelet can calibrate retrieval signals at build time (best semantic distance, distance margin, lexical coverage, retrieval agreement). When the corpus supports a reliable classifier, results carry `matchQuality: strong | weak | none`. When calibration can't separate supported from unsupported reliably — a single novel may be semantically homogeneous enough that the fit isn't trustworthy — Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. A `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way.
+A nearest neighbour is not automatically evidence that a corpus answers a question. Pikelet can calibrate retrieval signals at build time (best semantic distance, the margin to the next hits, the mean distance of the top ten, how much of the query's vocabulary the corpus knows, and how many of the query's terms the top passages contain). When the corpus supports a reliable classifier, results carry `matchQuality: strong | weak | none`. When calibration can't separate supported from unsupported reliably — a single novel may be semantically homogeneous enough that the fit isn't trustworthy — Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. In the library, a `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way. MCP `search` does the opposite: it returns results under `none` with a note telling the model the support is indirect, because the calibrator can misjudge a paraphrase; `showAbstained: false` withholds them.
 
 `matchQuality` is evidence about retrieval support. It is **not** a guarantee that an LLM will never hallucinate.
 
@@ -245,7 +248,7 @@ A nearest neighbour is not automatically evidence that a corpus answers a questi
 
 ## What this is not
 
-**Not a claim that vector databases are obsolete.** If your corpus changes continuously, needs transactional updates, serves many tenants, or already lives comfortably in a database, use a database. Pikelet targets `build → publish → query many times → replace on release`.
+**Not a claim that vector databases are obsolete.** If your corpus changes continuously, needs transactional updates, serves many tenants, or already lives comfortably in a database, use a database. Pikelet targets `build → publish → query many times → replace on release`, with small layered updates in between.
 
 **Not state-of-the-art embedding research.** The bundled model is MiniLM-L6, chosen for being small enough to live inside the artifact. ArguAna demonstrates a real quality cost from the compact encoder.
 
@@ -298,7 +301,8 @@ packages/pikelet-wasm/            The published pikelet-wasm package:
   src/                             Engine wrapper and artifact readers/builders
                                    (the entrypoints, core/, artifact/, errors/)
   complete/                        Reader and builder for the complete
-                                   range-readable .pikelet artifact
+                                   range-readable .pikelet artifact, and the
+                                   layered-chain reader and producers
   native/                          N-API build of the same engine (benchmarks)
 packages/pikelet/                 The published pikelet CLI: compiler, MCP
                                    server, encoder integration, Docusaurus plugin
@@ -306,6 +310,8 @@ docs/                             Deeper dives (how a query runs, the Veyra
                                    ablation, why a file), architecture notes,
                                    rename history, measurement reports
 spec/                             Byte-level artifact contracts
+LAYERED_PROFILE.md                The layered profile: append, compact,
+                                   rebase, and how chains are read
 benchmarks/beir/                       Frozen BEIR ablation harness (encoder,
                                    quantization, HNSW quality)
 benchmarks/range-proof/                The deliberately boring static-HTTP proof:
@@ -342,6 +348,7 @@ Pikelet is early. The implementation is real; the format is not frozen. One prim
 - content identity and lazy-read integrity verification
 - calibration/abstention support
 - MCP mounting
+- layered updates: append, compact, rebase
 - BEIR retrieval evaluation
 - range-read and failure-mode tests
 - a large 456k-record example artifact
