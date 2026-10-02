@@ -2,24 +2,17 @@
 
 **Knowledge that ships as a file.**
 
-Pikelet compiles a corpus into one self-contained, queryable artifact.
+Pikelet compiles a corpus into one self-contained, queryable artifact. A model can interrogate a 456,153-record knowledge base whose backend is a static file.
 
-A model can interrogate a 456,153-record knowledge base whose backend is a static file.
+A `.pikelet` carries the source text, semantic and keyword indexes, the query encoder, retrieval calibration, evaluation fixtures, and integrity commitments over all of them. So it is more than stored search data: the file fixes how its corpus is queried — the model that turns a question into a vector, how candidates are ranked, and when the honest answer is "this corpus doesn't say" — and its identity is a hash that commits to all of it. **Pikelet makes retrieval semantics part of the versioned knowledge artifact.**
 
-A `.pikelet` can carry the source text, semantic index, keyword index, query encoder, integrity commitments, retrieval calibration, and evaluation fixtures needed to interrogate that corpus. Put the file on disk, S3, R2, a CDN, or any static HTTP host. A reader can mount it locally or over HTTP Range and search it without a vector database, embedding API, or retrieval server.
+Put the file on disk, S3, R2, a CDN, or any static HTTP host. A reader can mount it locally or over HTTP Range and search it without a vector database, embedding API, or retrieval server. Updates ship as small immutable layers, and an answer can name the exact version of the knowledge it came from.
 
 The `pikelet` CLI requires Node 20+; the `pikelet-wasm` library runs on Node 18+ (CI tests 18, 20, 22), browsers, and Cloudflare Workers.
 
 ```bash
 npx pikelet compile --source ./docs --out docs.pikelet
 ```
-
-Installing rather than using `npx`? Use `npm install -g pikelet
---omit=optional`. The optional dependency is `@xenova/transformers`, which
-only the `create` scaffold path uses. Measured on a clean project, omitting it
-takes the install from **82 packages / 257 MB / "6 vulnerabilities (5 high, 1
-critical)"** to **2 packages / 1.8 MB / "found 0 vulnerabilities"** — the
-advisories are all inside a dependency `compile` and `mcp` never load.
 
 ```text
 Ingested 3 docs -> 3 chunks
@@ -54,7 +47,7 @@ console.log(out.matchQuality, out.results[0]?.title);
 // 'strong' 'Snapshot restore'
 ```
 
-That's the whole loop. `compile` also takes a live URL (`--source https://docs.example.com`) instead of a directory. If you want a deployed search app — a Worker + UI, not a file — use `npx pikelet create` instead; see [`packages/pikelet/README.md`](packages/pikelet/README.md) for the full CLI reference and the tradeoffs between the two. `create` is the one path that needs the optional `@xenova/transformers` dependency, which is why the install above omits it by default.
+That's the whole loop. `compile` also takes a live URL (`--source https://docs.example.com`) instead of a directory. If you want a deployed search app — a Worker + UI, not a file — use `npx pikelet create` instead; see [`packages/pikelet/README.md`](packages/pikelet/README.md) for the full CLI reference and the tradeoffs between the two. To install rather than use `npx`, run `npm install -g pikelet --omit=optional`: the optional dependency is only for `create` ([why it matters](packages/pikelet/README.md#installing)).
 
 Under the hood, the file is one container for everything a reader needs:
 
@@ -87,93 +80,18 @@ Search is the interface. **The file is the knowledge deployment unit.**
 
 ## The shortest demonstration
 
-A real Pikelet pack contains **456,153 Simple English Wikipedia records** in a **648.5 MiB** artifact.
+A real pack holds **456,153 Simple English Wikipedia records** in a **648.5 MiB** file. The [live browser demo](https://pikelet-wiki-playground.pages.dev/) is static HTML on Cloudflare Pages that mounts it straight from an R2 bucket — there is no `/search`, `/embed`, `/query` or `/api` behind it. The browser range-reads the file, verifies it, loads the query encoder from inside it, and shows every byte range it fetches.
 
-Try the live browser demo:
+For the agent test, the same file was served by a server whose only relevant capability was `fs.createReadStream` + HTTP Range and mounted by URL into a headless Claude restricted to the pack's three MCP tools (no web, no filesystem). The model answered questions such as "What causes earthquakes?" by searching, reading several records, and citing them.
 
-```text
-https://pikelet-wiki-playground.pages.dev/
-```
+| In one persistent session                | Transferred                 |
+| ---------------------------------------- | --------------------------: |
+| Mount (once)                             | 51.7 MiB in 11 requests     |
+| Query encoder (once, with the first query) | ~25 MiB                   |
+| Each fresh query after that              | ~0.5–1.1 MiB                |
+| Whole session: 5 queries and a repeat    | 80.8 MiB, 12.5% of the file |
 
-The page is static HTML/JS on Cloudflare Pages. It mounts the pack from R2:
-
-```text
-https://pub-6da2384a3bca4a44b2b2fa29a94cc811.r2.dev/wikipedia.pikelet
-```
-
-There is no `/search`, `/embed`, `/query`, or `/api` backend behind the demo.
-The browser opens the `.pikelet` file over HTTP Range, verifies the artifact,
-loads the embedded query encoder, and shows the byte ranges it reads.
-
-That file was served by a deliberately dumb HTTP server whose only relevant capability was:
-
-```text
-fs.createReadStream + HTTP Range
-```
-
-There was no vector database, no search service, no embedding service, no application server that understood the pack, no index process on the server.
-
-The pack was mounted by URL and exposed to a real headless Claude process through MCP. Each invocation was restricted with `--strict-mcp-config` to only:
-
-```text
-mcp__wiki-pack__search
-mcp__wiki-pack__list_packs
-mcp__wiki-pack__get_record
-```
-
-No web tool. No filesystem tool. No alternate retrieval tool.
-
-One of the actual responses:
-
-> **Q: What causes earthquakes?**
->
-> Earthquakes are caused by the movement of tectonic plates in the Earth's crust. Stress builds up along fault boundaries where plates grind against or ride over one another; when that stress exceeds the friction holding the locked fault in place, it suddenly releases as shock waves (seismic waves) that shake the ground [record 429637].
->
-> There are three main fault types that can produce quakes — normal, reverse (thrust), and strike-slip — and some quakes have less clear-cut causes, like deep shifts in ancient rock or mine-collapse "tremors" [record 429638].
->
-> Two related mechanisms compound this:
->
-> * Subduction, where one plate is forced under another into the mantle, produces the most powerful earthquakes and can trigger tsunamis [record 132833].
-> * More broadly, the slow convection-driven movement of crustal plates over the hot mantle is the underlying driver of quakes, volcanoes, and mountain formation [record 132267].
->
-> Volcanic eruptions can also cause earthquakes, though these are localized to areas near active volcanoes [record 429637].
-
-The model did not just repeat the first search hit. It retrieved multiple records and synthesized them into a sourced answer.
-
-Other runs produced:
-
-```text
-Who was the first person on the moon?          → Neil Armstrong          (records 408686, 408684)
-How do volcanoes form?                          → plates + subduction + hotspots
-                                                                          (records 132770, 132765, 132852, 132853)
-How does photosynthesis work?                   → two-phase reaction, cited (5 records: 114219, 114220, 114222, 114223, 269279)
-What is the capital of France?                  → Paris                  (records 454641, 302684)
-```
-
-That is the product in one demonstration:
-
-> **A model is interrogating a 456,153-record knowledge base whose backend is a static file.**
-
-The model may already contain some of these facts in its pretrained parameters. This test demonstrates the retrieval, synthesis, citation, and deployment path; the [Veyra ablation](docs/veyra-ablation.md) tests whether support changes when evidence is removed from the pack.
-
-**Network cost.** In a single persistent session (one mount, five queries, one repeat):
-
-| Operation                       | Bytes transferred | Requests |
-| ------------------------------- | ----------------: | -------: |
-| Initial mount                   |          51.7 MiB |       11 |
-| Query 1 + one-time encoder load |          25.9 MiB |       77 |
-| Query 2                         |         504.4 KiB |       37 |
-| Query 3                         |         499.4 KiB |       46 |
-| Query 4                         |         968.9 KiB |       75 |
-| Query 5                         |           1.1 MiB |      116 |
-| Repeated query 1                |         238.4 KiB |        4 |
-| **Total**                       |      **80.8 MiB** |  **366** |
-
-Roughly **12.5% of the 648.5 MiB artifact** crossed the wire across that whole session. Excluding the one-time ~25 MiB encoder load, fresh-query traffic ran **~0.5–1.1 MiB per query**. The complete artifact was never downloaded.
-
-The headless-Claude test above used a fresh process per question, so each invocation repaid the ~52 MiB mount and ~25 MiB encoder cost — about 78 MiB per cold query. That's a real operational distinction: **persistent sessions amortize mount and encoder cost; independent cold processes do not.**
-
-*(The large benchmark fixture still carries its historical `.pancake` filename from before the Pikelet rename; current artifacts use `.pikelet`.)*
+The complete artifact is never downloaded. The full transcript, the per-query table, and what a cold process per question costs instead are in [the Wikipedia demonstration](docs/wikipedia-demonstration.md); [`benchmarks/range-proof/`](benchmarks/range-proof/) reproduces it.
 
 ---
 
@@ -189,7 +107,7 @@ npx pikelet mcp install \
 
 The agent gets `search`, `get_record`, `list_packs`, `verify_pack`. A search result carries the identity of the pack and the location of the source record, so an agent can work against `product-docs.pikelet`, `rust-reference.pikelet`, `policy-2026-09.pikelet`, `customer-manual-v4.pikelet` without each publisher operating a retrieval API. The artifact can be local, private, public, behind authenticated object storage, or distributed like any other static asset.
 
-A pack mounted with a content hash has a stable identity — `https://example.com/docs.pikelet#8d731...` — so "what body of knowledge did this agent query?" has a reproducible answer.
+A pack mounted with a content hash has a stable identity — `https://example.com/docs.pikelet#8d731...` — so "what body of knowledge did this agent query?" has a reproducible answer. A citation is `(pack identity, record id)`, and it stays meaningful as the pack changes: a chain of layers resolves citations made against any of its earlier versions, and a pack compacted from a chain translates them forward, reporting what an old record became or that it was deleted (the old record's bytes stay in the old files). Citation translation is a library call today, `citation(identity, id)`; the MCP tools do not expose it yet.
 
 **A mounted pack's content reaches the model as tool output.** `verify_pack` proves the bytes are intact and match their pinned identity; it does not prove the corpus itself is trustworthy. Mounting a pack from a source you don't control is the same trust decision as giving an agent any other untrusted-content tool — treat pack text the way you'd treat search results or fetched web pages, not as instructions.
 
@@ -221,7 +139,7 @@ All three packs derive from the same small synthetic Station Veyra corpus, with 
 
 ## Update a pack without rebuilding it
 
-A pack doesn't have to be recompiled when a few documents change. `append` writes a small **layer** on top of it — new records, deletions, or replacements — and the chain of base plus layers is searched as one pack:
+A pack doesn't have to be recompiled when a few documents change. `append` never modifies its parent: it writes a new, small `.pikelet` — a **layer** — holding new records, deletions, or replacements, and the base plus its layers (a chain) is searched as one pack. Every published file stays byte-for-byte immutable; the newest layer defines the current state, and its identity pins the whole history.
 
 ```bash
 npx pikelet append --parent docs.pikelet --source ./changed-docs --out docs.0001.pikelet
@@ -229,11 +147,13 @@ npx pikelet append --parent docs.0001.pikelet --remove 412 --out docs.0002.pikel
 npx pikelet mcp --pack docs.0002.pikelet
 ```
 
-A layer records its parent's identity, and its location when the parent sits in the same directory, so mounting the newest layer finds the rest of the chain — locally or over HTTP — and verifies every link. `#<sha256>` on the newest layer pins the whole chain. The base's encoder and calibration carry over: layers keep scoring with the base's fit until the change outgrows the drift limit (20% of the base's records by default), after which the chain serves `unscored` until it is compacted. `compact` folds a chain back into one fresh base, and `rebase` moves a layer onto a different parent. The format is specified in [`LAYERED_PROFILE.md`](LAYERED_PROFILE.md); `npx pikelet --help` lists every flag.
+Layers are small. On a 20-record test pack with a 24.6 MiB base, deleting a record took a 1.2 KiB layer and replacing one took 6.9 KiB; a layer that adds records also carries a vocabulary filter sized to its base's (about 43 KiB on a 3,255-record docs pack).
+
+A layer records its parent's identity, and its location when the parent sits in the same directory, so mounting the newest layer finds the rest of the chain — locally or over HTTP — and verifies every link. `#<sha256>` on the newest layer pins the whole chain. Layers always inherit the base's encoder. They inherit its calibration only while the chain stays within the drift limit (by default, records added plus deleted up to 20% of the base's); past it, the chain serves `unscored` until `compact` folds it into one fresh base. `rebase` moves a layer onto a different parent. The format is specified in [`LAYERED_PROFILE.md`](LAYERED_PROFILE.md); `npx pikelet --help` lists every flag.
 
 ## Match quality and abstention
 
-A nearest neighbour is not automatically evidence that a corpus answers a question. Pikelet can calibrate retrieval signals at build time (best semantic distance, the margin to the next hits, the mean distance of the top ten, how much of the query's vocabulary the corpus knows, and how many of the query's terms the top passages contain). When the corpus supports a reliable classifier, results carry `matchQuality: strong | weak | none`. When calibration can't separate supported from unsupported reliably — a single novel may be semantically homogeneous enough that the fit isn't trustworthy — Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. In the library, a `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way. MCP `search` does the opposite: it returns results under `none` with a note telling the model the support is indirect, because the calibrator can misjudge a paraphrase; `showAbstained: false` withholds them.
+A nearest neighbour is not automatically evidence that a corpus answers a question. At build time Pikelet can fit a classifier over retrieval signals — distances, and how much of the question the top passages actually contain ([details](docs/how-a-query-runs.md#how-abstention-is-decided)). When the corpus supports a reliable classifier, results carry `matchQuality: strong | weak | none`. When calibration can't separate supported from unsupported reliably — a single novel may be semantically homogeneous enough that the fit isn't trustworthy — Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. In the library, a `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way. MCP `search` does the opposite: it returns results under `none` with a note telling the model the support is indirect, because the calibrator can misjudge a paraphrase; `showAbstained: false` withholds them.
 
 `matchQuality` is evidence about retrieval support. It is **not** a guarantee that an LLM will never hallucinate.
 
@@ -241,7 +161,8 @@ A nearest neighbour is not automatically evidence that a corpus answers a questi
 
 ## Deeper dives
 
-- [How a `.pikelet` query runs](docs/how-a-query-runs.md) — what is inside the file, what a query costs on the wire, remote execution, and the integrity checks on the read path.
+- [The Wikipedia demonstration](docs/wikipedia-demonstration.md) — the full agent transcript, the per-query network table, and what cold processes cost.
+- [How a `.pikelet` query runs](docs/how-a-query-runs.md) — what is inside the file, what a query costs on the wire, remote execution, the integrity checks on the read path, and how abstention is decided.
 - [The Veyra ablation](docs/veyra-ablation.md) — what happens to answers when the supporting record is edited or removed from the pack, with the reproduction commands.
 - [Why make knowledge a file](docs/why-a-file.md) — the reasoning behind the single-artifact design, and what it commits to.
 - [Architecture](docs/architecture.md) — the engine, the C ABI and the JavaScript wrapper; the artifact formats are specified in [`spec/`](spec/).

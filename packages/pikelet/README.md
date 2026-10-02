@@ -30,6 +30,16 @@ zero results instead of confidently wrong ones. See
 [Compiling a complete `.pikelet` artifact](#compiling-a-complete-pikelet-artifact)
 for the details.
 
+## Installing
+
+`npx pikelet` needs no install. To install it, use `npm install -g pikelet
+--omit=optional`. The optional dependency is `@xenova/transformers`, which
+only the `create` scaffold path uses. Measured on a clean project, omitting it
+takes the install from **82 packages / 257 MB / "6 vulnerabilities (5 high, 1
+critical)"** to **2 packages / 1.8 MB / "found 0 vulnerabilities"** — the
+advisories are all inside a dependency `compile` and `mcp` never load. The
+CLI requires Node 20+.
+
 ## Scaffolding a search app
 
 When you want a deployed app instead of a file, the scaffold path ingests

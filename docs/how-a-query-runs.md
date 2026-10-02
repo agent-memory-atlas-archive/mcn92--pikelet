@@ -14,9 +14,9 @@ calibration     supported / unsupported retrieval model
 evaluation      golden queries / expected behavior
 ```
 
-The artifact is immutable. Publish a new corpus by publishing a new artifact; old artifacts retain their identity.
+The artifact is immutable. Publish a new corpus by publishing a new artifact, or a small layer over the old one (see [`LAYERED_PROFILE.md`](../LAYERED_PROFILE.md)); either way, old artifacts retain their identity.
 
-**Encoder profiles.** Self-containment has a cost — the default profile carries ~25 MiB of MiniLM data regardless of corpus size. Three arrangements: **inline** (tokenizer + weights + runtime in the artifact — largest file, no external dependency, used by the Wikipedia demo above), **distilled/compact** (smaller corpus-specific representation, lower footprint, potentially lower quality), **host-supplied** (the artifact declares expected encoder behavior and verifies the host implementation against embedded test vectors — smallest artifact, no longer fully self-contained). The format treats the encoder as a capability, not Pikelet's identity — MiniLM is the current choice, not a permanent requirement.
+**Encoder profiles.** Self-containment has a cost — the default profile carries ~25 MiB of MiniLM data regardless of corpus size. Three arrangements: **inline** (tokenizer + weights + runtime in the artifact — largest file, no external dependency, used by the [Wikipedia demonstration](wikipedia-demonstration.md)), **distilled/compact** (smaller corpus-specific representation, lower footprint, potentially lower quality), **host-supplied** (the artifact declares expected encoder behavior and verifies the host implementation against embedded test vectors — smallest artifact, no longer fully self-contained). The format treats the encoder as a capability, not Pikelet's identity — MiniLM is the current choice, not a permanent requirement.
 
 ---
 
@@ -96,3 +96,17 @@ truncated Range response     → fetch fails; no partial result is silently
 The point is not that static HTTP is magically reliable. The point is that a static artifact can fail in explicit, testable ways.
 
 ---
+
+## How abstention is decided
+
+`compile` fits a logistic classifier over five signals of each retrieval and ships it in the artifact; a query computes the same signals from its own hits and maps the score to `strong`, `weak` or `none`:
+
+```text
+d0          distance of the best hit
+margin      gap between the best hit and the next ones
+mean10      mean distance of the top ten hits
+known_frac  share of the query's words the corpus vocabulary contains
+coverage1   share of the query's content words the top passages contain
+```
+
+The first four say whether the corpus discusses the area; `coverage1` says whether a returned passage contains the question's own terms, which separates "topically adjacent" from "actually answers". The signals are always computed over the same fixed window the fit used, whatever `k` a caller asks for, so the verdict does not depend on `k`. The fit is gated on cross-validated AUC; when it fails, the pack ships `unscored` and records why. On a chain of layers, the base's fit is applied to the merged results, with the layers' vocabulary added to `known_frac`, until the chain outgrows its drift limit.
