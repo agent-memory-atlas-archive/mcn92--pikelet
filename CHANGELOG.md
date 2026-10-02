@@ -8,7 +8,20 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
-## Unreleased
+## pikelet-wasm 0.9.2 / pikelet 0.9.2 — 2026-10-01
+
+Makes the layered update path work as documented: `append` on a freshly
+compiled pack needs no flag, `pikelet mcp --pack` takes the newest layer,
+and `verify_pack` reports honestly on a chain. Both packages move to 0.9.2
+together, and `pikelet` requires `pikelet-wasm` ^0.9.2, whose chain reader
+supplies the integrity fields `verify_pack` reports.
+
+### Compatibility
+
+- **A pack compiled from the same source gets a different identity than
+  under 0.9.1**, because its manifest gains `corpus.ingest`. Pins and
+  citations to packs already published are unaffected; only new compiles
+  change.
 
 ### Changed
 
@@ -37,6 +50,17 @@ first.
   the chain by walking each layer's parent locator, as LAYERED_PROFILE.md 7
   specifies, locally or over HTTP; `#<sha256>` pins the head. Shelf entries
   with a `lineage` mount as before.
+
+### Documentation
+
+- **Both READMEs describe layered updates** (`append`, `compact`, `rebase`,
+  mounting the newest layer, pins, the drift limit) and citations that
+  survive updates. The root README's opening states that a pack fixes how
+  its corpus is queried; the long Wikipedia demonstration moved to
+  `docs/wikipedia-demonstration.md`, and the abstention signals to
+  `docs/how-a-query-runs.md`. Stale claims were corrected: a "retrieval
+  agreement" signal that does not exist, MCP returning zero results under
+  `none`, and the old `PIKELET_SEARCH_EMBED_WORKERS` name.
 
 ## pikelet-wasm 0.9.1 / pikelet 0.9.1 — 2026-09-30
 
