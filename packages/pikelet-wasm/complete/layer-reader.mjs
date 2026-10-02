@@ -121,6 +121,15 @@ async function walkToBase(head, options) {
     throw new Error(`walking to the base exceeded the depth limit ${maxDepth} (2.7): a layer.parent cycle or an over-deep chain`);
 }
 
+function memberIntegritySummary(opened) {
+    const infos = opened.filter((r) => typeof r?.info === 'function').map((r) => r.info());
+    const one = (key) => {
+        const values = [...new Set(infos.map((i) => i[key]))];
+        return values.length === 1 ? values[0] : 'mixed';
+    };
+    return { corpusIntegrity: one('corpusIntegrity'), indexRowIntegrity: one('indexRowIntegrity') };
+}
+
 const isHttpUrl = (loc) => /^https?:\/\//i.test(loc);
 const describeLocation = (loc) => (typeof loc === 'string' ? loc : (loc?.url ?? loc?.location ?? '<source>'));
 
@@ -370,7 +379,24 @@ export async function openPikeletChain(members, options = {}) {
                     // to that member. A chain surfaces the base's, which are
                     // the ones fit against the corpus the encoder saw.
                     sampleQueries: Array.isArray(base.manifest.sampleQueries) ? base.manifest.sampleQueries : [],
-                    members: chainMembers.map((m) => ({ depth: m.depth, identity: m.identity, records: m.records })),
+                    // Each member's own integrity, from its reader. A
+                    // tombstone-only layer is a verified shell (manifest plus
+                    // tombstones), with no corpus or index to report on.
+                    members: chainMembers.map((m, i) => {
+                        const ri = typeof opened[i]?.info === 'function' ? opened[i].info() : null;
+                        return {
+                            depth: m.depth, identity: m.identity, records: m.records,
+                            ...(ri ? { corpusIntegrity: ri.corpusIntegrity, indexRowIntegrity: ri.indexRowIntegrity }
+                                : { tombstoneOnly: true }),
+                        };
+                    }),
+                    // The chain encodes with the base's encoder (4.5), so the
+                    // base's verification is the chain's. Chain-level integrity
+                    // is the members' when they agree, else 'mixed'. Without
+                    // these, verify_pack on a chain reported no encoder or
+                    // integrity state at all.
+                    encoderVerified: opened[0].info().encoderVerified,
+                    ...memberIntegritySummary(opened),
                 };
             },
 

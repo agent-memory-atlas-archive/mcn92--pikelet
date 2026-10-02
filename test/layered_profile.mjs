@@ -3169,6 +3169,40 @@ console.log('lineage: a compacted base translates citations through the reader')
     fs.rmSync(linTmp, { recursive: true, force: true });
 }
 
+console.log('mcp: verify_pack on a chain runs the base\'s tests and says so');
+{
+    const { callVerifyPack } = await import('../packages/pikelet/src/mcp.mjs');
+    const baseId = 'b'.repeat(64);
+    const packs = new Map([['docs', {
+        chain: true, identity: 'c'.repeat(64),
+        search: {
+            evaluation: async () => ({
+                evaluationScope: 'base', evaluationIdentity: baseId,
+                goldenQueries: [{ text: 'kept', expectId: 1 }, { text: 'gone', expectId: 2 }],
+                calibration: { cvAuc: 0.9, cvAucHard: 0.8, fitAuc: 0.95 },
+            }),
+            // A layer tombstoned record 2.
+            record: async (id) => ({ id, tombstoned: id === 2 }),
+            query: async () => ({ matchQuality: 'strong', results: [{ id: 1 }] }),
+            info: () => ({
+                encoderVerified: true, corpusIntegrity: 'per-record-sha256', indexRowIntegrity: 'per-row-sha256',
+                members: [{ depth: 0 }, { depth: 1, tombstoneOnly: true }],
+                calibrationStatus: 'inherited', calibrationDrift: 0.01, driftLimit: 0.2,
+            }),
+        },
+    }]]);
+    const out = typeof callVerifyPack === 'function' ? await callVerifyPack(packs, {}) : { goldenQueries: {} };
+    check('a golden whose expected record a layer removed is skipped, not failed',
+        out.verdict === 'pass' && out.goldenQueries.total === 1 && out.goldenQueries.passed === 1
+        && out.goldenQueries.skipped?.length === 1 && /record 2 was removed or superseded/.test(out.goldenQueries.skipped[0].reason),
+        JSON.stringify(out.goldenQueries));
+    check('verify_pack on a chain names the tests as the base\'s and carries its calibration figures',
+        out.chain?.testsFrom?.scope === 'base' && out.chain.testsFrom.identity === baseId
+        && out.chain.calibrationStatus === 'inherited' && out.calibration?.cvAucHard === 0.8
+        && /base pack's tests run against the whole chain/.test(out.note || ''),
+        JSON.stringify({ chain: out.chain, note: out.note }));
+}
+
 console.log('mcp: a mounted chain embeds queries with the query prefix');
 {
     // A real kind-3 base from the packaged inline MiniLM, compiled with an
@@ -3295,13 +3329,14 @@ console.log('mcp: a mounted chain embeds queries with the query prefix');
         const failed = run.then(() => null, (err) => err);
         sin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search', arguments: args } })}\n`);
         sin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_packs', arguments: {} } })}\n`);
+        sin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'verify_pack', arguments: {} } })}\n`);
         const deadline = Date.now() + 60000;
-        while (!(got.some((r) => r.id === 1) && got.some((r) => r.id === 2)) && Date.now() < deadline) {
+        while (!(got.some((r) => r.id === 1) && got.some((r) => r.id === 2) && got.some((r) => r.id === 3)) && Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 5));
         }
         sin.end();
         const err = await failed;
-        return { err, search: got.find((r) => r.id === 1)?.result, packs: got.find((r) => r.id === 2)?.result };
+        return { err, search: got.find((r) => r.id === 1)?.result, packs: got.find((r) => r.id === 2)?.result, verify: got.find((r) => r.id === 3)?.result };
     };
     try {
         for (const [label, loc] of [['bare', layerPath], ['pinned', `${layerPath}#${layerBuilt.identity}`]]) {
@@ -3318,6 +3353,21 @@ console.log('mcp: a mounted chain embeds queries with the query prefix');
                 out.err ? out.err.message.slice(0, 140)
                     : sp?.text ? String(sp.text).slice(0, 140)
                         : JSON.stringify({ d: sec?.results?.[0]?.distance, id: listed?.identity?.slice(0, 12) }));
+            if (label === 'bare') {
+                // The base was compiled --skip-calibration, so it carries no
+                // tests; the chain must still report its members, encoder and
+                // integrity state, and must not blame an "older build".
+                const vp = out.verify ? parse(out.verify) : null;
+                check('verify_pack on a chain reports its members, encoder and integrity state',
+                    vp?.chain?.members?.length === 2 && vp.chain.members[1].tombstoneOnly === true
+                    && vp.encoderVerified === true && typeof vp.corpusIntegrity === 'string'
+                    && typeof vp.indexRowIntegrity === 'string',
+                    JSON.stringify(vp && { chain: vp.chain, encoderVerified: vp.encoderVerified, ci: vp.corpusIntegrity }).slice(0, 200));
+                check('verify_pack on an untested chain says so without blaming an older build',
+                    vp?.verdict === 'no-tests' && /chain-level tests are not assembled yet/.test(vp.note || '')
+                    && !/older build/.test(vp.note || ''),
+                    String(vp?.note || vp?.text).slice(0, 160));
+            }
         }
     } finally {
         fs.rmSync(mt, { recursive: true, force: true });

@@ -112,7 +112,9 @@ function toolDefinitions(packs) {
         + 'its matchQuality verdicts — a low or missing cvAucHard means "none" verdicts from '
         + 'this pack were never tested against in-domain-unanswerable queries. This is '
         + 'self-verification: it proves the artifact is intact and behaves as it did when '
-        + 'built — not that its content is true or its publisher trustworthy.',
+        + 'built — not that its content is true or its publisher trustworthy. On a pack updated '
+        + 'with layers (a chain), the tests and calibration figures are the base pack\'s, run '
+        + 'against the whole chain, and the result says so.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -271,7 +273,10 @@ async function callGetRecord(packs, args) {
   return shaped;
 }
 
-async function callVerifyPack(packs, args) {
+// Exported for testing: the chain branch (base-scoped tests, skipped goldens)
+// needs a pack with base-scoped evaluation material that no small fixture
+// can compile, so the test drives this with a stub mount.
+export async function callVerifyPack(packs, args) {
   const names = resolvePack(packs, args?.pack, 'verify_pack');
   if (names.length !== 1) {
     throw new Error('verify_pack: pack is required when more than one pack is mounted');
@@ -292,8 +297,20 @@ async function callVerifyPack(packs, args) {
   const goldens = Array.isArray(evaluation?.goldenQueries) ? evaluation.goldenQueries.slice(0, limit) : [];
   const probes = Array.isArray(evaluation?.abstentionProbes) ? evaluation.abstentionProbes.slice(0, limit) : [];
   const goldenResults = [];
+  // On a chain the tests are the base's (evaluationScope 'base'). A golden
+  // that expects a record a layer tombstoned or superseded tests a corpus the
+  // chain no longer serves, so it is skipped with that reason, not failed.
+  const baseScoped = evaluation?.evaluationScope === 'base';
+  const skipped = [];
   for (const golden of goldens) {
     if (typeof golden?.text !== 'string') continue;
+    if (baseScoped && Number.isSafeInteger(golden.expectId)) {
+      const expected = await mounted.search.record(golden.expectId).catch(() => null);
+      if (expected?.tombstoned) {
+        skipped.push({ text: golden.text, reason: `record ${golden.expectId} was removed or superseded by a layer` });
+        continue;
+      }
+    }
     const out = await mounted.search.query(golden.text, { k: 10 });
     const pass = golden.expectId !== undefined
       ? out.results.some((r) => r.id === golden.expectId)
@@ -324,7 +341,20 @@ async function callVerifyPack(packs, args) {
     encoderVerified: info.encoderVerified,
     corpusIntegrity: info.corpusIntegrity,
     indexRowIntegrity: info.indexRowIntegrity,
-    goldenQueries: { total: goldenResults.length, passed: goldenPassed, results: goldenResults },
+    ...(mounted.chain ? {
+      chain: {
+        members: info.members,
+        calibrationStatus: info.calibrationStatus,
+        calibrationDrift: info.calibrationDrift,
+        driftLimit: info.driftLimit,
+        // Whose tests these are: the base's, run against the whole chain.
+        testsFrom: baseScoped ? { scope: 'base', identity: evaluation.evaluationIdentity } : null,
+      },
+    } : {}),
+    goldenQueries: {
+      total: goldenResults.length, passed: goldenPassed, results: goldenResults,
+      ...(skipped.length ? { skipped } : {}),
+    },
     abstentionProbes: { total: probeResults.length, passed: probesPassed, results: probeResults },
     // fitAuc is in-sample and near-uninformative on its own; cvAucHard is
     // the number that catches a calibrator that answers anything in-domain
@@ -353,8 +383,17 @@ async function callVerifyPack(packs, args) {
         + 'than .base means the fit leans on lexical coverage more than genuine answerability.',
     } : null,
     ...(goldenResults.length === 0 && probeResults.length === 0
-      ? { note: 'This pack embeds no runnable tests (older build, or calibration was skipped); encoder and integrity state above still apply.' }
-      : {}),
+      ? { note: mounted.chain
+        ? 'This chain\'s base embeds no runnable tests, and chain-level tests are not assembled yet; '
+          + 'the encoder, integrity and calibration fields still apply.'
+        : 'This pack embeds no runnable tests (older build, or calibration was skipped); the encoder '
+          + 'and integrity fields still apply.' }
+      : baseScoped
+        ? { note: 'These are the base pack\'s tests run against the whole chain. The chain serves the base\'s '
+          + 'calibration while calibrationStatus is "inherited", so its figures describe the verdicts. A '
+          + 'golden that fails may be one a layer legitimately changed: a replacement record can outrank '
+          + 'the original, and goldens named by title cannot be checked against deletions.' }
+        : {}),
     verdict: goldenPassed === goldenResults.length && probesPassed === probeResults.length
       ? (goldenResults.length + probeResults.length > 0 ? 'pass' : 'no-tests')
       : 'fail',
@@ -464,11 +503,12 @@ async function mountChain(packs, spec, { httpRangeSource, log, head = null }) {
       return chain.query(vector, queryOptions.k ?? 5, { ...queryOptions, text: String(text ?? '') });
     },
     record: (id) => chain.record(id),
-    // A chain has no single evaluation segment: each member carries its own,
-    // and 6.2 says chain-level golden queries are invalid after a rebase. Until
-    // the chain-level material of 4.7 is assembled, report none rather than
-    // serving one member's as the chain's.
-    evaluation: async () => null,
+    // A chain has no evaluation segment of its own; the reader surfaces the
+    // base's, tagged evaluationScope 'base'. Reporting none made verify_pack
+    // say "no tests" and drop the calibration figures of a fit the chain was
+    // actually serving with. verify_pack labels the scope and skips goldens
+    // whose expected record a layer has since removed.
+    evaluation: () => chain.evaluation(),
     close: () => chain.close(),
   };
 

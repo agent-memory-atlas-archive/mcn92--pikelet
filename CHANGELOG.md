@@ -22,6 +22,15 @@ first.
 
 ### Fixed
 
+- **`verify_pack` on a chain reports what it actually checked.** It returned
+  "no tests" with no encoder, integrity or calibration figures, and a note
+  blaming an "older build", so an agent concluded no verdict could be
+  trusted. It now runs the base's golden queries and probes against the
+  chain, labelled as the base's, skips a golden whose expected record a
+  layer removed, and reports the base's calibration figures, the chain's
+  calibration status and drift, and each member's integrity. A chain's
+  `info()` gains `encoderVerified`, `corpusIntegrity` and
+  `indexRowIntegrity`, and per-member integrity under `members`.
 - **`pikelet mcp --pack` accepts the newest layer of an updated pack.** A
   layer passed to `--pack`, or named by a shelf entry without a `lineage`,
   failed to mount with "unsupported profile pikelet-layer-v1". It now mounts
