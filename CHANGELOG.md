@@ -34,6 +34,13 @@ first.
   region. Readers default to at most 4096, keep the declared value as
   `declaredRecommendedRerank`, and still honor an explicit `rerank`. The
   published wiki, astro-docs and rust-book packs declare 200, 40 and 30.
+- **A malformed abstention asset serves `unscored`.** Missing or
+  non-numeric `thresholds` compared false against every score, so the pack
+  answered every query as if calibrated; out-of-order or out-of-range ones
+  gave verdicts the fit never defined. A `coverage.topK` outside 1–10 is
+  refused too, since each counted passage is a record read on every query.
+  The scorer now rejects such an asset and the pack reports `unscored`.
+  Assets written by `compile` are unaffected.
 
 ## pikelet-wasm 0.9.2 / pikelet 0.9.2 — 2026-10-01
 

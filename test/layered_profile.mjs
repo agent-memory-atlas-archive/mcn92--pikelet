@@ -1550,7 +1550,7 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
                 mean: { d0: 0, margin: 0, mean10: 0, known_frac: 0 },
                 std: { d0: 1, margin: 1, mean10: 1, known_frac: 1 },
             },
-            thresholds: { answer: 0.9, weak: 0.4 }, vocabBloom: { bits: BITS },
+            thresholds: { hard: 0.1, weak: 0.4 }, vocabBloom: { bits: BITS },
         };
         const baseBloom = bloomFor(['alpha', 'beta']);
         const layerBloom = bloomFor(['gamma', 'delta']);

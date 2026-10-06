@@ -34,11 +34,25 @@
 // one — there is no scenario where re-adding this via a config flag was
 // going to end differently a third time.
 
+// Upper bound on asset.coverage.topK. calibrate.mjs ships 5; every passage
+// counted here is a record hydrated on every query, so a pack must not be
+// able to turn one query into a hydration of its whole rerank window.
+export const MAX_COVERAGE_TOP_K = 10;
+
 export function createAbstentionScorer(asset, bloomBytes) {
     if (!asset || !Array.isArray(asset.weights) || !asset.thresholds) return null;
+    // Thresholds that are missing, non-numeric or out of order compare false
+    // against every p and would answer everything; a malformed asset must
+    // degrade to unscored instead (callers map a null scorer to it).
+    const { hard, weak } = asset.thresholds;
+    if (!Number.isFinite(hard) || !Number.isFinite(weak) || hard < 0 || hard > weak || weak > 1) return null;
     const coverageCfg = asset.coverage && typeof asset.coverage.weight === 'number'
         && Number.isFinite(asset.coverage.mean) && Number.isFinite(asset.coverage.std)
         ? asset.coverage : null;
+    if (coverageCfg && coverageCfg.topK !== undefined
+        && !(Number.isInteger(coverageCfg.topK) && coverageCfg.topK >= 1 && coverageCfg.topK <= MAX_COVERAGE_TOP_K)) {
+        return null;
+    }
     const coverageStopwords = coverageCfg ? new Set(coverageCfg.stopwords || []) : null;
     const coverageMinLen = coverageCfg ? (coverageCfg.minWordLen || 3) : 3;
     // Words the corpus uses everywhere ground any query that mentions them,

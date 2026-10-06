@@ -1344,6 +1344,37 @@ console.log('inline encoder: a pack cannot declare an out-of-range maxTokens');
     check('an honest recommendedRerank passes through unchanged', honest.recommendedRerank === 40);
 }
 
+{
+    // A retrieval-signals asset that cannot be scored as calibrated must
+    // degrade to unscored (a null scorer), never answer everything.
+    const { createAbstentionScorer, MAX_COVERAGE_TOP_K } = await import('../packages/pikelet-wasm/complete/retrieval-abstention.mjs');
+    const base = {
+        features: ['d0'], weights: [-1], bias: 0,
+        standardize: { mean: { d0: 0.5 }, std: { d0: 0.1 } },
+        thresholds: { hard: 0.2, weak: 0.5 },
+        vocabBloom: { bits: 64 },
+    };
+    const bloom = new Uint8Array(8);
+    check('a well-formed asset yields a scorer', createAbstentionScorer(base, bloom) !== null);
+    const badThresholds = [
+        ['missing', {}],
+        ['non-numeric', { hard: '0.2', weak: '0.5' }],
+        ['NaN', { hard: NaN, weak: 0.5 }],
+        ['out of order', { hard: 0.6, weak: 0.5 }],
+        ['outside [0,1]', { hard: -0.1, weak: 1.5 }],
+    ];
+    for (const [label, thresholds] of badThresholds) {
+        check(`thresholds ${label} degrade to unscored`, createAbstentionScorer({ ...base, thresholds }, bloom) === null);
+    }
+    const coverage = { weight: 1, mean: 0.5, std: 0.2 };
+    check('coverage.topK 5 (what calibrate ships) is accepted',
+        createAbstentionScorer({ ...base, coverage: { ...coverage, topK: 5 } }, bloom)?.passagesNeeded === 5);
+    for (const topK of [0, 1.5, MAX_COVERAGE_TOP_K + 1, 1e6, '5']) {
+        check(`coverage.topK ${JSON.stringify(topK)} degrades to unscored`,
+            createAbstentionScorer({ ...base, coverage: { ...coverage, topK } }, bloom) === null);
+    }
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nComplete-profile reader conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
