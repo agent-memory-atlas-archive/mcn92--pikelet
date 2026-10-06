@@ -666,7 +666,8 @@ console.log('resolution order: lineage, then locator, then host (5.1.1)');
         // A lineage listing is operator-supplied and MAY name any origin the
         // operator trusts — deliberately not confined like a locator.
         const r = await resolveParentLocation(want, { lineage, childLocation: CHILD_URL });
-        check('a lineage entry wins and may be cross-origin', r.via === 'lineage' && r.location.includes('ops.example.com'));
+        check('a lineage entry wins and may be cross-origin',
+            r.via === 'lineage' && r.location === 'https://ops.example.com/mirror/base.pikelet', r.location);
 
         const r2 = await resolveParentLocation(want, { childLocation: CHILD_URL });
         check('the locator is used when no lineage entry exists',
