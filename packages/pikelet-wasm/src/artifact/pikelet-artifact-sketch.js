@@ -37,6 +37,12 @@ const {
 const SKETCH_MAGIC = 0x31415350; // PSA1
 const SKETCH_HEADER_BYTES = 256;
 const SKETCH_KIND_U8 = 1;
+// Ceiling on the header's recommendedRerank as a reader default. The field
+// is a producer hint, and a hostile (or exhaustive-fallback) value up to the
+// row count would make every query fetch, hash and rerank the whole vectors
+// region — at wiki scale, minutes per query with every check passing. An
+// explicit options.rerank is the caller's own choice and is not capped here.
+const MAX_RECOMMENDED_RERANK = 4096;
 
 // The affine table feeds every rerank distance; a NaN/Infinity entry makes
 // that row's distance non-finite and lets it sit in the result set
@@ -375,7 +381,8 @@ class PikeletSketchArtifact {
         const sketchesOffset = view.getUint32(40, true);
         artifact.vectorsOffset = view.getUint32(44, true);
         const fileBytes = Number(view.getBigUint64(48, true));
-        artifact.recommendedRerank = view.getUint32(120, true);
+        artifact.declaredRecommendedRerank = view.getUint32(120, true);
+        artifact.recommendedRerank = Math.min(artifact.declaredRecommendedRerank, MAX_RECOMMENDED_RERANK);
         // Retained so the lazy tier stays verifiable after open — see
         // verifyVectors(). Copied out of the header read buffer.
         artifact.vectorsSha256 = new Uint8Array(header.subarray(88, 120));

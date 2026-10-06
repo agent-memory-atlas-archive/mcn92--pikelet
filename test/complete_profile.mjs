@@ -1320,6 +1320,30 @@ console.log('inline encoder: a pack cannot declare an out-of-range maxTokens');
     }
 }
 
+// ---------------------------------------------------------------------------
+// Producer hints a pack can use to inflate per-query work
+// ---------------------------------------------------------------------------
+
+{
+    // recommendedRerank is a header hint. Up to the row count it would make
+    // every query fetch, hash and rerank the whole vectors region, so the
+    // reader caps the value it defaults to; an explicit rerank still wins.
+    const { PikeletSketchArtifact } = require('pikelet-wasm/artifact');
+    const qdata = new Uint8Array(COUNT * DIM);
+    const scales = new Float32Array(COUNT).fill(1 / 255);
+    const offsets = new Float32Array(COUNT);
+    for (let i = 0; i < qdata.length; i++) qdata[i] = (i * 37) & 0xff;
+    const bigRerankPath = path.join(tmp, 'big-rerank.pikelet-sketch');
+    exportSketchArtifact({ dim: DIM, count: COUNT, metric: 1, qdata, scales, offsets }, bigRerankPath,
+        { sketchDims: DIM, sketchBits: 8, recommendedRerank: 1_000_000 });
+    const sk = await PikeletSketchArtifact.open(memorySource(fs.readFileSync(bigRerankPath)));
+    check('a header recommendedRerank of 1e6 is kept as declared but capped as the default',
+        sk.declaredRecommendedRerank === 1_000_000 && sk.recommendedRerank === 4096,
+        `declared ${sk.declaredRecommendedRerank}, effective ${sk.recommendedRerank}`);
+    const honest = await PikeletSketchArtifact.open(memorySource(SKETCH));
+    check('an honest recommendedRerank passes through unchanged', honest.recommendedRerank === 40);
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nComplete-profile reader conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

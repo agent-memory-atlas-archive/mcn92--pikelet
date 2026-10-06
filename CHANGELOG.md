@@ -28,6 +28,12 @@ first.
   list of that `df` can occupy. `info().lexical.integrity` reports
   `'unverified-lazy-reads'` for such segments and `'segment-sha256'` for
   eagerly verified ones.
+- **A pack's declared rerank depth is capped at 4096 by default.** The
+  sketch header's `recommendedRerank` is a producer hint; a value near the
+  row count made every query fetch, hash and rerank the whole vectors
+  region. Readers default to at most 4096, keep the declared value as
+  `declaredRecommendedRerank`, and still honor an explicit `rerank`. The
+  published wiki, astro-docs and rust-book packs declare 200, 40 and 30.
 
 ## pikelet-wasm 0.9.2 / pikelet 0.9.2 — 2026-10-01
 
