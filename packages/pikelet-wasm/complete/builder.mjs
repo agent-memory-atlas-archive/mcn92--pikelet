@@ -351,6 +351,12 @@ export function buildInlineTransformerEncoderSegment({ declaration, vocabBytes, 
 // targetRecall — plus the whole curve for the evaluation segment. Queries
 // are the corpus's own float embeddings when the caller has them, else rows
 // dequantized out of the snapshot.
+//
+// The sweep stops at the reader's default ceiling (MAX_RECOMMENDED_RERANK):
+// it used to fall back to the full row count, a depth readers no longer
+// honor by default, so a pack could record a recall it would not be served
+// at. The last rung is the ceiling, measured like any other, and
+// targetReached says whether the target was met below it.
 export async function measureRecommendedRerank({
   artifactModule,
   sketchBytes,
@@ -387,9 +393,10 @@ export async function measureRecommendedRerank({
     for (const q of queries) {
       truth.push(new Set((await sketch.search(q, topK, { rerank: count })).results.map((r) => r.id)));
     }
+    const rerankCeiling = Math.min(count, artifactModule.MAX_RECOMMENDED_RERANK ?? count);
     const ladder = (sweep || [10, 15, 20, 30, 40, 60, 80, 120, 160, 240, 320, 480, 640])
-      .filter((c) => c >= topK && c < count);
-    ladder.push(count);
+      .filter((c) => c >= topK && c < rerankCeiling);
+    ladder.push(rerankCeiling);
     const curve = [];
     let recommendedRerank = null;
     let recommendedRecall = null;
@@ -409,13 +416,16 @@ export async function measureRecommendedRerank({
         recommendedRecall = recall;
       }
     }
-    if (recommendedRerank === null) {
-      recommendedRerank = count;
+    const targetReached = recommendedRerank !== null;
+    if (!targetReached) {
+      recommendedRerank = rerankCeiling;
       recommendedRecall = curve[curve.length - 1].recall;
     }
     return {
       recommendedRerank,
       recall: recommendedRecall,
+      targetReached,
+      rerankCeiling,
       k: topK,
       targetRecall,
       queries: queries.length,

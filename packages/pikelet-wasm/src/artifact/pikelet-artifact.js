@@ -12,13 +12,14 @@
 const { NodeFileRangeSource, parseUint8Snapshot } = require('./pikelet-artifact-common.js');
 const { PikeletRangeArtifact, buildRangeArtifact, buildRangeArtifactFile } = require('./pikelet-artifact-range.js');
 const {
-    PikeletSketchArtifact, createSketchScanner,
+    PikeletSketchArtifact, MAX_RECOMMENDED_RERANK, createSketchScanner,
     buildSketchArtifact, buildSketchArtifactBytes, buildSketchArtifactFile, exportSketchArtifact,
 } = require('./pikelet-artifact-sketch.js');
 
 module.exports = {
     PikeletRangeArtifact,
     PikeletSketchArtifact,
+    MAX_RECOMMENDED_RERANK,
     createSketchScanner,
     NodeFileRangeSource,
     buildRangeArtifact,

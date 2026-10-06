@@ -34,6 +34,13 @@ first.
   region. Readers default to at most 4096, keep the declared value as
   `declaredRecommendedRerank`, and still honor an explicit `rerank`. The
   published wiki, astro-docs and rust-book packs declare 200, 40 and 30.
+- **`compile` and `append` no longer declare a rerank depth readers will not
+  use.** `compile`'s rerank sweep fell back to the full row count when no
+  depth up to 640 met its recall target; it now stops at the same 4096
+  ceiling, records the recall measured there, and logs a warning when the
+  target was not met. `append` caps a layer's exhaustive hint the same way.
+  `measureRecommendedRerank` returns `targetReached` and `rerankCeiling`,
+  and `pikelet-wasm/artifact` exports `MAX_RECOMMENDED_RERANK`.
 - **A malformed abstention asset serves `unscored`.** Missing or
   non-numeric `thresholds` compared false against every score, so the pack
   answered every query as if calibrated; out-of-order or out-of-range ones

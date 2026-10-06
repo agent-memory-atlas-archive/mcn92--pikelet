@@ -1160,6 +1160,7 @@ async function createSketchScanner(loadEngine, artifact, options = {}) {
 
 module.exports = {
     PikeletSketchArtifact,
+    MAX_RECOMMENDED_RERANK,
     createSketchScanner,
     buildSketchArtifact,
     buildSketchArtifactBytes,

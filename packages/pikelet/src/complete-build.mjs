@@ -128,6 +128,11 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
   });
   log(`Measured rerank operating point: C=${rerankSweep.recommendedRerank} `
     + `(recall@${rerankSweep.k} ${rerankSweep.recall} over ${rerankSweep.queries} ${rerankSweep.querySource} queries)`);
+  if (rerankSweep.targetReached === false) {
+    log(`warn: recall@${rerankSweep.k} target ${rerankSweep.targetRecall} not reached at the reader's default `
+      + `rerank ceiling C=${rerankSweep.rerankCeiling}; queries are served at recall ${rerankSweep.recall} `
+      + 'unless a caller passes a deeper rerank');
+  }
   const sketch = artifactContract.buildSketchArtifactBytes(snapshot, {
     sketchDims: runtime.sketchDims,
     sketchBits: runtime.sketchBits,

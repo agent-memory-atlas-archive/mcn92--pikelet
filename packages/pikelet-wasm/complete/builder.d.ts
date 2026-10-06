@@ -71,6 +71,10 @@ export declare function measureRecommendedRerank(input: {
 }): Promise<{
   recommendedRerank: number;
   recall: number;
+  /** False when no rung up to rerankCeiling reached targetRecall; recommendedRerank is then the ceiling. */
+  targetReached: boolean;
+  /** min(row count, MAX_RECOMMENDED_RERANK): the deepest rerank the sweep measures. */
+  rerankCeiling: number;
   k: number;
   targetRecall: number;
   queries: number;

@@ -105,5 +105,12 @@ export declare function exportSketchArtifact(
   options?: SketchArtifactBuildOptions
 ): SketchArtifactBuildManifest;
 
+/**
+ * Ceiling on the header's recommendedRerank that readers use as their default
+ * rerank depth. Producers should not declare more: a reader will not honor it
+ * unless the caller passes an explicit rerank.
+ */
+export declare const MAX_RECOMMENDED_RERANK: number;
+
 /** Parse and validate an untrusted uint8 engine snapshot (fails closed). */
 export declare function parseUint8Snapshot(bytes: Uint8Array | ArrayBufferLike): Uint8SnapshotGraph;

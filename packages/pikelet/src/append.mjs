@@ -257,8 +257,10 @@ export async function appendLayer(flags) {
         const snapshot = index.export();
         indexBytes = artifactContract.buildSketchArtifactBytes(snapshot, {
           // recommendedRerank applies to THIS layer's index only (4.1); a
-          // small layer is cheapest to rerank exhaustively.
-          recommendedRerank: chunks.length,
+          // small layer is cheapest to rerank exhaustively. Capped at the
+          // reader's default ceiling, which a larger declaration would not
+          // get anyway.
+          recommendedRerank: Math.min(chunks.length, artifactContract.MAX_RECOMMENDED_RERANK ?? chunks.length),
         }).bytes;
       } finally {
         index.dispose();

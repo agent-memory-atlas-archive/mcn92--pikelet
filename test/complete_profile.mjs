@@ -1342,6 +1342,35 @@ console.log('inline encoder: a pack cannot declare an out-of-range maxTokens');
         `declared ${sk.declaredRecommendedRerank}, effective ${sk.recommendedRerank}`);
     const honest = await PikeletSketchArtifact.open(memorySource(SKETCH));
     check('an honest recommendedRerank passes through unchanged', honest.recommendedRerank === 40);
+
+    // compile's sweep used to fall back to the full row count when no rung
+    // reached its recall target: a depth the reader above no longer honors
+    // by default. It now stops at the same ceiling and says so.
+    const artifactModule = require('pikelet-wasm/artifact');
+    const { measureRecommendedRerank } = await import('../packages/pikelet-wasm/complete/builder.mjs');
+    const sweepSketch = (count, tag) => {
+        const q = new Uint8Array(count * DIM);
+        for (let i = 0; i < q.length; i++) q[i] = (i * 2654435761) >>> 24;
+        const at = path.join(tmp, `sweep-${tag}.pikelet-sketch`);
+        exportSketchArtifact({ dim: DIM, count, metric: 1, qdata: q, scales: new Float32Array(count).fill(1 / 255), offsets: new Float32Array(count) },
+            at, { sketchDims: DIM, sketchBits: 8 });
+        const vectors = [];
+        for (let r = 0; r < 32; r++) vectors.push(Float32Array.from(q.subarray(r * DIM, (r + 1) * DIM), (v) => v / 255));
+        return { bytes: fs.readFileSync(at), vectors };
+    };
+    const big = sweepSketch(5000, 'big');
+    const capped = await measureRecommendedRerank({
+        artifactModule, sketchBytes: big.bytes, queryVectors: big.vectors, targetRecall: 1.01, sweep: [10, 100],
+    });
+    check('the rerank sweep stops at the reader ceiling, not the row count, when the target is not met',
+        capped.recommendedRerank === artifactModule.MAX_RECOMMENDED_RERANK && capped.rerankCeiling === 4096
+        && capped.targetReached === false && capped.curve[capped.curve.length - 1].rerank === 4096,
+        JSON.stringify({ C: capped.recommendedRerank, ceiling: capped.rerankCeiling, reached: capped.targetReached, last: capped.curve.at(-1) }));
+    const small = sweepSketch(300, 'small');
+    const met = await measureRecommendedRerank({ artifactModule, sketchBytes: small.bytes, queryVectors: small.vectors });
+    check('a sketch under the ceiling sweeps to its row count as before and reports the target met',
+        met.rerankCeiling === 300 && met.targetReached === true && met.recommendedRerank <= 300,
+        JSON.stringify({ C: met.recommendedRerank, ceiling: met.rerankCeiling, reached: met.targetReached }));
 }
 
 {
