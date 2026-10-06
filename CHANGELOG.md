@@ -8,6 +8,19 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## Unreleased
+
+### Fixed
+
+- **The index header commitment binds the bytes the reader parses.** The
+  complete reader checked `manifest.index.headerSha256` on its own read of
+  the sketch header, while the sketch parsed a separate read of the same
+  range. A host answering the two reads differently could pass the check
+  with the genuine header and have a forged one parsed, together with the
+  integrity anchors it carries, replacing the index under a pinned
+  identity. `PikeletSketchArtifact.open()` now takes
+  `expectedHeaderSha256` and checks the header it parses.
+
 ## pikelet-wasm 0.9.2 / pikelet 0.9.2 — 2026-10-01
 
 Makes the layered update path work as documented: `append` on a freshly

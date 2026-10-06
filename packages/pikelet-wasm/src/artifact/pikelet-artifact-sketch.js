@@ -331,6 +331,28 @@ class PikeletSketchArtifact {
         if (header.byteLength !== SKETCH_HEADER_BYTES) {
             throw pikeletError(PIKELET_ERROR_CODES.SNAPSHOT_INVALID, 'Sketch artifact header is truncated');
         }
+        // options.expectedHeaderSha256 (hex): a container that commits to this
+        // header (the complete profile's manifest.index.headerSha256) checks
+        // it HERE, against the very bytes parsed below. Checking a separate
+        // read instead would let a host serve the genuine header to that read
+        // and a rewritten one (with a self-consistent residentSha256 and page
+        // table) to this one, replacing the index under a pinned identity.
+        if (options.expectedHeaderSha256 !== undefined) {
+            const expected = options.expectedHeaderSha256;
+            if (typeof expected !== 'string' || !/^[0-9a-f]{64}$/.test(expected)) {
+                throw pikeletError(PIKELET_ERROR_CODES.INVALID_ARGUMENT, 'SketchArtifact.open() expectedHeaderSha256 must be 64 lowercase hex characters');
+            }
+            const digest = await sha256BytesAsync(header);
+            if (!digest) {
+                throw pikeletError(PIKELET_ERROR_CODES.SNAPSHOT_INVALID,
+                    'Sketch artifact header verification requested but no crypto backend is available');
+            }
+            let hex = '';
+            for (const b of digest) hex += b.toString(16).padStart(2, '0');
+            if (hex !== expected) {
+                throw pikeletError(PIKELET_ERROR_CODES.SNAPSHOT_INVALID, '.pikelet index header failed hash verification against the manifest');
+            }
+        }
         const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
         if (view.getUint32(0, true) !== SKETCH_MAGIC) {
             throw pikeletError(PIKELET_ERROR_CODES.SNAPSHOT_INVALID, 'Not a Pikelet sketch artifact (bad magic)');

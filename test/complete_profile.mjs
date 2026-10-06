@@ -556,6 +556,32 @@ const A = buildSynthetic();
     await rejects('format 2: a rewritten sketch self-hash fails the open (manifest commitment or resident self-check)',
         () => openPikeletFile(memorySource(selfHash), { encodeQuery: hostEncode }),
         /index header failed hash verification|resident prefix failed hash verification/);
+    // A host that serves different bytes for the same range: the forged
+    // header (recommendedRerank rewritten — nothing in the sketch self-checks
+    // it) on every read of the header except the second. When the reader
+    // checked the commitment on its own separate read, the sketch parsed the
+    // forged copy and the genuine one satisfied the check, so the open
+    // succeeded under the pinned identity. The commitment must bind the
+    // bytes the sketch actually parses.
+    {
+        const hs = segments.index.offset;
+        let headerReads = 0;
+        const inconsistent = {
+            size: A.bytes.length,
+            preferredParallelism: Infinity,
+            preferredGapBytes: 0,
+            async read(offset, length) {
+                if (offset < hs + 256 && offset + length > hs) {
+                    headerReads++;
+                    return (headerReads === 2 ? A.bytes : rerankFlip).subarray(offset, offset + length);
+                }
+                return A.bytes.subarray(offset, offset + length);
+            },
+            async close() {},
+        };
+        await rejects('format 2: a host serving the genuine header to only one read cannot slip a forged header past the commitment',
+            () => openPikeletFile(inconsistent, { encodeQuery: hostEncode }), /index header failed hash verification/);
+    }
     // Format 1 has no header commitment; the metric cross-check against the
     // identity-verified manifest is the binding there.
     const v1 = buildSynthetic({ profile: PROFILE_V1, name: 'v1metric' });

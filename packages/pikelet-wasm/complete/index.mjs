@@ -780,7 +780,12 @@ export async function openPikeletFile(input, options = {}) {
                 }
                 return bytes;
             })(),
-            PikeletSketchArtifact.open(windowSource(source, idx.offset, idx.length), { maxReadBytes }),
+            // Format 2's header commitment is checked inside open(), against
+            // the same bytes the sketch parses (see expectedHeaderSha256).
+            PikeletSketchArtifact.open(windowSource(source, idx.offset, idx.length), {
+                maxReadBytes,
+                ...(perRecord ? { expectedHeaderSha256: manifest.index.headerSha256 } : {}),
+            }),
             readChecked(source, corpus.offset, tablesBytes, 'corpus tables', maxReadBytes, fileBytes),
             // Lexical index (kind 5, OPTIONAL). Small segments: eager
             // whole-segment read, digest-verified like the query-interp
@@ -799,12 +804,6 @@ export async function openPikeletFile(input, options = {}) {
                     throw new Error('.pikelet lexical segment failed hash verification');
                 }
                 return { bytes };
-            })() : null,
-            perRecord ? (async () => {
-                const headerBytes = await readChecked(source, idx.offset, SKETCH_HEADER_BYTES, 'index header', maxReadBytes, fileBytes);
-                if (await sha256hex(headerBytes) !== manifest.index.headerSha256) {
-                    throw new Error('.pikelet index header failed hash verification against the manifest');
-                }
             })() : null,
         ]);
 
