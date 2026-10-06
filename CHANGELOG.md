@@ -20,6 +20,14 @@ first.
   integrity anchors it carries, replacing the index under a pinned
   identity. `PikeletSketchArtifact.open()` now takes
   `expectedHeaderSha256` and checks the header it parses.
+- **Lazily read keyword segments cannot steer reads or inflate them.**
+  Lexical segments over 8 MiB are read on demand without per-read
+  verification. Reads are now confined to the segment's window, and each
+  term entry is checked before its postings are fetched: inside the
+  postings region, `df` no larger than the corpus, and a length a postings
+  list of that `df` can occupy. `info().lexical.integrity` reports
+  `'unverified-lazy-reads'` for such segments and `'segment-sha256'` for
+  eagerly verified ones.
 
 ## pikelet-wasm 0.9.2 / pikelet 0.9.2 — 2026-10-01
 

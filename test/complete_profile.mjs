@@ -970,6 +970,34 @@ console.log('\nD. lexical segment and hybrid retrieval');
             JSON.stringify(lazyHits) === JSON.stringify(eager),
             `${JSON.stringify(lazyHits.slice(0, 3))} vs ${JSON.stringify(eager.slice(0, 3))}`);
     }
+
+    // Lazy term entries are not individually verified, so the lazy reader
+    // must hold each one to the segment before fetching its postings: a
+    // forged entry must not steer a read outside the postings region or
+    // request more bytes than a df-entry list can occupy.
+    const lexView = new DataView(lexical.bytes.buffer, lexical.bytes.byteOffset, lexical.bytes.byteLength);
+    const termCount = lexView.getUint32(8, true);
+    const termTableOffset = lexView.getUint32(24, true);
+    const postingsBytes = Number(lexView.getBigUint64(32, true));
+    const forgeEntries = (patch) => {
+        const forged = Buffer.from(lexical.bytes);
+        const fv = new DataView(forged.buffer, forged.byteOffset, forged.byteLength);
+        for (let i = 0; i < termCount; i++) patch(fv, termTableOffset + 24 * i);
+        return forged;
+    };
+    const forgeries = [
+        ['a postings offset past the postings region', (v, at) => v.setBigUint64(at + 8, BigInt(postingsBytes + 1024), true)],
+        ['a postings length of ~4 GiB', (v, at) => v.setUint32(at + 16, 0xfffffff0, true)],
+        ['a df larger than the corpus', (v, at) => v.setUint32(at + 20, COUNT + 1, true)],
+        ['a postings length no df-entry list can occupy', (v, at) => v.setUint32(at + 20, 1, true)],
+    ];
+    for (const [label, patch] of forgeries) {
+        const forged = forgeEntries(patch);
+        const lazyForged = await openLexicalIndexLazy(
+            async (off, len) => forged.subarray(off, off + len), forged.length);
+        await rejects(`lazy lexical: ${label} is refused before its postings are read`,
+            () => lazyForged.search('record number 17', 8), /lexical postings out of bounds/);
+    }
 }
 
 {

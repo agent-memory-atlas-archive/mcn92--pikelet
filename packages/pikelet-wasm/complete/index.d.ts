@@ -134,7 +134,13 @@ export interface CompleteSearch {
      * order fuses distance and BM25 rankings by reciprocal rank). Null on
      * vector-only artifacts.
      */
-    lexical: { terms: number; docCount: number; lazy?: true } | null;
+    lexical: {
+        terms: number;
+        docCount: number;
+        /** 'segment-sha256' when read eagerly and verified whole; 'unverified-lazy-reads' for lazily opened segments. */
+        integrity: 'segment-sha256' | 'unverified-lazy-reads';
+        lazy?: true;
+    } | null;
     /**
      * 'engine' once a WASM scan kernel serves the resident scan
      * (auto-staged or injected via options.sketchScanner); 'js' before

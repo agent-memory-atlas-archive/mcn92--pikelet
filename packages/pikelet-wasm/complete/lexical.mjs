@@ -181,6 +181,20 @@ export async function openLexicalIndexLazy(read, segLength) {
                 return e && { ...e, term: t };
             }))).filter(Boolean);
             if (!found.length) return [];
+            // Term entries arrive by lazy read, unverified (see the stance
+            // note above), so each one is held to the segment before its
+            // postings are fetched: inside the postings region (spec 3.8, as
+            // the eager reader enforces), a df no larger than the corpus, and
+            // a length a df-entry list can actually occupy (a doc-gap and a
+            // tf varint, each at most 6 bytes). Without these, one forged
+            // entry could steer a read anywhere in the file or ask for
+            // hundreds of MiB per query term.
+            for (const e of found) {
+                if (!Number.isSafeInteger(e.postingsRel) || e.postingsRel + e.postingsLen > postingsBytes
+                    || e.df > docCount || e.postingsLen > 12 * e.df) {
+                    throw new Error('.pikelet lexical postings out of bounds');
+                }
+            }
             const postings = await Promise.all(found.map((e) => read(postingsOffset + e.postingsRel, e.postingsLen)));
             const scores = new Map();
             found.forEach((e, i) => {

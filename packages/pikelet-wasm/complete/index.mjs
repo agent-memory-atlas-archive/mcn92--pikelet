@@ -796,7 +796,15 @@ export async function openPikeletFile(input, options = {}) {
             segments.has('lexical') ? (async () => {
                 const seg = segments.get('lexical');
                 if (seg.length > LAZY_LEXICAL_BYTES) {
-                    const lexRead = (off, len) => readChecked(source, seg.offset + off, len, 'lexical segment', maxReadBytes, fileBytes);
+                    // Confined to the segment's own window: lazy reads are
+                    // not individually verified, so no field they carry may
+                    // steer a read into another segment.
+                    const lexRead = (off, len) => {
+                        if (!Number.isSafeInteger(off) || !Number.isSafeInteger(len) || off < 0 || len < 0 || off + len > seg.length) {
+                            throw new Error('.pikelet lexical segment read is outside the segment window');
+                        }
+                        return readChecked(source, seg.offset + off, len, 'lexical segment', maxReadBytes, fileBytes);
+                    };
                     return { lazyIndex: await openLexicalIndexLazy(lexRead, seg.length) };
                 }
                 const bytes = await readChecked(source, seg.offset, seg.length, 'lexical segment', maxReadBytes, fileBytes);
@@ -1288,6 +1296,9 @@ export async function openPikeletFile(input, options = {}) {
                         ? {
                             terms: lexicalIndex.termCount,
                             docCount: lexicalIndex.docCount,
+                            // Lazy reads are bounded to the segment but not
+                            // individually verified (LAZY_LEXICAL_BYTES).
+                            integrity: lexicalIndex.lazy ? 'unverified-lazy-reads' : 'segment-sha256',
                             ...(lexicalIndex.lazy ? { lazy: true } : {}),
                         }
                         : null,
