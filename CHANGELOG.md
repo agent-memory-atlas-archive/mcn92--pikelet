@@ -8,7 +8,27 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
-## Unreleased
+## pikelet-wasm 0.9.3 / pikelet 0.9.3 — 2026-10-06
+
+Hardening for readers that mount packs from other publishers or hosts:
+the index header commitment now covers the bytes actually parsed, and a
+pack can no longer steer lazy reads, demand an exhaustive rerank, or turn
+a malformed abstention asset into confident answers. Upgrade if you mount
+packs you did not build, including over `pikelet mcp`. Both packages move
+to 0.9.3 together, and `pikelet` requires `pikelet-wasm` ^0.9.3 so that
+`pikelet mcp` serves through the hardened reader.
+
+### Compatibility
+
+- **A pack that declares a rerank depth over 4096 is served at 4096 by
+  default**, unless the caller passes `rerank`. No published pack is
+  affected.
+- **A pack whose abstention asset has malformed `thresholds` or
+  `coverage.topK` now reports `unscored`** instead of answering. Packs
+  built by `compile` are not affected.
+- **`compile` declares at most 4096** for a pack over 4096 records whose
+  sweep does not meet its recall target, and warns. Other packs compile
+  as under 0.9.2.
 
 ### Fixed
 
