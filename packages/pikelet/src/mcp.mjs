@@ -61,19 +61,20 @@ function toolDefinitions(packs) {
         + 'chunks with full provenance (pack, immutable pack identity, title, heading path, '
         + 'source), a matchQuality per pack, and grounding: which of the query\'s content words '
         + 'the best passage restates (covered) and which no passage contains (uncovered). '
-        + 'matchQuality measures how directly the retrieved text restates the question, not '
-        + 'whether the answer is there. "strong": a passage restates it — cite that passage. '
-        + '"weak": partial restatement — read before relying on it. "none": no passage restates '
-        + 'it; results still ship by default because a passage can answer a question without '
+        + 'matchQuality measures retrieval relevance — whether this pack covers the question\'s '
+        + 'topic — not whether the answer is there. "strong": the passages are squarely on the '
+        + 'topic — read them and cite the one that states the answer. "weak": partly on topic — '
+        + 'read before relying on it. "none": the pack does not appear to cover the topic; '
+        + 'results still ship by default because a passage can answer a question without '
         + 'sharing its wording (a sentence saying "no build step needed" answers "do I have to '
         + 'compile it myself?") — read them and compose the answer if it is there, and say the '
         + 'support is indirect. "unscored": the pack has no fitted calibrator — no signal at all, '
         + 'not even a low one; treat every result as unverified (see unscoredWarning). Two '
-        + 'cautions follow from what matchQuality measures. A "strong" result can be on the right '
-        + 'subject and still not contain the specific value asked for (right entity, wrong '
-        + 'attribute): if the thing you were asked for appears in grounding.uncovered, the '
-        + 'passage does not establish it whatever matchQuality says — never state a value the '
-        + 'returned text does not contain. And a question that chains two facts (which floor is '
+        + 'cautions follow from what matchQuality measures. A "strong" result is on the right '
+        + 'subject but may not contain the specific value asked for (right entity, wrong '
+        + 'attribute, or a fact the pack never states): if the thing you were asked for appears '
+        + 'in grounding.uncovered, the passage does not establish it whatever matchQuality says — '
+        + 'never state a value the returned text does not contain. And a question that chains two facts (which floor is '
         + 'X\'s project on: project→chamber, then chamber→floor) returns only the first hop; take '
         + 'the entity the passage names and search again for the rest rather than answering from '
         + 'one hop. Pass showAbstained: false to withhold results under "none" (no effect on '
@@ -87,7 +88,7 @@ function toolDefinitions(packs) {
           showAbstained: {
             type: 'boolean',
             description: 'Whether to return results when matchQuality is "none" for a section '
-              + '(default true — the calibrator can misjudge paraphrases, so withholding by '
+              + '(default true — the relevance score can misjudge paraphrases, so withholding by '
               + 'default hides real answers too often). Pass false to withhold results under '
               + '"none" instead. Never changes matchQuality or confidence — only whether '
               + 'results ship.',
@@ -108,9 +109,10 @@ function toolDefinitions(packs) {
       description: 'Run the tests a pack carries inside itself: golden queries (each verified '
         + 'at build time to retrieve its source) and abstention probes (queries the pack must '
         + 'answer or must refuse). Reports pass/fail per test plus the pack\'s encoder and '
-        + 'integrity verification state, and the calibration quality (cvAuc, cvAucHard) behind '
-        + 'its matchQuality verdicts — a low or missing cvAucHard means "none" verdicts from '
-        + 'this pack were never tested against in-domain-unanswerable queries. This is '
+        + 'integrity verification state, and the calibration quality behind its matchQuality '
+        + 'verdicts: cvAuc, how well the relevance score separates on-topic from off-topic '
+        + 'queries, and cvAucHard, how well it separates answerable from in-domain-unanswerable '
+        + 'ones (expected lower, since matchQuality measures relevance). This is '
         + 'self-verification: it proves the artifact is intact and behaves as it did when '
         + 'built — not that its content is true or its publisher trustworthy. On a pack updated '
         + 'with layers (a chain), the tests and calibration figures are the base pack\'s, run '
@@ -240,12 +242,12 @@ async function callSearch(packs, args) {
     packsSearched: names,
     ...(answered.length === 0 && noneSections.length > 0 ? {
       note: showAbstained
-        ? 'No passage restates this query (matchQuality "none"). Results are shown anyway '
-          + 'because a passage can answer a question without sharing its wording — read them and '
+        ? 'This pack does not appear to cover this query\'s topic (matchQuality "none"). Results '
+          + 'are shown anyway because a passage can answer a question without sharing its wording — read them and '
           + 'weigh whether the answer is there, compose it if so and say the support is indirect; '
           + 'do not cite one with "strong" confidence, and do not dismiss them unread.'
-        : 'No passage restates this query and results were withheld (showAbstained: false). Say '
-          + 'so rather than guessing, or rerun without showAbstained: false to read what was '
+        : 'This pack does not appear to cover this query\'s topic and results were withheld '
+          + '(showAbstained: false). Say so rather than guessing, or rerun without showAbstained: false to read what was '
           + 'withheld — a passage can answer a question without sharing its wording.',
     } : {}),
     ...(unscoredSections.length > 0 ? {
@@ -356,18 +358,23 @@ export async function callVerifyPack(packs, args) {
       ...(skipped.length ? { skipped } : {}),
     },
     abstentionProbes: { total: probeResults.length, passed: probesPassed, results: probeResults },
-    // fitAuc is in-sample and near-uninformative on its own; cvAucHard is
-    // the number that catches a calibrator that answers anything in-domain
-    // regardless of whether the passage actually supports it. realQueryAuc/
+    // method/target say what matchQuality measures: self-templates-v6
+    // packs score relevance (target 'relevance'), fit against off-topic
+    // queries; earlier packs carry no target and were fit against
+    // in-domain-unanswerable ones. fitAuc is in-sample and near-
+    // uninformative on its own; cvAuc is the held-out AUC of the fit's own
+    // target; cvAucHard is answerable vs. in-domain-unanswerable (the fit
+    // target before v6, a diagnostic since). realQueryAuc/
     // realQueryAbstentionRate — human-written calibration queries, held out
     // of the fit entirely — is the only real validation this pack's
     // calibrator can have; humanCalibrationQueries: 0 means the corpus
-    // shipped none and this pack is validated by cvAucHard alone (see
-    // pikelet/src/calibrate.mjs's design note on why there is no synthetic
-    // substitute for real held-out queries). null means the pack shipped
-    // without a fitted calibrator (calibration skipped, or a pre-audit
-    // build without this field).
+    // shipped none (see pikelet/src/calibrate.mjs's design note on why
+    // there is no synthetic substitute for real held-out queries). null
+    // means the pack shipped without a fitted calibrator (calibration
+    // skipped, or a pre-audit build without this field).
     calibration: calibration ? {
+      method: calibration.method ?? null,
+      target: calibration.target ?? null,
       cvAuc: calibration.cvAuc,
       cvAucHard: calibration.cvAucHard,
       cvAucByGenKind: calibration.cvAucByGenKind ?? null,
@@ -375,12 +382,18 @@ export async function callVerifyPack(packs, args) {
       humanCalibrationQueries: calibration.humanCalibrationQueries ?? 0,
       realQueryAuc: calibration.realQueryAuc ?? null,
       realQueryAbstentionRate: calibration.realQueryAbstentionRate ?? null,
-      note: 'matchQuality verdicts on this pack are only as trustworthy as cvAucHard, or '
-        + 'realQueryAbstentionRate when humanCalibrationQueries > 0 (the stronger signal — it is '
-        + 'measured on queries the fit never trained on). A high realQueryAbstentionRate means real '
-        + 'paraphrases get wrongly withheld even if cvAucHard looks fine — "none" verdicts should '
-        + 'not be trusted without showAbstained. cvAucByGenKind.substituted scoring notably worse '
-        + 'than .base means the fit leans on lexical coverage more than genuine answerability.',
+      note: calibration.target === 'relevance'
+        ? 'matchQuality on this pack measures relevance: cvAuc is how well it separates on-topic from '
+          + 'off-topic queries, and realQueryAbstentionRate (when humanCalibrationQueries > 0, measured '
+          + 'on queries the fit never trained on) how often real questions are wrongly called "none". '
+          + 'cvAucHard is measured on synthetic in-domain-unanswerable queries and overstates how well '
+          + '"strong" predicts that the fact is present; check grounding.uncovered for that. '
+          + 'cvAucByGenKind.substituted scoring notably worse than .base means the fit leans on '
+          + 'lexical coverage more than the topic.'
+        : 'This pack predates the relevance target: its matchQuality was fit against in-domain-'
+          + 'unanswerable queries and is only as trustworthy as cvAucHard, or realQueryAbstentionRate '
+          + 'when humanCalibrationQueries > 0. A high realQueryAbstentionRate means real paraphrases '
+          + 'get wrongly withheld — "none" verdicts should not be trusted without showAbstained.',
     } : null,
     ...(goldenResults.length === 0 && probeResults.length === 0
       ? { note: mounted.chain
@@ -827,19 +840,20 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
           supportedVersions,
           capabilities: { tools: {} },
           instructions: 'This server mounts .pikelet knowledge packs. Use search to retrieve '
-            + 'provenanced passages with a matchQuality that measures how directly the text '
-            + 'restates the question, not whether the answer is there: "strong" passages can be '
-            + 'cited directly; "none" results still ship by default because a passage can answer '
-            + 'without sharing the question\'s wording — read and compose rather than dismissing '
-            + 'them, and never cite one as confidently as a "strong" one. Each section carries '
+            + 'provenanced passages with a matchQuality that measures retrieval relevance — whether '
+            + 'the pack covers the question\'s topic — not whether the answer is there: "strong" '
+            + 'passages are squarely on topic, so read them and cite the one that states the answer; '
+            + '"none" results still ship by default because a passage can answer without sharing '
+            + 'the question\'s wording — read and compose rather than dismissing them, and never '
+            + 'cite one as confidently as a "strong" one. Each section carries '
             + 'grounding.uncovered, the query words no passage contained: if what you were asked '
             + 'for is in that list, the passage does not establish it whatever matchQuality says. '
             + 'Chained questions return only their first hop — search again for the next. '
             + '"unscored" means a pack has no fitted calibrator at all — no confidence signal, '
             + 'not just a low one; the response carries an unscoredWarning for these. '
             + 'verify_pack runs the tests a pack carries inside itself, including the '
-            + 'calibration quality (cvAucHard) behind matchQuality verdicts; list_packs '
-            + 'reports identities for citation pinning.',
+            + 'calibration quality behind matchQuality verdicts; list_packs reports identities '
+            + 'for citation pinning.',
           ...CACHE_HINTS,
         });
       } else if (method === 'initialize') {

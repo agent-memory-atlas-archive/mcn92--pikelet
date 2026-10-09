@@ -67,6 +67,14 @@ export declare function httpRangeSource(url: string, options?: {
 }): HttpRangeSource;
 
 export interface CompleteQueryResult {
+  /**
+   * The pack's calibrated verdict on this retrieval. On packs calibrated
+   * by pikelet 0.10 or later (evaluation calibration.target 'relevance')
+   * it measures retrieval relevance: 'none' means the pack does not appear
+   * to cover the query's topic, 'strong' that it does — not that a
+   * returned passage states the specific fact asked for. 'unscored': the
+   * pack ships no fitted calibrator.
+   */
   matchQuality: 'strong' | 'weak' | 'none' | 'unscored';
   confidence?: number;
   /**

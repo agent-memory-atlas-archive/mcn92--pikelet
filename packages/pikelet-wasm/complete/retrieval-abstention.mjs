@@ -4,6 +4,12 @@
 // bloom filter, standardized and passed through the fitted logistic model.
 // Verdict semantics: 'answer' (strong match), 'weak' (closest match is
 // distant — shown with a caveat), 'abstain' (nothing useful in the pack).
+// What "match" means is the asset's: pikelet's self-templates-v6 assets
+// (calibration.target 'relevance') are fit against off-topic queries, so
+// 'abstain' means the pack does not cover the query's topic and 'answer'
+// means it does — not that a passage states the asked-for fact. Earlier
+// assets were fit against in-domain-unanswerable queries instead. The
+// scoring math here is the same for both.
 //
 // Assets calibrated by pikelet's self-templates-v2+ may carry an additional
 // grounding term (asset.coverage): the fraction of the query's content
