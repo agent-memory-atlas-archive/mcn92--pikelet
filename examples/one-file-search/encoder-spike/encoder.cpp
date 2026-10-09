@@ -2,12 +2,14 @@
 // by export_encoder_blob.py — the inline-encoder (kind 3) kernel spike.
 // Float weight tensors are never materialized: every GEMV dequantizes
 // inside the dot product. LayerNorm, softmax, GELU, biases, and residuals
-// run in f32. Correctness-first: attention is direct (seq <= MAXSEQ, the
-// score tile is KBs), the FFN intermediate is materialized per token;
-// the streamed-accumulator variant is a later optimization. Attention is
-// O(seq^2) per head per layer, so MAXSEQ trades embedding latency for
-// window width — pinned to P (the position-embedding table size, 512),
-// since a wider window has no positions to encode past that anyway.
+// run in f32. Every projection runs over all tokens at once, TOKEN_TILE
+// tokens per pass over the weights (see gemm_tile), with bit-identical
+// results to a token-at-a-time GEMV; the FFN intermediate is materialized
+// for the whole sequence. Attention is direct (seq <= MAXSEQ, the score
+// tile is KBs) and O(seq^2) per head per layer, so MAXSEQ trades
+// embedding latency for window width — pinned to P (the position-embedding
+// table size, 512), since a wider window has no positions to encode past
+// that anyway.
 //
 // Layout constants mirror the exporter exactly; offsets are running sums
 // in the same emit order. Everything is 16-byte aligned by construction.
@@ -88,56 +90,88 @@ void fill_layout(const uint8_t* blob, Layout& lay) {
     }
 }
 
-// Fused u8 GEMV: y = A x + bias, A block-affine u8 (rows x cols).
-void gemv(const QuantMat& m, int rows, int cols, const float* x, const float* bias, float* y) {
+// Fused u8 GEMM over a tile of NT tokens: Y[t] = A X[t] + bias, A
+// block-affine u8 (rows x cols), X and Y token-major (stride cols / rows).
+// Each 16-byte weight chunk is widened to f32 once and applied to every
+// token in the tile, so a layer's weights stream through memory once per
+// NT tokens instead of once per token. Per token the arithmetic and its
+// order are exactly the one-token GEMV's, so results are bit-identical
+// whatever the tile size.
+template <int NT>
+void gemm_tile(const QuantMat& m, int rows, int cols, const float* X, const float* bias, float* Y) {
     const int nblocks = cols / B;
-    float xsums[NBF];
-    for (int b = 0; b < nblocks; b++) {
-        float s = 0.f;
-        for (int c = 0; c < B; c++) s += x[b * B + c];
-        xsums[b] = s;
+    float xsums[NT][NBF];
+    for (int t = 0; t < NT; t++) {
+        for (int b = 0; b < nblocks; b++) {
+            float s = 0.f;
+            for (int c = 0; c < B; c++) s += X[t * cols + b * B + c];
+            xsums[t][b] = s;
+        }
     }
 #ifdef __wasm_simd128__
     for (int r = 0; r < rows; r++) {
         const uint8_t* arow = m.q + (size_t)r * cols;
         const float* srow = m.s + (size_t)r * nblocks;
         const float* orow = m.o + (size_t)r * nblocks;
-        float acc = bias ? bias[r] : 0.f;
+        float acc[NT];
+        for (int t = 0; t < NT; t++) acc[t] = bias ? bias[r] : 0.f;
         for (int b = 0; b < nblocks; b++) {
             const uint8_t* ab = arow + b * B;
-            const float* xb = x + b * B;
-            v128_t vacc = wasm_f32x4_const_splat(0.f);
+            v128_t vacc[NT];
+            for (int t = 0; t < NT; t++) vacc[t] = wasm_f32x4_const_splat(0.f);
             for (int c = 0; c < B; c += 16) {
                 const v128_t bytes = wasm_v128_load(ab + c);
                 const v128_t lo16 = wasm_u16x8_extend_low_u8x16(bytes);
                 const v128_t hi16 = wasm_u16x8_extend_high_u8x16(bytes);
-                vacc = wasm_f32x4_add(vacc, wasm_f32x4_mul(
-                    wasm_f32x4_convert_u32x4(wasm_u32x4_extend_low_u16x8(lo16)), wasm_v128_load(xb + c)));
-                vacc = wasm_f32x4_add(vacc, wasm_f32x4_mul(
-                    wasm_f32x4_convert_u32x4(wasm_u32x4_extend_high_u16x8(lo16)), wasm_v128_load(xb + c + 4)));
-                vacc = wasm_f32x4_add(vacc, wasm_f32x4_mul(
-                    wasm_f32x4_convert_u32x4(wasm_u32x4_extend_low_u16x8(hi16)), wasm_v128_load(xb + c + 8)));
-                vacc = wasm_f32x4_add(vacc, wasm_f32x4_mul(
-                    wasm_f32x4_convert_u32x4(wasm_u32x4_extend_high_u16x8(hi16)), wasm_v128_load(xb + c + 12)));
+                const v128_t w0 = wasm_f32x4_convert_u32x4(wasm_u32x4_extend_low_u16x8(lo16));
+                const v128_t w1 = wasm_f32x4_convert_u32x4(wasm_u32x4_extend_high_u16x8(lo16));
+                const v128_t w2 = wasm_f32x4_convert_u32x4(wasm_u32x4_extend_low_u16x8(hi16));
+                const v128_t w3 = wasm_f32x4_convert_u32x4(wasm_u32x4_extend_high_u16x8(hi16));
+                for (int t = 0; t < NT; t++) {
+                    const float* xb = X + t * cols + b * B + c;
+                    vacc[t] = wasm_f32x4_add(vacc[t], wasm_f32x4_mul(w0, wasm_v128_load(xb)));
+                    vacc[t] = wasm_f32x4_add(vacc[t], wasm_f32x4_mul(w1, wasm_v128_load(xb + 4)));
+                    vacc[t] = wasm_f32x4_add(vacc[t], wasm_f32x4_mul(w2, wasm_v128_load(xb + 8)));
+                    vacc[t] = wasm_f32x4_add(vacc[t], wasm_f32x4_mul(w3, wasm_v128_load(xb + 12)));
+                }
             }
-            const float dot = wasm_f32x4_extract_lane(vacc, 0) + wasm_f32x4_extract_lane(vacc, 1)
-                + wasm_f32x4_extract_lane(vacc, 2) + wasm_f32x4_extract_lane(vacc, 3);
-            acc += srow[b] * dot + orow[b] * xsums[b];
+            for (int t = 0; t < NT; t++) {
+                const float dot = wasm_f32x4_extract_lane(vacc[t], 0) + wasm_f32x4_extract_lane(vacc[t], 1)
+                    + wasm_f32x4_extract_lane(vacc[t], 2) + wasm_f32x4_extract_lane(vacc[t], 3);
+                acc[t] += srow[b] * dot + orow[b] * xsums[t][b];
+            }
         }
-        y[r] = acc;
+        for (int t = 0; t < NT; t++) Y[t * rows + r] = acc[t];
     }
 #else
-    for (int r = 0; r < rows; r++) {
-        const uint8_t* arow = m.q + (size_t)r * cols;
-        float acc = bias ? bias[r] : 0.f;
-        for (int b = 0; b < nblocks; b++) {
-            float dot = 0.f;
-            for (int c = 0; c < B; c++) dot += (float)arow[b * B + c] * x[b * B + c];
-            acc += m.s[(size_t)r * nblocks + b] * dot + m.o[(size_t)r * nblocks + b] * xsums[b];
+    for (int t = 0; t < NT; t++) {
+        const float* x = X + t * cols;
+        for (int r = 0; r < rows; r++) {
+            const uint8_t* arow = m.q + (size_t)r * cols;
+            float acc = bias ? bias[r] : 0.f;
+            for (int b = 0; b < nblocks; b++) {
+                float dot = 0.f;
+                for (int c = 0; c < B; c++) dot += (float)arow[b * B + c] * x[b * B + c];
+                acc += m.s[(size_t)r * nblocks + b] * dot + m.o[(size_t)r * nblocks + b] * xsums[t][b];
+            }
+            Y[t * rows + r] = acc;
         }
-        y[r] = acc;
     }
 #endif
+}
+
+#ifndef TOKEN_TILE
+#define TOKEN_TILE 4
+#endif
+
+// Y = A X + bias for all seq tokens: full tiles, then 4-, 2- and 1-token
+// tiles for the remainder.
+void gemm(const QuantMat& m, int rows, int cols, const float* X, int seq, const float* bias, float* Y) {
+    int t = 0;
+    for (; t + TOKEN_TILE <= seq; t += TOKEN_TILE) gemm_tile<TOKEN_TILE>(m, rows, cols, X + t * cols, bias, Y + t * rows);
+    for (; t + 4 <= seq; t += 4) gemm_tile<4>(m, rows, cols, X + t * cols, bias, Y + t * rows);
+    for (; t + 2 <= seq; t += 2) gemm_tile<2>(m, rows, cols, X + t * cols, bias, Y + t * rows);
+    for (; t < seq; t++) gemm_tile<1>(m, rows, cols, X + t * cols, bias, Y + t * rows);
 }
 
 // Dequantize one u8 row into f32 (embedding gather).
@@ -172,7 +206,7 @@ float bk_[MAXSEQ * D];
 float bv_[MAXSEQ * D];
 float bctx[MAXSEQ * D];
 float btmp[D];
-float bh[F];
+float bh[MAXSEQ * F];
 float bscores[MAXSEQ];
 
 } // namespace
@@ -206,11 +240,9 @@ int encoder_forward(const uint8_t* blob, const int* ids, int seq, float* outHidd
     const float invSqrtHd = 1.f / sqrtf((float)HD);
     for (int li = 0; li < L; li++) {
         const Layer& ly = lay.layer[li];
-        for (int t = 0; t < seq; t++) {
-            gemv(ly.wq, D, D, bx + t * D, ly.bq, bq_ + t * D);
-            gemv(ly.wk, D, D, bx + t * D, ly.bk, bk_ + t * D);
-            gemv(ly.wv, D, D, bx + t * D, ly.bv, bv_ + t * D);
-        }
+        gemm(ly.wq, D, D, bx, seq, ly.bq, bq_);
+        gemm(ly.wk, D, D, bx, seq, ly.bk, bk_);
+        gemm(ly.wv, D, D, bx, seq, ly.bv, bv_);
         for (int h = 0; h < H; h++) {
             const int off = h * HD;
             for (int ti = 0; ti < seq; ti++) {
@@ -238,15 +270,19 @@ int encoder_forward(const uint8_t* blob, const int* ids, int seq, float* outHidd
                 }
             }
         }
+        // bq_ is dead once attention has run; it holds the projections.
+        gemm(ly.wo, D, D, bctx, seq, ly.bo, bq_);
         for (int t = 0; t < seq; t++) {
-            gemv(ly.wo, D, D, bctx + t * D, ly.bo, btmp);
             float* x = bx + t * D;
-            for (int d = 0; d < D; d++) x[d] += btmp[d];
+            for (int d = 0; d < D; d++) x[d] += bq_[t * D + d];
             layernorm(x, ly.ln1_g, ly.ln1_b);
-            gemv(ly.wu, F, D, x, ly.bu, bh);
-            for (int f = 0; f < F; f++) bh[f] = gelu(bh[f]);
-            gemv(ly.wd, D, F, bh, ly.bd, btmp);
-            for (int d = 0; d < D; d++) x[d] += btmp[d];
+        }
+        gemm(ly.wu, F, D, bx, seq, ly.bu, bh);
+        for (int i = 0; i < seq * F; i++) bh[i] = gelu(bh[i]);
+        gemm(ly.wd, D, F, bh, seq, ly.bd, bq_);
+        for (int t = 0; t < seq; t++) {
+            float* x = bx + t * D;
+            for (int d = 0; d < D; d++) x[d] += bq_[t * D + d];
             layernorm(x, ly.ln2_g, ly.ln2_b);
         }
         if (dbgStages) {
