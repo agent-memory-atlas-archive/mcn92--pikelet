@@ -3,7 +3,9 @@
 
 Uses pytrec_eval — the same scoring library the official BEIR benchmark
 scripts use — so numbers are directly comparable to published BEIR results.
-No LLM judging: qrels are the ground truth.
+No LLM judging: qrels are the ground truth. Like BEIR's
+EvaluateRetrieval.evaluate (ignore_identical_ids=True, its default), a hit
+whose document id equals the query id is dropped before scoring.
 
 Usage:
     python3.11 benchmarks/beir/score.py scifact A
@@ -37,9 +39,15 @@ def load_run(dataset: str, configuration: str) -> dict:
     with open(path) as f:
         raw = json.load(f)
     # raw["results"]: { queryId: [ {beirId, score}, ... ], ... }
+    # A hit whose id is the query's own id is dropped, as BEIR's official
+    # evaluation does by default (ignore_identical_ids=True). It matters on
+    # ArguAna, whose queries are arguments that are also in the corpus:
+    # retrieving the query itself is not a counter-argument, and keeping it
+    # scored the first hit as a miss on 1298 of 1406 queries (nDCG@10 about
+    # 0.13 low). No other dataset here has a query id among its own hits.
     run = {}
     for qid, hits in raw["results"].items():
-        run[qid] = {h["beirId"]: float(h["score"]) for h in hits}
+        run[qid] = {h["beirId"]: float(h["score"]) for h in hits if h["beirId"] != qid}
     return run, raw
 
 

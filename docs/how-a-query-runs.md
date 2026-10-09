@@ -36,23 +36,25 @@ Corpus mapping and evaluation config were frozen before the runs. Official BEIR 
 | Dataset  | Config                                     |    nDCG@10 |  Recall@10 | Recall@100 | median ms/q | p95 ms/q |
 | -------- | ------------------------------------------ | ---------: | ---------: | ---------: | ----------: | -------: |
 | SciFact  | A — upstream float exhaustive              |     0.6451 |     0.7833 |     0.9250 |         3.6 |      4.0 |
-| SciFact  | B — Pikelet encoder / float exhaustive     |     0.6512 |     0.7942 |     0.9417 |         3.8 |      4.4 |
-| SciFact  | C — Pikelet encoder / affine-u8 exhaustive |     0.6500 |     0.7942 |     0.9417 |         6.9 |      8.7 |
-| SciFact  | D — Pikelet encoder / affine-u8 HNSW       | **0.6500** | **0.7942** | **0.9417** |    **0.15** | **0.24** |
+| SciFact  | B — Pikelet encoder / float exhaustive     |     0.6554 |     0.8086 |     0.9317 |         3.7 |      4.4 |
+| SciFact  | C — Pikelet encoder / affine-u8 exhaustive |     0.6560 |     0.8086 |     0.9317 |         3.7 |      5.0 |
+| SciFact  | D — Pikelet encoder / affine-u8 HNSW       | **0.6562** | **0.8086** | **0.9317** |    **0.16** | **0.49** |
 | NFCorpus | A — upstream float exhaustive              |     0.3159 |     0.1550 |     0.3115 |         2.6 |      3.1 |
-| NFCorpus | B — Pikelet encoder / float exhaustive     |     0.3154 |     0.1511 |     0.3044 |         2.8 |      3.3 |
-| NFCorpus | C — Pikelet encoder / affine-u8 exhaustive |     0.3154 |     0.1511 |     0.3036 |         2.9 |      3.6 |
-| NFCorpus | D — Pikelet encoder / affine-u8 HNSW       | **0.3135** | **0.1482** | **0.3061** |    **0.16** | **0.25** |
-| ArguAna  | A — upstream float exhaustive              |     0.3698 |     0.7653 |     0.9772 |         7.8 |     10.8 |
-| ArguAna  | B — Pikelet encoder / float exhaustive     |     0.3506 |     0.7397 |     0.9801 |         6.1 |      7.3 |
-| ArguAna  | C — Pikelet encoder / affine-u8 exhaustive |     0.3496 |     0.7368 |     0.9801 |         6.4 |      7.5 |
-| ArguAna  | D — Pikelet encoder / affine-u8 HNSW       | **0.3496** | **0.7368** | **0.9808** |    **0.12** | **0.20** |
+| NFCorpus | B — Pikelet encoder / float exhaustive     |     0.3173 |     0.1562 |     0.3088 |         2.8 |      3.5 |
+| NFCorpus | C — Pikelet encoder / affine-u8 exhaustive |     0.3174 |     0.1563 |     0.3089 |         2.8 |      3.4 |
+| NFCorpus | D — Pikelet encoder / affine-u8 HNSW       | **0.3164** | **0.1572** | **0.3080** |    **0.17** | **0.26** |
+| ArguAna  | A — upstream float exhaustive              |     0.5017 |     0.7909 |     0.9772 |         7.8 |     10.8 |
+| ArguAna  | B — Pikelet encoder / float exhaustive     |     0.4875 |     0.7824 |     0.9772 |         6.1 |      7.2 |
+| ArguAna  | C — Pikelet encoder / affine-u8 exhaustive |     0.4889 |     0.7831 |     0.9772 |         6.3 |      7.4 |
+| ArguAna  | D — Pikelet encoder / affine-u8 HNSW       | **0.4889** | **0.7831** | **0.9772** |    **0.12** | **0.19** |
+
+The figures are the scored runs in `benchmarks/beir/results/` (512-token encoder window; ArguAna scored without a query's own document, as BEIR's official evaluation does). [`benchmarks/beir/README.md`](../benchmarks/beir/README.md) has the full ladder, including the hybrid configuration the reader actually serves.
 
 These results are more useful because they are not uniformly flattering.
 
-**Affine-u8 storage is not the main quality cost** (B→C nDCG@10: SciFact 0.6512→0.6500, NFCorpus 0.3154→0.3154, ArguAna 0.3506→0.3496). **HNSW is similarly close to exhaustive search** at these settings (C→D: SciFact and ArguAna unchanged at reported precision; NFCorpus exposes a small approximation loss, 0.3154→0.3135).
+**Affine-u8 storage is not the main quality cost** (B→C nDCG@10: SciFact 0.6554→0.6560, NFCorpus 0.3173→0.3174, ArguAna 0.4875→0.4889). **HNSW is similarly close to exhaustive search** at these settings (C→D: SciFact 0.6560→0.6562 and ArguAna unchanged; NFCorpus exposes a small approximation loss, 0.3174→0.3164).
 
-**The largest observed loss is the embedded query encoder on ArguAna**: A→B moves nDCG@10 from 0.3698 to 0.3506, about a 5% relative reduction. Recall@100 actually improves slightly (0.9772→0.9801) — the relevant document is generally still in the candidate set; the degradation is in fine ordering near the top. That limitation isn't hidden: MiniLM is small *because* the goal is to fit the query encoder inside the artifact. It is not state of the art, and the compact implementation is not behaviorally identical to an upstream sentence-transformers runtime on every task.
+**The largest observed loss is the embedded query encoder on ArguAna**: A→B moves nDCG@10 from 0.5017 to 0.4875, about a 3% relative reduction, while on SciFact and NFCorpus the embedded encoder scores slightly above the upstream one. Recall@100 is unchanged (0.9772) — the relevant document is still in the candidate set; the degradation is in fine ordering near the top. That limitation isn't hidden: MiniLM is small *because* the goal is to fit the query encoder inside the artifact. It is not state of the art, and the compact implementation is not behaviorally identical to an upstream sentence-transformers runtime on every task.
 
 The benchmark harness, quantization-conformance test, frozen configuration, and raw runs live under `benchmarks/beir/`.
 

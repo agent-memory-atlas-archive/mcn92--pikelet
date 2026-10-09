@@ -175,15 +175,15 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | NFCorpus | G Arctic-XS / dense only | 0.3085 | 0.1462 | 0.2607 | 5.9 |
 | NFCorpus | G-noprefix (Arctic-XS, no query prefix) | 0.1546 | 0.0777 | 0.1818 | 5.5 |
 | NFCorpus | H Arctic-XS / hybrid | 0.3283 | 0.1558 | 0.2729 | 5.6 |
-| ArguAna (1406q) | A upstream float exhaustive | 0.3698 | 0.7653 | 0.9772 | 7.8 |
-| ArguAna | B Pikelet encoder / float exhaustive | 0.3612 | 0.7546 | 0.9772 | 6.1 |
-| ArguAna | C Pikelet encoder / affine-u8 exhaustive | 0.3613 | 0.7532 | 0.9772 | 6.3 |
-| ArguAna | D Pikelet encoder / affine-u8, dense only | 0.3613 | 0.7532 | 0.9772 | 0.1 |
-| ArguAna | **E MiniLM / hybrid (production default)** | **0.3613** | 0.7532 | 0.9772 | 16.7 |
-| ArguAna | F BM25 lexical only | 0.3273 | 0.6920 | 0.9324 | 6.0 |
-| ArguAna | **G Arctic-XS / dense only** | **0.3788** | 0.7681 | 0.9566 | 10.5 |
-| ArguAna | G-noprefix (Arctic-XS, no query prefix) | 0.3795 | 0.7639 | 0.9381 | 10.4 |
-| ArguAna | **H Arctic-XS / hybrid** | **0.3788** | 0.7681 | 0.9566 | 17.5 |
+| ArguAna (1406q) | A upstream float exhaustive | 0.5017 | 0.7909 | 0.9772 | 7.8 |
+| ArguAna | B Pikelet encoder / float exhaustive | 0.4875 | 0.7824 | 0.9772 | 6.1 |
+| ArguAna | C Pikelet encoder / affine-u8 exhaustive | 0.4889 | 0.7831 | 0.9772 | 6.3 |
+| ArguAna | D Pikelet encoder / affine-u8, dense only | 0.4889 | 0.7831 | 0.9772 | 0.1 |
+| ArguAna | **E MiniLM / hybrid (production default)** | **0.4907** | 0.7809 | 0.9772 | 16.7 |
+| ArguAna | F BM25 lexical only | 0.4351 | 0.7098 | 0.9324 | 6.0 |
+| ArguAna | G Arctic-XS / dense only | 0.5166 | 0.7845 | 0.9566 | 10.5 |
+| ArguAna | G-noprefix (Arctic-XS, no query prefix) | 0.5217 | 0.7817 | 0.9381 | 10.4 |
+| ArguAna | **H Arctic-XS / hybrid** | **0.5188** | 0.7838 | 0.9566 | 17.5 |
 | FiQA (648q) | A upstream float exhaustive | 0.3687 | 0.4413 | 0.7061 | 55.1 |
 | FiQA | B Pikelet encoder / float exhaustive | 0.3608 | 0.4313 | 0.7067 | 40.0 |
 | FiQA | C Pikelet encoder / affine-u8 exhaustive | 0.3618 | 0.4329 | 0.7073 | 40.1 |
@@ -193,6 +193,19 @@ node benchmarks/beir/conformance/test-quantization.mjs   # golden-vector proof q
 | FiQA | F BM25 lexical only | 0.2319 | 0.2905 | 0.5201 | 9.5 |
 | FiQA | G / H Arctic-XS | — | not encoded | | |
 | TREC-COVID | not run | — | — | — | — |
+
+**The ArguAna rows were rescored on 2026-10-09** with `score.py` dropping a
+hit whose id is the query's own, as BEIR's official evaluation does
+(`EvaluateRetrieval.evaluate`, `ignore_identical_ids=True` by default).
+ArguAna's queries are arguments that are also corpus documents, and 1298 of
+the 1406 queries retrieved themselves, which the old scoring counted as a
+miss in the first position: every ArguAna nDCG@10 above was about 0.13 low
+(A read 0.3698; the published all-MiniLM-L6-v2 figure is about 0.50, which
+A now matches at 0.5017). Recall@100 is unchanged, since each run holds 100
+hits. No SciFact, NFCorpus or FiQA run retrieves a document with its query's
+id, so those rows are identical under either rule. ArguAna figures quoted
+below from before that date (the previous-RRF numbers and the 128 -> 512
+delta) were scored the old way.
 
 Until 2026-09-23 the E and H rows were scored in vector-distance order:
 `score.py` ranks by the run's `score` field, and `query-E.mjs`/`query-H.mjs`
@@ -234,19 +247,19 @@ scanner for sketches this size, which the ladder does not exercise.
 
 All three completed datasets independently validate the pipeline against
 published literature: SciFact nDCG@10 ~0.64-0.65, NFCorpus ~0.31-0.32,
-ArguAna ~0.35-0.40 are the expected ranges for MiniLM-L6-v2-class encoders
+ArguAna ~0.50 are the expected values for MiniLM-L6-v2-class encoders
 on these tasks — this is not a benchmark that happens to favor Pikelet, it
 reproduces known-hard and known-easy cases correctly.
 
 **Per-dataset A→B (encoder-quantization) deltas differ meaningfully:**
 SciFact **+0.0103** (net positive), NFCorpus **+0.0014** (net positive),
-ArguAna **-0.0087** (still the only negative here, and outside noise at
+ArguAna **-0.0142** (still the only negative here, and outside noise at
 n=1406). All three were restated on 2026-09-27 against the scored runs on
 disk; they had read +0.0061, -0.0005 and -0.0192, computed from B rows the
-512-token re-encode had already superseded. The shape of the finding
-survives — ArguAna is the one dataset where quantizing the encoder costs
-anything — but the cost is less than half what was published, and NFCorpus
-moved from straddling zero to net positive. B→C (corpus quantization) and C→D
+512-token re-encode had already superseded, and ArguAna's read -0.0087 until
+the 2026-10-09 rescoring. The shape of the finding survives — ArguAna is the
+one dataset where quantizing the encoder costs anything — and NFCorpus moved
+from straddling zero to net positive. B→C (corpus quantization) and C→D
 (dense-only sketch artifact search) stay small and roughly flat relative to
 B on all three datasets — the loss so far, where it exists, concentrates in
 the encoder step, not the storage or search-approximation steps. Do not
@@ -266,7 +279,7 @@ sizes.
 **This section's original premise no longer holds.** It was written when E
 reproduced D almost exactly, and that is what the old heading claimed.
 Against the runs on disk, E now *beats* D by **+0.0449** on SciFact and
-**+0.0227** on NFCorpus, and ties it on ArguAna (-0.0000). Hybrid fusion is
+**+0.0227** on NFCorpus, and gains +0.0018 on ArguAna. Hybrid fusion is
 not a no-op on this suite; it is the largest single gain on the ladder
 outside the encoder step.
 
@@ -279,11 +292,11 @@ ranking usually survived untouched. Under the weighted rule the lexical
 ranking carries real weight and the guard margin, not the cutoff, is what
 protects a strong vector hit.
 
-ArguAna's tie is still explained the old way: its "queries" are full
+ArguAna's near-tie is still explained the old way: its "queries" are full
 argument passages, so BM25 and the vector ranking largely agree and there is
-nothing for fusion to reorder. F (lexical-only) vs. D is no longer uniformly
+little for fusion to reorder. F (lexical-only) vs. D is no longer uniformly
 negative either — F beats D by +0.0029 on SciFact, and trails it by 0.0101
-on NFCorpus and 0.0340 on ArguAna — so "BM25 alone is a weak signal on this
+on NFCorpus and 0.0538 on ArguAna — so "BM25 alone is a weak signal on this
 suite" holds on two of three datasets, not all three.
 
 This ladder does not yet include a
@@ -311,11 +324,12 @@ measures exactly that claim instead of trusting it:
 |---|---|---|---|
 | SciFact | 0.6427 | 0.4791 | **-0.1636** |
 | NFCorpus | 0.3085 | 0.1546 | **-0.1539** |
-| ArguAna | 0.3788 | 0.3795 | +0.0007 (noise) |
+| ArguAna | 0.5166 | 0.5217 | +0.0052 |
 
 Confirmed and large on SciFact and NFCorpus — both have short, question-shaped
 queries, exactly the asymmetric case the prefix exists for. ArguAna is the
-one dataset in this suite where the prefix makes no measurable difference,
+one dataset in this suite where the prefix does not help (dropping it scores
+slightly higher),
 because ArguAna's "queries" are full argument passages, not questions — the
 query/passage asymmetry the prefix encodes barely applies when both sides
 look like documents. The claim in the CLI help text is verified, with the
@@ -345,11 +359,11 @@ are not.
   0.3164, -0.0079) and hybrid (0.3283 vs. 0.3391, -0.0108) — though the two
   are close enough here that the gap could plausibly narrow or flip with a
   larger query sample.
-- **ArguAna**: Arctic-XS **beats** MiniLM, dense (0.3788 vs. 0.3613,
-  +0.0176) and hybrid (0.3788 vs. 0.3613, +0.0176 — identical to dense here,
+- **ArguAna**: Arctic-XS **beats** MiniLM, dense (0.5166 vs. 0.4889,
+  +0.0277) and hybrid (0.5188 vs. 0.4907, +0.0281 — close to dense here,
   since hybrid is a near-no-op on ArguAna for either encoder). ArguAna is
   also the one dataset in the existing A→B row where MiniLM's own
-  quantization shows a real, measured cost (-0.0087) — the dataset
+  quantization shows a real, measured cost (-0.0142) — the dataset
   chosen specifically to stress semantic discrimination is the one place a
   different encoder pulls ahead.
 

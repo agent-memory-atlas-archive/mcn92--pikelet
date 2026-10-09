@@ -5,8 +5,8 @@
   "num_queries_scored": 1406,
   "num_queries_missing": 0,
   "metrics": {
-    "ndcg_at_10": 0.36127623834566575,
-    "recall_at_10": 0.7532005689900427,
+    "ndcg_at_10": 0.48888449666051176,
+    "recall_at_10": 0.783072546230441,
     "recall_at_100": 0.9772403982930299
   },
   "system": {
