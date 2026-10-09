@@ -3,7 +3,43 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pikelet Playground</title>
+<title>Pikelet Playground: search 456,153 Wikipedia articles from one static file</title>
+<meta name="description" content="Pikelet compiles documents into one self-contained .pikelet file (source text, semantic and keyword indexes, the query encoder, and integrity hashes) that browsers, Node.js and AI agents over MCP can search with HTTP range reads and no server. This playground searches 456,153 Simple English Wikipedia articles from a single static file.">
+<link rel="canonical" href="https://pikelet-wiki-playground.pages.dev/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pikelet">
+<meta property="og:title" content="Pikelet Playground: query a knowledge file, not a server">
+<meta property="og:description" content="Pikelet compiles documents into one self-contained .pikelet file (source text, semantic and keyword indexes, the query encoder, and integrity hashes) that browsers, Node.js and AI agents over MCP can search with HTTP range reads and no server. This playground searches 456,153 Simple English Wikipedia articles from a single static file.">
+<meta property="og:url" content="https://pikelet-wiki-playground.pages.dev/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Pikelet Playground: query a knowledge file, not a server">
+<meta name="twitter:description" content="Pikelet compiles documents into one self-contained .pikelet file (source text, semantic and keyword indexes, the query encoder, and integrity hashes) that browsers, Node.js and AI agents over MCP can search with HTTP range reads and no server. This playground searches 456,153 Simple English Wikipedia articles from a single static file.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://pikelet-wiki-playground.pages.dev/#page",
+      "url": "https://pikelet-wiki-playground.pages.dev/",
+      "name": "Pikelet Playground",
+      "description": "A live in-browser demo of Pikelet: semantic and keyword search over 456,153 Simple English Wikipedia articles, served from one static 648.5 MB .pikelet file through HTTP range reads, with no search server.",
+      "about": { "@id": "https://github.com/mcn92/pikelet#software" }
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": "https://github.com/mcn92/pikelet#software",
+      "name": "Pikelet",
+      "description": "Pikelet compiles a corpus into one self-contained, queryable .pikelet file carrying the source text, semantic and BM25 indexes, the query encoder, retrieval calibration, evaluation queries, and integrity commitments. Readers in Node.js, browsers and Cloudflare Workers search it locally or over HTTP Range without a vector database, embedding API or retrieval server, and an MCP server exposes packs to LLM agents.",
+      "codeRepository": "https://github.com/mcn92/pikelet",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "programmingLanguage": ["JavaScript", "C++", "WebAssembly"],
+      "runtimePlatform": ["Node.js", "Web browsers", "Cloudflare Workers"],
+      "keywords": "semantic search, vector search, retrieval, RAG, MCP, WebAssembly, HTTP range requests, static hosting"
+    }
+  ]
+}
+</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
   :root {
@@ -469,6 +505,43 @@
   }
   .empty { color: var(--ink-dim); font-size: 14px; margin: 0; }
 
+  section.about {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border-top: 1px solid var(--rule);
+    padding-top: 24px;
+  }
+  section.about h2 {
+    margin: 0;
+    font: 700 22px/1.25 'JetBrains Mono', monospace;
+  }
+  section.about h3 {
+    margin: 8px 0 0;
+    font: 600 15px/1.3 'Inter', sans-serif;
+  }
+  section.about p, section.about li { margin: 0; color: var(--ink-dim); font-size: 15px; }
+  section.about strong { color: var(--ink); font-weight: 600; }
+  section.about ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+  section.about a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  section.about a:hover { text-decoration: underline; }
+  section.about code {
+    font: 400 13px 'JetBrains Mono', monospace;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  section.about pre {
+    margin: 0;
+    background: var(--log-bg);
+    color: var(--log-ink);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font: 400 13px/1.6 'JetBrains Mono', monospace;
+  }
+  section.about pre code { background: none; padding: 0; color: inherit; }
+
   footer {
     text-align: center;
     color: var(--ink-dim);
@@ -482,7 +555,7 @@
     .identity-card { grid-template-columns: 1fr; }
   }
 </style>
-  <script type="module" crossorigin src="./assets/index-CANnaI1t.js"></script>
+  <script type="module" crossorigin src="./assets/index-B-T-_erG.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -496,6 +569,14 @@
       from byte-range reads against that one file, visible in the log as they happen.
     </p>
   </header>
+
+  <noscript>
+    <p class="lede">
+      The live search below runs in your browser and needs JavaScript. Without it, the rest of
+      this page still explains <a href="#about-title">what Pikelet is and how to use it</a>, and
+      the source is at <a href="https://github.com/mcn92/pikelet">github.com/mcn92/pikelet</a>.
+    </p>
+  </noscript>
 
   <div class="tabs" role="tablist">
     <button type="button" class="tab active" id="tab-btn-search" role="tab" aria-selected="true" aria-controls="tab-search">Search</button>
@@ -618,6 +699,63 @@
       <p class="ablation-removed" id="ablation-c43-note"></p>
     </section>
   </div>
+
+  <section class="about" aria-labelledby="about-title">
+    <h2 id="about-title">What is Pikelet?</h2>
+    <p>
+      <strong>Pikelet</strong> is an open-source (Apache-2.0) tool that compiles a folder of
+      documents or a website into one self-contained, queryable <code>.pikelet</code> file. The
+      file carries the source text, a semantic (vector) index and a BM25 keyword index, the query
+      encoder that turns a question into a vector, a calibrated match-quality model, evaluation
+      queries, and integrity hashes over all of it. Its identity is a SHA-256 hash of its
+      contents, so an answer can cite the exact version of the knowledge it came from.
+    </p>
+    <p>
+      Put the file on disk, S3, R2, a CDN or any static HTTP host. A reader opens it locally or
+      over HTTP Range requests and searches it with no vector database, embedding API or search
+      server: it loads a small index, embeds the question with the encoder inside the file
+      (WebAssembly, in the browser or Node.js), and fetches only the byte ranges it needs. Updates
+      ship as small immutable layer files on top of a base file.
+    </p>
+
+    <h3>What this page shows</h3>
+    <ul>
+      <li>
+        <strong>Search:</strong> the page mounts <code>wikipedia.pikelet</code>, 456,153 Simple
+        English Wikipedia articles in one 648.5&nbsp;MB file on Cloudflare R2, and answers each
+        question in your browser, listing every byte range it reads. There is no
+        <code>/search</code>, <code>/embed</code> or <code>/api</code> endpoint behind it.
+      </li>
+      <li>
+        <strong>Remove a fact:</strong> small packs that are identical except for one record,
+        removed in one and edited in another, answer the same question. The answer follows the
+        file's contents and nothing else.
+      </li>
+    </ul>
+
+    <h3>Match quality</h3>
+    <p>
+      Each answer carries <code>matchQuality</code>: <code>strong</code>, <code>weak</code> or
+      <code>none</code>, a calibrated signal of how well the file's best passages match the
+      question. It is not a fact-check: a passage on the right topic can still lack the specific
+      detail asked for, so read the passage before relying on it.
+    </p>
+
+    <h3>Use it</h3>
+    <pre><code>npx pikelet compile --source ./docs --out docs.pikelet
+npx pikelet mcp install --client claude-code --pack ./docs.pikelet</code></pre>
+    <p>
+      The first command builds a pack from a folder or a URL; the second gives Claude Code, or
+      any MCP client, a <code>search</code> tool over it. From code, <code>openPikeletFile</code>
+      in the <a href="https://www.npmjs.com/package/pikelet-wasm">pikelet-wasm</a> package opens a
+      pack in Node.js, browsers or Cloudflare Workers; the CLI is the
+      <a href="https://www.npmjs.com/package/pikelet">pikelet</a> package.
+    </p>
+    <p>
+      Source, documentation and benchmarks:
+      <a href="https://github.com/mcn92/pikelet">github.com/mcn92/pikelet</a>.
+    </p>
+  </section>
 
   <footer>
     the file is the search environment · <a href="https://github.com/mcn92/pikelet" target="_blank" rel="noopener">github.com/mcn92/pikelet</a>
