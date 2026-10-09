@@ -123,31 +123,29 @@ book's content is not crawled twice. The scaffold-only flags (`--mode`,
 `--runtime`, `--artifact`, deploy and student options) are rejected:
 compile always builds the complete kind-3 profile.
 
-Abstention is calibrated from the corpus at build time, so queries the
-artifact cannot answer return `matchQuality: "none"` (or `"weak"`, shown
-with a caveat) instead of confidently wrong ones. The calibrator generates
-answerable queries from chunk titles and content words (each verified by
-retrieval before it counts) and fits the same retrieval-signals model the
-wiki pack ships against two classes of negatives. Easy negatives — a
-built-in off-domain bank and out-of-vocabulary gibberish — teach the model
-what foreign queries look like. Hard negatives teach it the case that
-matters: **in-domain questions the corpus does not answer**. They come
-from held-out documents (whole documents excluded from the calibration
-searches, then asked about — in-domain vocabulary, unanswerable by
-construction) and from cross-chunk recombinations (corpus words no single
-document contains together). Alongside the distance signals the model
+Match quality is calibrated from the corpus at build time, so queries
+the artifact does not cover return `matchQuality: "none"` (or `"weak"`,
+shown with a caveat) instead of confidently wrong results. The calibrator
+generates on-topic queries from chunk titles and content words (each
+verified by retrieval before it counts) and fits the same
+retrieval-signals model the wiki pack ships against off-topic ones: a
+built-in off-domain bank, minus any entry the corpus turns out to cover,
+and out-of-vocabulary gibberish. Alongside the distance signals the model
 fits a grounding feature: the fraction of the query's content words that
-appear in the top retrieved passage's text. Distances measure whether the
-corpus discusses the area; grounding measures whether the returned
-passage contains the question's own terms — the axis that separates
-"topically adjacent" from "actually answers". The asset records its
-method, per-class query counts, in-sample fit AUC, and cross-validated
-AUCs — pooled, against the hard class alone, and per hard-negative kind —
-for inspection. The acceptance gates use
-the cross-validated numbers (a deterministic 5-fold split): pooled AUC
-under 0.85, hard-negative AUC under 0.75, or too few verified positives
-or hard negatives all log why and ship unscored rather than
-miscalibrated. `--calibration <file>` embeds a prebuilt
+appear in the top retrieved passages' text. The verdict measures
+retrieval relevance — whether the pack covers the question's topic — not
+whether a passage states the specific fact asked for; a query returns
+the per-word detail (`grounding.covered` / `grounding.uncovered`) for
+that check. The calibrator also generates in-domain questions the corpus
+does not answer (an ablated source passage, a swapped entity, a held-out
+document) and reports how well the verdict separates them as a
+diagnostic (`cvAucHard`); they do not shape the fit. The asset records
+its method, target, per-class query counts, in-sample fit AUC, and
+cross-validated AUCs for inspection. The acceptance gates use the
+cross-validated numbers (a deterministic 5-fold split): an AUC against
+off-topic queries under 0.85, too few verified positives or off-topic
+negatives, or a distance weight with the wrong sign all log why and ship
+unscored rather than miscalibrated. `--calibration <file>` embeds a prebuilt
 retrieval-signals-v1 asset instead; `--skip-calibration` ships unscored
 deliberately.
 
@@ -213,11 +211,13 @@ pack's encoder and corpus) and every result carries its provenance —
 pack name, the pack's immutable manifest identity (sha256), title,
 heading path, anchor, and source — so an answer can cite the exact
 knowledge state it was derived from, and a pinned identity means the
-citation survives pack rebuilds detectably. Calibrated abstention
-crosses the protocol intact: a pack whose passages do not restate the
-question says `matchQuality: "none"`, and the tool result tells the model
-the support is at best indirect. The results still ship under `none` by
-default, because the calibrator can misjudge a paraphrase; pass
+citation survives pack rebuilds detectably. Calibrated match quality
+crosses the protocol intact: a pack that does not cover the question's
+topic says `matchQuality: "none"`, and the tool result tells the model
+the support is at best indirect; on any verdict, an asked-for value in
+`grounding.uncovered` is one no passage states. The results still ship
+under `none` by default, because the calibrator can misjudge a
+paraphrase; pass
 `showAbstained: false` to withhold them. (The library's `query()` does the
 reverse: it withholds under `none` unless asked.) `list_packs` reports names, identities, record counts, licenses,
 and each pack's sample queries; `get_record` hydrates one full chunk

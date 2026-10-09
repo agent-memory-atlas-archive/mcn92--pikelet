@@ -133,7 +133,7 @@ claude \
   --mcp-config examples/one-file-search/web/public/veyra.mcp.json
 ```
 
-All three packs derive from the same small synthetic Station Veyra corpus, with controlled differences in the Tovash evidence. Ask where the Tovash project is housed: the full pack supports Chamber 17, the modified pack supports Chamber 43, and the ablated pack should abstain.
+All three packs derive from the same small synthetic Station Veyra corpus, with controlled differences in the Tovash evidence. Ask where the Tovash project is housed: the full pack supports Chamber 17, the modified pack supports Chamber 43, and the ablated pack should not support any chamber.
 
 ---
 
@@ -153,7 +153,7 @@ A layer records its parent's identity, and its location when the parent sits in 
 
 ## Match quality and abstention
 
-A nearest neighbour is not automatically evidence that a corpus answers a question. At build time Pikelet can fit a classifier over retrieval signals — distances, and how much of the question the top passages actually contain ([details](docs/how-a-query-runs.md#how-abstention-is-decided)). When the corpus supports a reliable classifier, results carry `matchQuality: strong | weak | none`. When calibration can't separate supported from unsupported reliably — a single novel may be semantically homogeneous enough that the fit isn't trustworthy — Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. In the library, a `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way. MCP `search` does the opposite: it returns results under `none` with a note telling the model the support is indirect, because the calibrator can misjudge a paraphrase; `showAbstained: false` withholds them.
+A nearest neighbour is not automatically evidence that a corpus covers a question. At build time Pikelet fits a classifier over retrieval signals — distances, and how much of the question the top passages actually contain — against queries the corpus does not cover ([details](docs/how-a-query-runs.md#how-abstention-is-decided)), and results carry `matchQuality: strong | weak | none`. It measures retrieval relevance: `none` means the pack does not cover the question's topic; `strong` means it does, not that a returned passage states the specific fact asked for. For that, each result lists the question's words no top passage contains (`grounding.uncovered`), and an asked-for value in that list is unsupported whatever `matchQuality` says. When calibration can't separate on-topic from off-topic queries reliably, Pikelet reports `matchQuality: unscored` and records why calibration was skipped, rather than manufacturing confidence. In the library, a `none` verdict withholds `results` by default; pass `query(text, { showAbstained: true })` to see the raw retrieval anyway — `matchQuality` and `confidence` are unaffected either way. MCP `search` does the opposite: it returns results under `none` with a note telling the model the support is indirect, because the calibrator can misjudge a paraphrase; `showAbstained: false` withholds them.
 
 `matchQuality` is evidence about retrieval support. It is **not** a guarantee that an LLM will never hallucinate.
 

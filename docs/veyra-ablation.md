@@ -38,4 +38,15 @@ node examples/one-file-search/web/public/reproduce-ablation.mjs
 
 The script reproduces `matchQuality`, confidence, and retrieved evidence for the full, ablated, and Chamber 43 packs. The paired LLM-session results — declining to confirm the removed fact, answering Chamber 43 after the mutation, and declining without Veyra mounted — were run separately and are not scripted here.
 
+## Packs compiled with 0.10 or later
+
+The published packs above were calibrated before 0.10, against on-topic questions the corpus cannot answer, and they keep that behavior: the files are immutable. From 0.10, `matchQuality` measures retrieval relevance instead (see [How abstention is decided](how-a-query-runs.md#how-abstention-is-decided)), because on hand-written questions the earlier fit withheld about half of the answerable ones. Rebuilt with 0.10 from the full and ablated Veyra corpora, the same question gives:
+
+```text
+full pack:     matchQuality: strong    grounding.uncovered: []
+ablated pack:  matchQuality: strong    grounding.uncovered: ["chamber", "housed"]
+```
+
+The ablated pack still covers the Tovash project — its supervision and clearance records are there — so it is on topic and says so. The boundary around the removed fact moves to `grounding.uncovered`: no returned passage mentions a chamber, and the MCP `search` tool tells the model that an asked-for value in that list is not established, whatever `matchQuality` says.
+
 ---
