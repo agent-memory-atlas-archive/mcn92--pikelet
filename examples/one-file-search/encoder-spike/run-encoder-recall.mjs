@@ -29,7 +29,7 @@ function encode(text) {
     const ids = tokenizer.encode(text);
     new Int32Array(M.HEAP32.buffer, idsPtr, ids.length).set(ids);
     const t0 = performance.now();
-    const rc = M._encoder_forward(blobPtr, idsPtr, ids.length, outPtr, 0);
+    const rc = M._encoder_forward(blobPtr, idsPtr, ids.length, outPtr, 0, 6, 8);
     encodeMs += performance.now() - t0;
     if (rc !== ids.length) throw new Error(`encoder_forward failed: ${rc}`);
     const hidden = new Float32Array(M.HEAPF32.buffer, outPtr, ids.length * D);

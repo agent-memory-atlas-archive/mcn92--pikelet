@@ -1321,6 +1321,153 @@ console.log('inline encoder: a pack cannot declare an out-of-range maxTokens');
 }
 
 // ---------------------------------------------------------------------------
+// Layer count in the inline-encoder declaration
+// ---------------------------------------------------------------------------
+console.log('inline encoder: the declared layer count is bounded by the kernel');
+{
+    const { parseInlineTransformerEncoder, createInlineTransformerEmbedder, KERNEL_LAYOUT, KERNEL_MAX_LAYERS,
+        expectedBlobBytes } = await import('../packages/pikelet-wasm/complete/inline-transformer.mjs');
+    const { default: createEncoderModule } =
+        await import('../packages/pikelet-wasm/complete/encoder-kernels/encoder.node.mjs');
+
+    // The kernel takes the layer count per call and holds MAXL layers; the
+    // host is what keeps a declaration inside that and the blob consistent
+    // with it.
+    const vocabText = '[PAD]\n[UNK]\n[CLS]\n[SEP]\nhello\n';
+    const pack = (L, blobLayers = L) => {
+        const blob = new Uint8Array(expectedBlobBytes({ ...KERNEL_LAYOUT, L: blobLayers }));
+        const decl = { dim: KERNEL_LAYOUT.D, layout: { ...KERNEL_LAYOUT, L }, pooling: 'mean' };
+        const declBytes = new TextEncoder().encode(JSON.stringify(decl));
+        const vocabBytes = new TextEncoder().encode(vocabText);
+        const out = new Uint8Array(12 + declBytes.length + vocabBytes.length + blob.length);
+        const view = new DataView(out.buffer);
+        view.setUint32(0, declBytes.length, true);
+        view.setUint32(4, vocabBytes.length, true);
+        view.setUint32(8, blob.length, true);
+        out.set(declBytes, 12);
+        out.set(vocabBytes, 12 + declBytes.length);
+        out.set(blob, 12 + declBytes.length + vocabBytes.length);
+        return out;
+    };
+
+    check('the kernel runs up to 12 layers', KERNEL_MAX_LAYERS === 12);
+    for (const good of [1, 6, 12]) {
+        let ok = true;
+        let detail = '';
+        try {
+            ok = parseInlineTransformerEncoder(pack(good)).declaration.layout.L === good;
+        } catch (err) { ok = false; detail = String(err && err.message).slice(0, 120); }
+        check(`layout L=${good} parses`, ok, detail);
+    }
+    // Shapes that dodge an integer check, and counts past the kernel's
+    // Layout struct. The blob is sized for 1 layer so that an unbounded L
+    // never sizes an allocation here.
+    for (const bad of [0, 13, -1, 6.5, '6', null, 1e9]) {
+        await rejects(`layout L=${JSON.stringify(bad)} is refused at parse`,
+            async () => parseInlineTransformerEncoder(pack(bad, 1)), /layout L=/);
+    }
+    await rejects('a 6-layer blob declared as 12 layers is refused at parse',
+        async () => parseInlineTransformerEncoder(pack(12, 6)), /blob is \d+ bytes/);
+
+    // createInlineTransformerEmbedder() is also called without the parser
+    // (the BEIR ladder), so it checks the blob against the layer count too.
+    const sixLayerBlob = new Uint8Array(expectedBlobBytes(KERNEL_LAYOUT));
+    await rejects('the embedder refuses a blob that does not match the declared layers',
+        () => createInlineTransformerEmbedder({
+            declaration: { dim: KERNEL_LAYOUT.D, layout: { ...KERNEL_LAYOUT, L: 12 } },
+            vocabText, blob: sixLayerBlob, createEncoder: createEncoderModule, verify: false,
+        }), /12 layers of u8 weights imply/);
+    await rejects('the embedder refuses an out-of-range layer count',
+        () => createInlineTransformerEmbedder({
+            declaration: { dim: KERNEL_LAYOUT.D, layout: { ...KERNEL_LAYOUT, L: 13 } },
+            vocabText, blob: sixLayerBlob, createEncoder: createEncoderModule, verify: false,
+        }), /layout L=13/);
+
+    // The kernel's own guards, for any caller that skips the host checks.
+    // Blob pointer 0: both checks run before any weight is read.
+    const EM = await createEncoderModule();
+    const idsPtr = EM._malloc(4 * 4);
+    new Int32Array(EM.HEAP32.buffer, idsPtr, 4).set([2, 4, 4, 3]);
+    const outPtr = EM._malloc(4 * KERNEL_LAYOUT.D * 4);
+    for (const layers of [0, -1, 13]) {
+        check(`the kernel returns -3 for ${layers} layers`, EM._encoder_forward(0, idsPtr, 4, outPtr, 0, layers, 8) === -3);
+    }
+    for (const bits of [0, 2, 16]) {
+        check(`the kernel returns -4 for ${bits}-bit weights`, EM._encoder_forward(0, idsPtr, 4, outPtr, 0, 6, bits) === -4);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Weight format in the inline-encoder declaration
+// ---------------------------------------------------------------------------
+console.log('inline encoder: the declared weight format is one the kernel runs');
+{
+    const { parseInlineTransformerEncoder, createInlineTransformerEmbedder, KERNEL_LAYOUT, expectedBlobBytes } =
+        await import('../packages/pikelet-wasm/complete/inline-transformer.mjs');
+    const { default: createEncoderModule } =
+        await import('../packages/pikelet-wasm/complete/encoder-kernels/encoder.node.mjs');
+
+    const vocabText = '[PAD]\n[UNK]\n[CLS]\n[SEP]\nhello\n';
+    const pack = (layoutFields, blobLayout = { ...KERNEL_LAYOUT, ...layoutFields }) => {
+        const blob = new Uint8Array(expectedBlobBytes(blobLayout));
+        const layout = { ...KERNEL_LAYOUT, ...layoutFields };
+        for (const key of Object.keys(layout)) if (layout[key] === undefined) delete layout[key];
+        const decl = { dim: KERNEL_LAYOUT.D, layout, pooling: 'mean' };
+        const declBytes = new TextEncoder().encode(JSON.stringify(decl));
+        const vocabBytes = new TextEncoder().encode(vocabText);
+        const out = new Uint8Array(12 + declBytes.length + vocabBytes.length + blob.length);
+        const view = new DataView(out.buffer);
+        view.setUint32(0, declBytes.length, true);
+        view.setUint32(4, vocabBytes.length, true);
+        view.setUint32(8, blob.length, true);
+        out.set(declBytes, 12);
+        out.set(vocabBytes, 12 + declBytes.length);
+        out.set(blob, 12 + declBytes.length + vocabBytes.length);
+        return out;
+    };
+
+    // u4 halves the weight bytes; the per-block scales and offsets double
+    // with the halved block size.
+    const u8Bytes = expectedBlobBytes(KERNEL_LAYOUT);
+    const u4Bytes = expectedBlobBytes({ ...KERNEL_LAYOUT, Q: 4, B: 32 });
+    check('a u4 blob is weights/2 plus twice the block parameters of u8',
+        u8Bytes === 25474368 && u4Bytes === 17023872, `${u8Bytes} ${u4Bytes}`);
+    check('Q absent and Q=8 size the blob identically',
+        expectedBlobBytes({ ...KERNEL_LAYOUT, Q: 8 }) === u8Bytes);
+
+    for (const [label, fields] of [['Q absent, B=64', {}], ['Q=8, B=64', { Q: 8 }], ['Q=4, B=32', { Q: 4, B: 32 }],
+        ['Q=4, B=32, L=12', { Q: 4, B: 32, L: 12 }]]) {
+        let ok = true;
+        let detail = '';
+        try { parseInlineTransformerEncoder(pack(fields)); } catch (err) { ok = false; detail = String(err && err.message).slice(0, 120); }
+        check(`layout ${label} parses`, ok, detail);
+    }
+    // Formats the kernel has no path for, a block size that does not match
+    // the format, and shapes that dodge a numeric check. The blob is sized
+    // as u8 so a bad Q never sizes an allocation here.
+    for (const [label, fields] of [['Q=4, B=64', { Q: 4 }], ['Q=8, B=32', { Q: 8, B: 32 }], ['Q absent, B=32', { B: 32 }],
+        ['Q=2, B=32', { Q: 2, B: 32 }], ['Q=16, B=64', { Q: 16 }], ['Q="4", B=32', { Q: '4', B: 32 }],
+        ['Q=null, B=64', { Q: null }], ['Q=4.5, B=32', { Q: 4.5, B: 32 }]]) {
+        await rejects(`layout ${label} is refused at parse`,
+            async () => parseInlineTransformerEncoder(pack(fields, KERNEL_LAYOUT)), /layout Q=/);
+    }
+    await rejects('a u8 blob declared as u4 is refused at parse',
+        async () => parseInlineTransformerEncoder(pack({ Q: 4, B: 32 }, KERNEL_LAYOUT)), /blob is \d+ bytes/);
+
+    const u8Blob = new Uint8Array(u8Bytes);
+    await rejects('the embedder refuses a u8 blob declared as u4',
+        () => createInlineTransformerEmbedder({
+            declaration: { dim: KERNEL_LAYOUT.D, layout: { ...KERNEL_LAYOUT, Q: 4, B: 32 } },
+            vocabText, blob: u8Blob, createEncoder: createEncoderModule, verify: false,
+        }), /6 layers of u4 weights imply/);
+    await rejects('the embedder refuses a format the kernel has no path for',
+        () => createInlineTransformerEmbedder({
+            declaration: { dim: KERNEL_LAYOUT.D, layout: { ...KERNEL_LAYOUT, Q: 2, B: 32 } },
+            vocabText, blob: u8Blob, createEncoder: createEncoderModule, verify: false,
+        }), /layout Q=2/);
+}
+
+// ---------------------------------------------------------------------------
 // Producer hints a pack can use to inflate per-query work
 // ---------------------------------------------------------------------------
 

@@ -297,6 +297,8 @@ export declare function verifyHostEncoder(
 
 /** Kernel layout compiled into the kind-3 encoder (mirrors encoder.cpp). */
 export declare const KERNEL_LAYOUT: Record<'V' | 'P' | 'T' | 'D' | 'F' | 'L' | 'B' | 'H', number>;
+/** Largest layer count (layout L) the kind-3 kernel runs; L may be 1 to this. */
+export declare const KERNEL_MAX_LAYERS: number;
 export declare function expectedBlobBytes(layout?: Record<string, number>): number;
 export declare function parseInlineTransformerEncoder(encoderBytes: Uint8Array): {
   declaration: Record<string, unknown>;

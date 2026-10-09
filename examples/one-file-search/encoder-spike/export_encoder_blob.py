@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Export the full MiniLM-L6 as the inline-encoder weight blob (v0 draft of
-the kind-3 segment layout) plus per-stage torch references for kernel parity.
+"""Export a MiniLM-shaped encoder (MiniLM-L6 by default) as the inline-encoder
+weight blob (the kind-3 segment layout) plus per-stage torch references for
+kernel parity.
 
 Blob layout — plain concatenation, every tensor byte-size is a multiple of
 16, offsets are running sums that encoder.cpp recomputes with the same
-arithmetic (V=30522 P=512 T=2 D=384 F=1536 L=6 B=64; u8 matrices are
-block-64 affine along the last dim, scales/offsets f32 per block; biases
-and LayerNorm params are f32):
+arithmetic (V=30522 P=512 T=2 D=384 F=1536, and L layers, 1 to 12;
+matrices are block-affine along the last dim, u8 in blocks of 64 or, with
+--bits 4, u4 in blocks of 32, with f32 scales/offsets per block; biases and
+LayerNorm params are f32). A u4 block's 16 bytes hold weight j in the low
+nibble of byte j and weight j+16 in the high nibble:
 
   word_q, word_s, word_o,
   pos_q, pos_s, pos_o,
   type_q, type_s, type_o,
   embln_g, embln_b,
-  then per layer 0..5:
+  then per layer 0..L-1:
     wq_q,wq_s,wq_o,bq,  wk_q,wk_s,wk_o,bk,  wv_q,wv_s,wv_o,bv,
     wo_q,wo_s,wo_o,bo,  ln1_g,ln1_b,
     wu_q,wu_s,wu_o,bu,  wd_q,wd_s,wd_o,bd,  ln2_g,ln2_b
@@ -33,26 +36,35 @@ from transformers import AutoModel, AutoTokenizer
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2",
                      help="HF model id. Must match the kernel's compiled-in shape "
-                          "(encoder.cpp constexpr V,P,T,D,F,L,B,H) exactly.")
+                          "(encoder.cpp constexpr V,P,T,D,F,B,H) exactly; the layer "
+                          "count may be anything from 1 to MAXL (12).")
 parser.add_argument("--pooling", choices=["mean", "cls"], default="mean",
                      help="mean: average every token's final hidden state (MiniLM's "
                           "native pooling). cls: use the [CLS] token's hidden state "
                           "(e.g. Snowflake arctic-embed models). Must match "
                           "inline-transformer.mjs's embed() pooling exactly, or the "
                           "reference vectors won't match what the reader produces.")
+parser.add_argument("--bits", type=int, choices=[8, 4], default=8,
+                     help="Weight bits: 8 (u8, blocks of 64) or 4 (u4, blocks of 32), "
+                          "for every matrix including the embedding tables.")
+parser.add_argument("--out", default=None,
+                     help="Output directory for the blob and references (default: real/).")
 args = parser.parse_args()
 
 HERE = Path(__file__).resolve().parent
-OUT = HERE / "real"
-OUT.mkdir(exist_ok=True)
+OUT = Path(args.out) if args.out else HERE / "real"
+OUT.mkdir(parents=True, exist_ok=True)
 MODEL = args.model
-B = 64
+BITS = args.bits
+B = 64 if BITS == 8 else 32
+LEVELS = (1 << BITS) - 1
 TEST_TEXT = "how do volcanoes form and why do they erupt"
 
 
 def quant_blocks(w: np.ndarray):
-    """Block-64 affine u8 along the last dim. Returns (q, scales, offsets)
-    and leaves w unchanged."""
+    """Block-B affine, LEVELS + 1 levels, along the last dim. Returns
+    (q, scales, offsets), q unpacked (one weight per byte), and leaves w
+    unchanged."""
     rows, cols = w.shape
     nb = cols // B
     q = np.zeros((rows, cols), dtype=np.uint8)
@@ -62,8 +74,8 @@ def quant_blocks(w: np.ndarray):
         chunk = w[:, bi * B:(bi + 1) * B]
         lo = chunk.min(axis=1)
         hi = chunk.max(axis=1)
-        scale = np.where(hi - lo <= 0, 1e-12, (hi - lo) / 255.0).astype(np.float32)
-        q[:, bi * B:(bi + 1) * B] = np.clip(np.round((chunk - lo[:, None]) / scale[:, None]), 0, 255).astype(np.uint8)
+        scale = np.where(hi - lo <= 0, 1e-12, (hi - lo) / LEVELS).astype(np.float32)
+        q[:, bi * B:(bi + 1) * B] = np.clip(np.round((chunk - lo[:, None]) / scale[:, None]), 0, LEVELS).astype(np.uint8)
         scales[:, bi] = scale
         offsets[:, bi] = lo
     return q, scales, offsets
@@ -84,16 +96,20 @@ model.eval()
 # The kernel's shape is compiled in (encoder.cpp constexpr), not read from
 # the blob or the declaration, so a mismatched model produces a blob that
 # silently corrupts every embedding rather than failing loudly. Check the
-# shape the config actually implies before spending time exporting it.
+# shape the config actually implies before spending time exporting it. The
+# layer count alone is a runtime argument (encoder.cpp MAXL = 12).
 cfg = model.config
 expected = {"vocab_size": 30522, "max_position_embeddings": 512, "type_vocab_size": 2,
-            "hidden_size": 384, "intermediate_size": 1536, "num_hidden_layers": 6,
-            "num_attention_heads": 12}
+            "hidden_size": 384, "intermediate_size": 1536, "num_attention_heads": 12}
+MAX_LAYERS = 12
 mismatches = {k: (getattr(cfg, k, None), v) for k, v in expected.items() if getattr(cfg, k, None) != v}
 if mismatches:
     lines = "\n".join(f"  {k}: model has {got}, kernel requires {want}" for k, (got, want) in mismatches.items())
     raise SystemExit(f"{MODEL} does not match the compiled-in kernel shape:\n{lines}\n"
                       f"Rebuild encoder.cpp for this shape first, or pick a model with this exact shape.")
+LAYERS = cfg.num_hidden_layers
+if not 1 <= LAYERS <= MAX_LAYERS:
+    raise SystemExit(f"{MODEL} has {LAYERS} layers; the kernel runs 1 to {MAX_LAYERS}.")
 if cfg.hidden_act != "gelu":
     raise SystemExit(f"{MODEL} uses hidden_act={cfg.hidden_act!r}; the kernel's activation is hardcoded to "
                       f"(erf) gelu. A different activation needs a kernel change, not just new weights.")
@@ -109,9 +125,17 @@ def emit(name, arr):
     blob.extend(data)
 
 
+def pack_u4(q):
+    """Two u4 weights per byte: within each 32-weight block, byte j holds
+    weight j (low nibble) and weight j+16 (high nibble)."""
+    rows, cols = q.shape
+    blocks = q.reshape(rows, cols // 32, 2, 16)
+    return (blocks[:, :, 0, :] | (blocks[:, :, 1, :] << 4)).reshape(rows, cols // 2)
+
+
 def emit_quant(name, w):
     q, s, o = quant_blocks(w)
-    emit(f"{name}_q", q)
+    emit(f"{name}_q", pack_u4(q) if BITS == 4 else q)
     emit(f"{name}_s", s)
     emit(f"{name}_o", o)
     return dequant(q, s, o)
@@ -211,8 +235,10 @@ pooled = x[0] if args.pooling == "cls" else x.mean(axis=0)
 pooled = pooled / np.linalg.norm(pooled)
 
 np.array(ids, dtype=np.int32).tofile(OUT / "ref-ids.i32")
-np.concatenate([stages["emb"][None], *[stages[f"layer{i}"][None] for i in range(6)]]).astype(np.float32).tofile(OUT / "ref-stages.f32")
+np.concatenate([stages["emb"][None], *[stages[f"layer{i}"][None] for i in range(LAYERS)]]).astype(np.float32).tofile(OUT / "ref-stages.f32")
 pooled.astype(np.float32).tofile(OUT / "ref-pooled.f32")
-(OUT / "ref-meta.json").write_text(json.dumps({"text": TEST_TEXT, "seq": seq, "ids": ids}))
+(OUT / "ref-meta.json").write_text(json.dumps({"text": TEST_TEXT, "seq": seq, "ids": ids,
+                                                "layers": LAYERS, "pooling": args.pooling,
+                                                "bits": BITS}))
 print(f"[refs] seq={seq} ids={ids}")
-print(f"[refs] wrote ref-stages.f32 (7 x {seq} x 384) + ref-pooled.f32")
+print(f"[refs] wrote ref-stages.f32 ({1 + LAYERS} x {seq} x 384) + ref-pooled.f32")

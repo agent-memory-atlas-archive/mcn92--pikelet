@@ -5,8 +5,13 @@ const decoder = new TextDecoder();
 // The wasm kernel compiles these in (encoder-spike/encoder.cpp `constexpr`
 // block) and walks the weight blob with a bare running cursor — it never
 // reads the declaration. Declaration/blob skew is therefore only catchable
-// here, host-side, before the first forward.
+// here, host-side, before the first forward. Two values are exceptions,
+// taken by the kernel per call: the layer count, any L from 1 to
+// KERNEL_MAX_LAYERS (KERNEL_LAYOUT.L is MiniLM-L6's, the default), and the
+// weight format, Q bits per weight in blocks of B — u8 in blocks of 64
+// (Q absent or 8, every pack before Q existed) or u4 in blocks of 32.
 export const KERNEL_LAYOUT = { V: 30522, P: 512, T: 2, D: 384, F: 1536, L: 6, B: 64, H: 12 };
+export const KERNEL_MAX_LAYERS = 12;
 const KERNEL_MAX_SEQ = 512;
 // Smallest window that still frames interior tokens between [CLS] and [SEP]
 // with room to make progress; see the maxTokens check in
@@ -14,17 +19,44 @@ const KERNEL_MAX_SEQ = 512;
 const MIN_DECLARED_MAX_TOKENS = 8;
 
 // Byte size the kernel's fill_layout() will consume for a given layout:
-// each quantized matrix is rows*cols u8 plus per-block f32 scales and
-// offsets; biases and layer norms are plain f32.
+// each quantized matrix is rows*cols weights of Q bits plus per-block f32
+// scales and offsets; biases and layer norms are plain f32.
 export function expectedBlobBytes(layout = KERNEL_LAYOUT) {
-  const { V, P, T, D, F, L, B } = layout;
-  const quant = (rows, cols) => rows * cols + rows * (cols / B) * 4 * 2;
+  const { V, P, T, D, F, L, B, Q = 8 } = layout;
+  const quant = (rows, cols) => (rows * cols * Q) / 8 + rows * (cols / B) * 4 * 2;
   const layer = 4 * quant(D, D) + 4 * (D * 4)   // wq,wk,wv,wo + their biases
     + 2 * (D * 4)                                // ln1 gamma/beta
     + quant(F, D) + F * 4                        // wu + bu
     + quant(D, F) + D * 4                        // wd + bd
     + 2 * (D * 4);                               // ln2 gamma/beta
   return quant(V, D) + quant(P, D) + quant(T, D) + 2 * (D * 4) + L * layer;
+}
+
+// The declared layer count, which the kernel takes per call. Its
+// Layout struct holds KERNEL_MAX_LAYERS layers (encoder.cpp MAXL), and it
+// returns -3 outside 1..MAXL rather than walking past them.
+function kernelLayers(layout) {
+  const layers = layout.L;
+  if (!Number.isInteger(layers) || layers < 1 || layers > KERNEL_MAX_LAYERS) {
+    throw new Error(`.pikelet inline-encoder declares layout L=${layers}; `
+      + `the kernel runs 1 to ${KERNEL_MAX_LAYERS} layers`);
+  }
+  return layers;
+}
+
+// The declared weight format as the kernel's bits argument. The kernel's
+// block size is fixed per format, so B must be the one Q implies.
+const KERNEL_WEIGHT_FORMATS = { 8: 64, 4: 32 };
+function kernelWeightBits(layout) {
+  // Only an absent Q means u8 (packs from before Q existed); null is not
+  // absent, and expectedBlobBytes() would size it as zero-bit weights.
+  const bits = layout.Q === undefined ? 8 : layout.Q;
+  if (!Object.hasOwn(KERNEL_WEIGHT_FORMATS, bits) || typeof bits !== 'number'
+      || layout.B !== KERNEL_WEIGHT_FORMATS[bits]) {
+    throw new Error(`.pikelet inline-encoder declares layout Q=${layout.Q} B=${layout.B}; `
+      + 'the kernel runs u8 weights in blocks of 64 (Q absent or 8) or u4 in blocks of 32 (Q=4)');
+  }
+  return bits;
 }
 
 export function parseInlineTransformerEncoder(encoderBytes) {
@@ -38,7 +70,12 @@ export function parseInlineTransformerEncoder(encoderBytes) {
   const declaration = JSON.parse(decoder.decode(encoderBytes.subarray(12, 12 + declLen)));
   const blob = encoderBytes.subarray(12 + declLen + vocabLen);
   const layout = declaration.layout || {};
+  // L, Q and B first: expectedBlobBytes() below scales with them, so they
+  // must be bounded before they size anything.
+  kernelLayers(layout);
+  kernelWeightBits(layout);
   for (const key of Object.keys(KERNEL_LAYOUT)) {
+    if (key === 'L' || key === 'B') continue;
     if (layout[key] !== KERNEL_LAYOUT[key]) {
       throw new Error(`.pikelet inline-encoder declares layout ${key}=${layout[key]}; `
         + `the compiled kernel requires ${key}=${KERNEL_LAYOUT[key]}`);
@@ -79,6 +116,16 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
   const vocabSize = vocabLines[vocabLines.length - 1] === '' ? vocabLines.length - 1 : vocabLines.length;
   if (vocabSize > KERNEL_LAYOUT.V) {
     throw new Error(`inline-encoder vocab has ${vocabSize} entries; the kernel's embedding table holds ${KERNEL_LAYOUT.V}`);
+  }
+  // Like maxTokens below, checked here too because this function is also
+  // called directly, without parseInlineTransformerEncoder(): the kernel
+  // walks the blob for exactly this many layers in this weight format.
+  const layers = kernelLayers({ L: declaration.layout?.L ?? KERNEL_LAYOUT.L });
+  const blockSize = declaration.layout?.B ?? KERNEL_LAYOUT.B;
+  const bits = kernelWeightBits({ Q: declaration.layout?.Q, B: blockSize });
+  const blobBytes = expectedBlobBytes({ ...KERNEL_LAYOUT, L: layers, Q: bits, B: blockSize });
+  if (blob.length !== blobBytes) {
+    throw new Error(`inline-encoder blob is ${blob.length} bytes but ${layers} layers of u${bits} weights imply ${blobBytes}`);
   }
   const tokenizer = createWordPiece(vocabText);
   const EM = await createEncoder();
@@ -121,7 +168,7 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
         throw new Error(`inline encoder window is ${tokenIds.length} tokens for a ${maxSeq}-token buffer`);
       }
       new Int32Array(EM.HEAP32.buffer, idsPtr, tokenIds.length).set(tokenIds);
-      const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0);
+      const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0, layers, bits);
       if (rc !== tokenIds.length) throw new Error(`inline encoder failed: ${rc}`);
       const hidden = new Float32Array(EM.HEAPF32.buffer, hiddenPtr, tokenIds.length * dim);
       if (usesClsPooling) {
@@ -181,7 +228,7 @@ export async function createInlineTransformerEmbedder({ declaration, vocabText, 
         throw new Error(`inline encoder window is ${tokenIds.length} tokens for a ${maxSeq}-token buffer`);
       }
       new Int32Array(EM.HEAP32.buffer, idsPtr, tokenIds.length).set(tokenIds);
-      const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0);
+      const rc = EM._encoder_forward(blobPtr, idsPtr, tokenIds.length, hiddenPtr, 0, layers, bits);
       if (rc !== tokenIds.length) throw new Error(`inline encoder failed: ${rc}`);
       const hidden = new Float32Array(EM.HEAPF32.buffer, hiddenPtr, tokenIds.length * dim);
       // Offset by 1: tokenIds[0] is [CLS], so idSlice's tokens start at

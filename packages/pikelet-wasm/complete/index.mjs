@@ -29,7 +29,7 @@ import { PikeletSketchArtifact } from '../src/artifact/pikelet-artifact.js';
 import { MAGIC, HEADER_BYTES, TABLE_ENTRY_BYTES, KINDS, KIND_NAMES } from './format.mjs';
 
 import {
-    KERNEL_LAYOUT, expectedBlobBytes, parseInlineTransformerEncoder,
+    KERNEL_LAYOUT, KERNEL_MAX_LAYERS, expectedBlobBytes, parseInlineTransformerEncoder,
     createInlineTransformerEmbedder, INLINE_TEST_VECTOR_TEXTS,
     buildInlineTestVectors, verifyInlineTestVectors,
     validateExpectedEmbedding, validateTestVectorTolerance,
@@ -44,7 +44,7 @@ export { openLexicalIndex } from './lexical.mjs';
 export { fuseCandidates, FUSION_DEFAULTS } from './fusion.mjs';
 import { fuseCandidates } from './fusion.mjs';
 export {
-    KERNEL_LAYOUT, expectedBlobBytes, parseInlineTransformerEncoder,
+    KERNEL_LAYOUT, KERNEL_MAX_LAYERS, expectedBlobBytes, parseInlineTransformerEncoder,
     createInlineTransformerEmbedder, INLINE_TEST_VECTOR_TEXTS,
     buildInlineTestVectors, verifyInlineTestVectors,
     validateExpectedEmbedding, validateTestVectorTolerance,
