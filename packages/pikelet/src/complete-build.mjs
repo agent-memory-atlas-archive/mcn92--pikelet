@@ -81,11 +81,13 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
         } = calibrated.summary;
         const validation = humanCalibrationQueries
           ? `${humanCalibrationQueries} human queries: AUC ${realQueryAuc ?? 'n/a'}, abstention rate ${((realQueryAbstentionRate ?? 0) * 100).toFixed(0)}%`
-          : 'no human queries (runtime.calibrationQueries) — validated by cvAucHard only';
-        log(`Calibrated abstention: ${verifiedPositiveQueries} answerable / ${ablationNegativeQueries} ablation + `
-          + `${entitySwapNegativeQueries} entity-swap + ${heldOutNegativeQueries} held-out-doc hard negatives / ${foreignNegativeQueries} off-domain / `
-          + `${syntheticGibberishQueries} gibberish / ${weakQueries} weak queries, `
-          + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs hard negatives (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
+          : 'no human queries (runtime.calibrationQueries) — validated by cross-validation only';
+        log(`Calibrated relevance: ${verifiedPositiveQueries} on-topic / ${foreignNegativeQueries} off-domain + `
+          + `${syntheticGibberishQueries} gibberish off-topic / ${weakQueries} weak queries, `
+          + `5-fold CV AUC ${cvAuc ?? 'n/a'} vs off-topic (fit AUC ${fitAuc}, in-sample), validation: ${validation}`);
+        log(`  in-domain-unanswerable diagnostic (not used in the fit): AUC ${cvAucHard ?? 'n/a'} vs `
+          + `${ablationNegativeQueries} ablation + ${entitySwapNegativeQueries} entity-swap + ${heldOutNegativeQueries} held-out-doc `
+          + 'hard negatives; matchQuality measures relevance, so "strong" does not by itself mean the passage holds the fact');
         // maxSim1 is comparison-only (see calibrate.mjs's GROUNDING_FEAT
         // design note: max(coverage1, maxSim1) has been tried twice —
         // unrescaled, then rescaled and damped — and reverted both times,
@@ -153,18 +155,21 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
     // COMPLETE_PROFILE.md section 5.4: the recall-vs-C measurements behind
     // this artifact's recommendedRerank.
     rerankSweep,
-    // Calibration quality, kept for audit after the file ships: fitAuc is
-    // in-sample and optimistic; cvAuc/cvAucHard (the same number — stage 2
-    // fits only on positives vs. paired ablation negatives, see
-    // calibrate.mjs) is the pooled 5-fold held-out AUC. realQueryAuc/
-    // realQueryAbstentionRate are the only real validation this asset can
-    // have: human-written queries (runtime.calibrationQueries), held out
-    // of the fit entirely. null when the corpus shipped none — such a
-    // pack is validated by cvAucHard alone. A pack that shipped without
+    // Calibration quality, kept for audit after the file ships. method and
+    // target say what matchQuality measures (self-templates-v6: relevance,
+    // fit against off-topic queries). fitAuc is in-sample and optimistic;
+    // cvAuc is the pooled 5-fold held-out AUC against off-topic queries
+    // (the gate); cvAucHard is the in-domain-unanswerable diagnostic,
+    // never fit or gated. realQueryAuc/realQueryAbstentionRate are the
+    // only real validation this asset can have: human-written queries
+    // (runtime.calibrationQueries), held out of the fit entirely. null
+    // when the corpus shipped none. A pack that shipped without
     // calibration (encoder.calibrationPath set, or the corpus failed the
     // fit gates) carries calibration: null here.
     ...(calibrationSummary ? {
       calibration: {
+        method: calibrationSummary.method,
+        target: calibrationSummary.target,
         fitAuc: calibrationSummary.fitAuc,
         cvAuc: calibrationSummary.cvAuc,
         cvAucHard: calibrationSummary.cvAucHard,

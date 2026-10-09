@@ -170,8 +170,8 @@ export async function compactChain(flags) {
         if (refit) {
           calibration = Buffer.from(JSON.stringify(refit.calibrationJson), 'utf8');
           const s = refit.summary || {};
-          log(`Calibration: refit over the compacted corpus — 5-fold CV AUC ${s.cvAuc ?? 'n/a'} `
-            + `(hard ${s.cvAucHard ?? 'n/a'}), bloom over live records only`);
+          log(`Calibration: refit over the compacted corpus — 5-fold CV AUC ${s.cvAuc ?? 'n/a'} vs off-topic `
+            + `(in-domain-unanswerable ${s.cvAucHard ?? 'n/a'}), bloom over live records only`);
         } else {
           log('Calibration: shipping unscored — the refit declined (the calibrator reports why '
             + 'above), and the inherited fit must never be carried across a compaction (6.3)');

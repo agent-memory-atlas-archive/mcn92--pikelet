@@ -1551,6 +1551,60 @@ console.log('inline encoder: the declared weight format is one the kernel runs')
     }
 }
 
+// ---------------------------------------------------------------------------
+// Compile-time calibration: matchQuality is retrieval relevance (v6)
+// ---------------------------------------------------------------------------
+console.log('calibration: a compiled pack scores relevance, fit against off-topic queries');
+{
+    // The calibrator fits verified on-topic probes against off-topic ones
+    // (foreign bank + gibberish); in-domain-unanswerable hard negatives are
+    // only a reported diagnostic. So an off-topic query is "none", while a
+    // question about a covered topic stays visible even when the corpus
+    // lacks its specific fact — telling those apart is the reader's job.
+    const { execFileSync } = await import('node:child_process');
+    const docs = path.join(tmp, 'calibration-docs');
+    fs.mkdirSync(docs);
+    const topics = {
+        tides: ['Tides', 'The moon pulls on the ocean, raising two bulges of water, so most coasts see two high tides and two low tides each day.', 'Spring tides happen near new and full moon, when the sun and moon line up; neap tides happen at the quarter moons.'],
+        volcanoes: ['Volcanoes', 'Magma rises through cracks in the crust, collects in a chamber, and erupts as lava, ash and gas when pressure builds.', 'Shield volcanoes have gentle slopes from runny basalt lava, while stratovolcanoes are steep and explosive.'],
+        bread: ['Bread', 'Yeast ferments the sugars in flour, releasing carbon dioxide that makes the dough rise before it is baked.', 'Kneading develops gluten, the elastic protein network that traps the gas and gives bread its chewy crumb.'],
+        bees: ['Honeybees', 'A honeybee colony has one queen that lays eggs, thousands of female workers, and male drones that mate with queens.', 'Workers perform a waggle dance to tell nestmates the direction and distance of a good patch of flowers.'],
+        glaciers: ['Glaciers', 'Glaciers form where more snow falls each winter than melts each summer, compacting over decades into dense ice.', 'Moving ice carves U-shaped valleys and leaves moraines, ridges of rock and gravel dropped at its edges.'],
+        chess: ['Chess openings', 'The Italian Game begins with king pawn moves and develops the bishop toward the vulnerable f7 square.', 'The Sicilian Defence answers the king pawn with the c-pawn, creating an unbalanced fight for the centre.'],
+        coffee: ['Coffee roasting', 'Roasting turns green coffee beans brown through the Maillard reaction and caramelization of their sugars.', 'Light roasts keep more acidity and origin flavor, while dark roasts taste more bitter and smoky.'],
+        eclipses: ['Eclipses', 'A solar eclipse happens when the moon passes between the sun and the earth and casts its shadow on the surface.', 'A lunar eclipse happens when the earth passes between the sun and the moon, often turning the moon a coppery red.'],
+    };
+    for (const [file, [title, a, b]] of Object.entries(topics)) {
+        fs.writeFileSync(path.join(docs, `${file}.md`), `# ${title}\n\n${a}\n\n${b}\n\n${a} ${b}\n`);
+    }
+    const out = path.join(tmp, 'calibrated.pikelet');
+    execFileSync(process.execPath, [path.join(ROOT, 'packages', 'pikelet', 'bin', 'pikelet.mjs'),
+        'compile', '--source', docs, '--out', out], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const pack = await openPikeletFile(out);
+    const cal = (await pack.evaluation()).calibration;
+    check('the evaluation segment records the relevance target',
+        cal?.method === 'self-templates-v6' && cal?.target === 'relevance', JSON.stringify(cal && { method: cal.method, target: cal.target }));
+    check('the cross-validated AUC against off-topic clears the gate', cal?.cvAuc >= 0.85, String(cal?.cvAuc));
+    check('the in-domain-unanswerable diagnostic is reported',
+        cal?.cvAucHard === null || (cal?.cvAucHard >= 0 && cal?.cvAucHard <= 1), String(cal?.cvAucHard));
+    const verdict = async (q) => (await pack.query(q, { k: 5, showAbstained: true })).matchQuality;
+    for (const q of ['why are there two high tides a day', 'what makes bread dough rise',
+        'how do bees tell each other where flowers are']) {
+        const v = await verdict(q);
+        check(`an on-topic question is not "none": ${q}`, v === 'strong' || v === 'weak', v);
+    }
+    // Covered topic, absent fact: relevance keeps these visible.
+    for (const q of ['how many eggs does a honeybee queen lay per day', 'what temperature should bread be baked at']) {
+        const v = await verdict(q);
+        check(`a covered topic with an absent fact stays visible: ${q}`, v === 'strong' || v === 'weak', v);
+    }
+    for (const q of ['how do I renew my passport', 'best mortgage refinance rates', 'nginx 502 bad gateway fix']) {
+        const v = await verdict(q);
+        check(`an off-topic question is "none": ${q}`, v === 'none', v);
+    }
+    await pack.close();
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nComplete-profile reader conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
