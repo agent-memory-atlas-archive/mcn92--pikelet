@@ -8,6 +8,74 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## pikelet-wasm 0.10.0 / pikelet 0.10.0 — 2026-10-09
+
+`matchQuality` changes meaning for packs compiled with this release: it
+now measures retrieval relevance — whether the pack covers the
+question's topic — instead of trying to say whether the answer is there.
+Packs already built keep their behavior, since the calibration ships
+inside each file. The inline query encoder runs about 1.65× faster in
+Node.js and Chromium and about 2.2× in WebKit with identical embeddings,
+and readers can now run 12-layer and 4-bit encoders. Both packages move
+to 0.10.0 together, and `pikelet` requires `pikelet-wasm` ^0.10.0.
+
+### Compatibility
+
+- **Newly compiled packs score relevance.** `none` means the pack does
+  not cover the question's topic; a question about a covered topic whose
+  specific fact the pack lacks now comes back `strong` or `weak` instead
+  of `none`. Do not read `strong` as "answered": an asked-for value in a
+  result's `grounding.uncovered` is one no passage states. On the
+  repository's labeled questions, answerable questions called `none`
+  went from 12 of 44 to 0 (docs) and 26 of 50 to 0 (Veyra registry).
+  Rebuild a pack to pick this up; packs compiled by 0.9.x keep their
+  calibration.
+- **The calibration summary changes shape.** The evaluation segment's
+  `calibration` block gains `method` (`self-templates-v6`) and `target`
+  (`relevance`); `cvAuc` is now measured against off-topic queries;
+  `cvAucHard`, answerable vs. in-domain-unanswerable, is reported but no
+  longer gates the fit; `stage1FloorAuc` is gone. Corpora that shipped
+  `unscored` for lack of hard negatives or a low hard-negative AUC now
+  calibrate.
+- **MCP wording changes.** The `search` description, the note on a
+  `none` result, the server instructions and `verify_pack`'s calibration
+  note describe relevance; `verify_pack`'s calibration block gains
+  `method` and `target` (null on older packs). Tool names and result
+  shapes are unchanged.
+- **Packs that declare a layer count other than 6, or 4-bit weights,
+  open only in 0.10.0 readers**; 0.9.x readers refuse them at parse. No
+  published pack declares either.
+
+### Added
+
+- **Inline encoders with 1 to 12 layers and u4 weights.** A kind-3
+  declaration may give `layout.L` from 1 to 12 and `layout.Q: 4` with
+  `layout.B: 32` (u4 weights, two per byte, an f32 scale and offset per
+  block of 32); `Q` absent means u8 in blocks of 64, as before. Exported
+  as `KERNEL_MAX_LAYERS`. The parser and the embedder check the layer
+  count, the format and the blob length before the kernel runs. A u4
+  BGE-small-en-v1.5 blob is 23.9 MiB against MiniLM's 24.3 and matches
+  PyTorch at cosine 0.985 (1.000 against the same weights fake-quantized).
+  `compile` has no flag for these layouts yet.
+
+### Changed
+
+- **The inline encoder runs its projections over tiles of four tokens**
+  instead of one token at a time, so each layer's weights stream through
+  memory once per tile. Median query encoding, before → after: about
+  23 → 14 ms for a 10-word question and 213 → 125 ms for 100 words in
+  Chromium; 32 → 14 and 285 → 134 ms in WebKit. Embeddings are
+  bit-identical, so existing packs and their verification vectors are
+  unaffected.
+- **Calibration** (`compile`, `compact` refits) fits verified on-topic
+  probes against off-topic ones — the built-in foreign bank, minus
+  entries the corpus turns out to cover, plus gibberish — and places
+  `none` at the 95th percentile of the off-topic scores. The
+  in-domain-unanswerable probe classes are still generated, for the
+  `cvAucHard` diagnostic only.
+- **Documentation** (both READMEs, `docs/how-a-query-runs.md`,
+  `docs/veyra-ablation.md`) describes `matchQuality` as relevance.
+
 ## pikelet-wasm 0.9.3 / pikelet 0.9.3 — 2026-10-06
 
 Hardening for readers that mount packs from other publishers or hosts:
