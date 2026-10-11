@@ -388,8 +388,12 @@ a partial success. u64 fields above `2^53 - 1` are rejected.
    section 3). The manifest MAY carry fetch hints (`recommendedRerank`,
    `recommendedGap`) that readers SHOULD apply when the caller does not
    override: a producer that laid rows out in cluster order chooses the
-   coalescing gap that matches its cluster geometry, and a reader using an
-   unmatched gap forfeits the layout's request savings. When the artifact
+   coalescing gap that matches its cluster geometry, and a reader using a
+   narrower gap forfeits the layout's request savings. `recommendedGap` is
+   a floor: a reader MAY coalesce at a wider gap (the reference reader uses
+   its source's preferred gap when that is wider, 256 KiB over HTTP), since
+   a wider gap merges a superset of the same runs and trades bytes for
+   requests. When the artifact
    carries a lexical segment (3.8), the BM25
    top matches join the rerank as extra candidates — scored by true vector
    distance like any candidate, which is what recovers a known-item lookup

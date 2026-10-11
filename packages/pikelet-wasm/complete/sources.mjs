@@ -102,7 +102,12 @@ export function httpRangeSource(url, options = {}) {
         url,
         size: undefined,
         preferredParallelism: options.preferredParallelism ?? 32,
-        preferredGapBytes: options.preferredGapBytes ?? 16 * 1024,
+        // Rows closer than this are fetched in one request, reading the
+        // bytes between them. Over HTTP a round trip costs far more than
+        // the bytes: on the 648.5 MB wiki pack in Chromium, 256 KiB took
+        // 61 -> 38 requests and about 2.8 -> 2.2 s per query against 16 KiB,
+        // at 0.9 -> 2.3 MiB transferred.
+        preferredGapBytes: options.preferredGapBytes ?? 256 * 1024,
 
         async init() {
             await resolveTarget();

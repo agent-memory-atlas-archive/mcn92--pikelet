@@ -41,6 +41,11 @@ export interface HttpRangeSource extends CompleteRangeSource {
 
 export declare function httpRangeSource(url: string, options?: {
   preferredParallelism?: number;
+  /**
+   * Rows of the vector rerank closer than this many bytes are fetched in
+   * one request, reading the bytes between them. Default 256 KiB. A pack's
+   * manifest recommendedGap applies only when it is wider.
+   */
   preferredGapBytes?: number;
   /** Cap on the one-time full download when a host ignores Range, enforced on received bytes. Default 64 MiB. */
   maxFullFallbackBytes?: number;

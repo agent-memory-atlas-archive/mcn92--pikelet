@@ -1552,6 +1552,44 @@ console.log('inline encoder: the declared weight format is one the kernel runs')
 }
 
 // ---------------------------------------------------------------------------
+// Rerank coalescing gap: the manifest hint is a floor, the source may widen it
+// ---------------------------------------------------------------------------
+console.log('rerank gap: a manifest recommendedGap is a floor under the source\'s own gap');
+{
+    const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
+    check('httpRangeSource coalesces rows within 256 KiB by default',
+        httpRangeSource('https://example.invalid/x.pikelet').preferredGapBytes === 256 * 1024);
+    check('an explicit preferredGapBytes still wins',
+        httpRangeSource('https://example.invalid/x.pikelet', { preferredGapBytes: 4096 }).preferredGapBytes === 4096);
+
+    // Reads one query costs, on a pack whose manifest hints `hint` (or none),
+    // over a source that prefers `prefer`. A fresh open per measurement, so
+    // no row is cached.
+    const readsFor = async ({ hint, prefer, gap }) => {
+        const pack = buildSynthetic({
+            name: `gap-${hint}-${prefer}-${gap}`,
+            manifestPatch: hint === undefined ? null : (m) => { m.recommendedGap = hint; },
+        });
+        const src = { ...memorySource(pack.bytes), preferredGapBytes: prefer };
+        const search = await openPikeletFile(src, { encodeQuery: hostEncode });
+        const before = src.reads;
+        await search.query('rec 150', { k: 5, rerank: 40, ...(gap === undefined ? {} : { gap }) });
+        const reads = src.reads - before;
+        await search.close();
+        return reads;
+    };
+    const tight = await readsFor({ hint: 0, prefer: 0 });
+    const wide = await readsFor({ hint: 1 << 20, prefer: 1 << 20 });
+    check('a wide gap costs fewer reads than none on this pack (the probe can tell them apart)', wide < tight, `${wide} vs ${tight}`);
+    check('a source preferring a wider gap than the hint keeps its own',
+        await readsFor({ hint: 0, prefer: 1 << 20 }) === wide);
+    check('a hint wider than the source preference still applies',
+        await readsFor({ hint: 1 << 20, prefer: 0 }) === wide);
+    check('without a hint the source preference applies', await readsFor({ hint: undefined, prefer: 1 << 20 }) === wide);
+    check('an explicit query gap overrides both', await readsFor({ hint: 1 << 20, prefer: 1 << 20, gap: 0 }) === tight);
+}
+
+// ---------------------------------------------------------------------------
 // Compile-time calibration: matchQuality is retrieval relevance (v6)
 // ---------------------------------------------------------------------------
 console.log('calibration: a compiled pack scores relevance, fit against off-topic queries');

@@ -1370,12 +1370,17 @@ export async function openPikeletFile(input, options = {}) {
                         parallelism: queryOptions.parallelism ?? queryOptions.rerankParallelism ?? options.rerankParallelism,
                         // The identity-verified manifest may carry a fetch
                         // hint: cluster-ordered layouts only coalesce at a
-                        // gap matched to their cluster geometry (the wiki
-                        // pack's k-means layout needs ~16 KiB; the default
-                        // 2 KiB squanders it — measured 440 vs 200
-                        // requests/query at C=600).
+                        // gap at least matched to their cluster geometry
+                        // (the wiki pack's k-means layout needs ~16 KiB; a
+                        // 2 KiB gap squanders it — measured 440 vs 200
+                        // requests/query at C=600). The hint is a floor: a
+                        // wider gap merges a superset of the same runs, so
+                        // a source that prefers more (HTTP's 256 KiB) keeps
+                        // its own.
                         gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap
-                            ?? (Number.isFinite(manifest.recommendedGap) ? manifest.recommendedGap : undefined),
+                            ?? (Number.isFinite(manifest.recommendedGap)
+                                ? Math.max(manifest.recommendedGap, Number(source.preferredGapBytes) || 0)
+                                : undefined),
                         maxRangeBytes: queryOptions.maxRangeBytes ?? options.rerankMaxRangeBytes,
                         // Present once background staging finished; the
                         // sketch reader ignores it for any query whose C
