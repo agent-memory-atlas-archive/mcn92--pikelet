@@ -80,15 +80,58 @@ export async function openLexicalIndexLazy(read, segLength) {
     const doclenOf = (id) => doclenView.getUint32(4 * id, true);
 
     const WINDOW = 512;
-    const windowCache = new Map(); // startIdx -> entry bytes (small LRU)
-    async function readWindow(startIdx, count) {
+    // Both caches hold the pending read, not its result, so concurrent
+    // lookups of one window (two query terms whose hashes land in it) or one
+    // postings list share a single read; a failed read is evicted so the
+    // next query retries rather than re-throwing a cached rejection.
+    const windowCache = new Map(); // `${startIdx}:${count}` -> Promise<entry bytes> (small LRU)
+    function readWindow(startIdx, count) {
         const key = `${startIdx}:${count}`;
         const hit = windowCache.get(key);
-        if (hit) return hit;
-        const bytes = await read(termTableOffset + 24 * startIdx, 24 * count);
+        if (hit) {
+            windowCache.delete(key);
+            windowCache.set(key, hit);
+            return hit;
+        }
+        const pending = read(termTableOffset + 24 * startIdx, 24 * count);
         if (windowCache.size >= 64) windowCache.delete(windowCache.keys().next().value);
-        windowCache.set(key, bytes);
-        return bytes;
+        windowCache.set(key, pending);
+        pending.catch(() => { if (windowCache.get(key) === pending) windowCache.delete(key); });
+        return pending;
+    }
+    // Postings, LRU by bytes: a repeated or overlapping query re-reads only
+    // the terms it has not seen. A list larger than POSTINGS_CACHE_MAX_ENTRY
+    // (a very common term) is read every time rather than evicting
+    // everything else.
+    const POSTINGS_CACHE_BYTES = 4 * 1024 * 1024;
+    const POSTINGS_CACHE_MAX_ENTRY = 1024 * 1024;
+    const postingsCache = new Map(); // postingsRel -> { pending, bytes }
+    let postingsCachedBytes = 0;
+    function readPostings(rel, len) {
+        const hit = postingsCache.get(rel);
+        if (hit && hit.bytes === len) {
+            postingsCache.delete(rel);
+            postingsCache.set(rel, hit);
+            return hit.pending;
+        }
+        const pending = read(postingsOffset + rel, len);
+        if (len > POSTINGS_CACHE_MAX_ENTRY) return pending;
+        const entry = { pending, bytes: len };
+        if (hit) postingsCachedBytes -= hit.bytes;
+        postingsCache.set(rel, entry);
+        postingsCachedBytes += len;
+        while (postingsCachedBytes > POSTINGS_CACHE_BYTES && postingsCache.size > 1) {
+            const [oldRel, old] = postingsCache.entries().next().value;
+            postingsCache.delete(oldRel);
+            postingsCachedBytes -= old.bytes;
+        }
+        pending.catch(() => {
+            if (postingsCache.get(rel) === entry) {
+                postingsCache.delete(rel);
+                postingsCachedBytes -= len;
+            }
+        });
+        return pending;
     }
     const entryAt = (bytes, i) => {
         const view = new DataView(bytes.buffer, bytes.byteOffset + 24 * i, 24);
@@ -195,7 +238,7 @@ export async function openLexicalIndexLazy(read, segLength) {
                     throw new Error('.pikelet lexical postings out of bounds');
                 }
             }
-            const postings = await Promise.all(found.map((e) => read(postingsOffset + e.postingsRel, e.postingsLen)));
+            const postings = await Promise.all(found.map((e) => readPostings(e.postingsRel, e.postingsLen)));
             const scores = new Map();
             found.forEach((e, i) => {
                 const bytes = postings[i];

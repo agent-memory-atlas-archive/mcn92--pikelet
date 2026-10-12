@@ -1592,6 +1592,49 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
             await readsFor({ prefer: 1 << 20, queryOptions: { maxRangeBytes: 1 } }) > wide);
     }
 
+    // The lazy lexical reader shares pending reads and caches postings: an
+    // identical second query re-read both postings lists, and two query
+    // terms in one uncached term-table window read it twice.
+    {
+        const { openLexicalIndexLazy } = await import('../packages/pikelet-wasm/complete/lexical.mjs');
+        const texts = Array.from({ length: 40 }, (_, i) => `alpha bravo item${i} ${i % 2 ? 'charlie' : 'delta'}`);
+        const built = buildLexSeg(texts);
+        const seg = built.bytes ?? built;
+        const log = [];
+        const read = async (offset, length) => { log.push([offset, length]); return seg.subarray(offset, offset + length); };
+        const lex = await openLexicalIndexLazy(read, seg.length);
+        log.length = 0;
+        const first = await lex.search('alpha bravo charlie', 5);
+        const firstReads = log.length;
+        log.length = 0;
+        const second = await lex.search('alpha bravo charlie', 5);
+        check('a repeated lazy lexical query reads nothing again', log.length === 0, `${log.length} reads (first query ${firstReads})`);
+        check('the cached query scores identically',
+            JSON.stringify(first) === JSON.stringify(second));
+        // Fresh index: three terms whose entries share the one term-table
+        // window must cost one window read, not three.
+        const lex2 = await openLexicalIndexLazy(read, seg.length);
+        log.length = 0;
+        await lex2.search('alpha bravo charlie', 5);
+        const v = new DataView(seg.buffer, seg.byteOffset, seg.byteLength);
+        const termTableOffset = v.getUint32(24, true);
+        const postingsOffset = v.getUint32(28, true);
+        const windowReads = log.filter(([o]) => o >= termTableOffset && o < postingsOffset).length;
+        check('concurrent terms share one pending term-table window read', windowReads === 1, `${windowReads} window reads`);
+        // A failed read is not cached: the next query retries it.
+        let fail = true;
+        const flaky = async (offset, length) => {
+            if (fail && offset >= postingsOffset) throw new Error('transient');
+            return seg.subarray(offset, offset + length);
+        };
+        const lex3 = await openLexicalIndexLazy(flaky, seg.length);
+        let threw = false;
+        try { await lex3.search('alpha', 5); } catch { threw = true; }
+        fail = false;
+        const retried = await lex3.search('alpha', 5);
+        check('a failed postings read is retried, not cached', threw && retried.length > 0);
+    }
+
     // 5.3/5.4: the tombstone mask must reach the lexical index BEFORE its cap,
     // and the chain-global stats must actually drive scoring. Both were
     // computed and then dropped: hits were capped at 24 per tier and filtered
