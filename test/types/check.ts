@@ -24,7 +24,7 @@ import type {
 } from 'pikelet-wasm';
 
 import { fuseCandidates, FUSION_DEFAULTS } from 'pikelet-wasm/complete';
-import type { FusionOptions } from 'pikelet-wasm/complete';
+import type { FusionOptions, CompleteQueryResult } from 'pikelet-wasm/complete';
 
 // The entrypoints provide PikeletError / PIKELET_ERROR_CODES as named runtime
 // exports, but NOT the artifact classes — those are properties of the API
@@ -132,6 +132,19 @@ async function artifactSubpath(): Promise<void> {
   scanner.dispose();
   await sketch.close();
 }
+
+// A query result carries grounding when a calibrator scored it: the fact
+// check the relevance verdict leaves to the reader.
+function completeQueryResult(out: CompleteQueryResult): string[] {
+  const missing: string[] = out.grounding?.uncovered ?? [];
+  const recordId: number | null | undefined = out.grounding?.recordId;
+  void recordId;
+  // @ts-expect-error grounding is optional: absent on 'unscored'
+  const required: string[] = out.grounding.uncovered;
+  void required;
+  return missing;
+}
+void completeQueryResult;
 
 void nodeSurface;
 void webSurface;
