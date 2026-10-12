@@ -8,6 +8,45 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## pikelet-wasm 0.10.1 / pikelet 0.10.1 — 2026-10-11
+
+Layered packs now serve the same grounding and fetch tuning as single
+files, HTTP readers make fewer, larger range requests, and lazily read
+keyword indexes cache what they read. Upgrade if you serve layered packs
+over `pikelet mcp`: under 0.10.0 they returned no `grounding`, the fact
+check a relevance verdict leaves to the reader. Both packages move to
+0.10.1 together, and `pikelet` requires `pikelet-wasm` ^0.10.1.
+
+### Compatibility
+
+- **HTTP range sources coalesce rerank rows within 256 KiB by default**
+  (was 16 KiB), and a pack's `recommendedGap` is a floor under the
+  source's own gap rather than a replacement for it. On the 456,153-record
+  Wikipedia pack a query makes about 38 range requests instead of 61 and
+  transfers about 2.3 MiB instead of 0.9 MiB; results are unchanged. Pass
+  `preferredGapBytes` to `httpRangeSource`, or `gap` to `query()`, to
+  choose otherwise.
+
+### Fixed
+
+- **A layered pack returns `grounding`.** The chain reader kept only the
+  inherited scorer's verdict and confidence, so `grounding.covered` and
+  `grounding.uncovered` were missing from chain queries and from MCP
+  `search` sections as soon as a pack gained a layer. `recordId` is the
+  chain-global id of the passage the coverage was taken from.
+- **A layered pack honors fetch tuning.** `gap`, `parallelism` and
+  `maxRangeBytes` (and the mount-level `rerankGap`, `rerankParallelism`
+  and `rerankMaxRangeBytes`) did not reach the tiers, and a tier's
+  manifest `recommendedGap` never applied. Each tier now fetches as its
+  own file would.
+- **Lazily read keyword indexes cache postings and share reads.** A
+  repeated query re-read every postings list, and query terms whose
+  entries share an uncached term-table window each read it. Postings are
+  now cached (4 MiB, by bytes), pending reads are shared, and a failed
+  read is retried by the next query rather than cached.
+- **`CompleteQueryResult` declares `grounding`** in the TypeScript
+  types; `query()` already returned it.
+
 ## pikelet-wasm 0.10.0 / pikelet 0.10.0 — 2026-10-09
 
 `matchQuality` changes meaning for packs compiled with this release: it
