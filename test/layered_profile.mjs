@@ -1496,6 +1496,102 @@ console.log('chain calibration: inherited and drift-exceeded with a real fit');
         await mc.close();
     }
 
+    // A chain returns the base scorer's grounding, as a single file does:
+    // which passage grounded the verdict and which query words no passage
+    // contains. The chain kept only matchQuality and confidence, so a layered
+    // pack served over MCP lost grounding.uncovered, the fact check a
+    // relevance verdict leaves to the reader.
+    {
+        const ids = Array.from({ length: 100 }, (_, i) => i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const cal = {
+            kind: 'retrieval-signals-v1',
+            asset: {
+                features: ['d0'], weights: [-1], bias: 0,
+                standardize: { mean: { d0: 0.5 }, std: { d0: 0.1 } },
+                thresholds: { hard: 0.01, weak: 0.02 },
+                vocabBloom: { bits: BLOOM_BITS, hashes: ['fnv1a:0', 'fnv1a:0x9e3779b9'] },
+                coverage: { weight: 1, mean: 0.5, std: 0.2, topK: 5 },
+            },
+            vocabBloomBase64: bloomB64([1, 2, 3]),
+        };
+        const gb = assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC,
+            corpus: { ...corpus.corpus, ingest: ING }, index: {},
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, 'ground') },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify(cal))) },
+        ], path.join(calTmp, 'base-grounding.pikelet'));
+        const gl = buildLayer(gb, 5, 'grounding');
+        const gc = await openPikeletChain([gb.outPath, gl.outPath]);
+        check('the grounding chain inherits the fit', gc.info().calibrationStatus === 'inherited', gc.info().calibrationStatus);
+        const out = await gc.query(ladderVector(50), 5, { text: 'record body zeppelin', showAbstained: true });
+        const g = out.grounding;
+        check('a chain query returns grounding from the inherited scorer',
+            !!g && Array.isArray(g.uncovered) && Array.isArray(g.covered), JSON.stringify(g));
+        check('grounding names the query words no passage contains',
+            !!g && g.uncovered.includes('zeppelin') && g.covered.includes('record') && g.covered.includes('body'),
+            JSON.stringify(g));
+        check('grounding recordId is a chain-global id inside the chain',
+            !!g && Number.isSafeInteger(g.recordId) && g.recordId >= 0 && g.recordId < 105, JSON.stringify(g));
+        await gc.close();
+    }
+
+    // A chain applies the single-file reader's fetch tuning to every tier:
+    // gap, parallelism and maxRangeBytes from the query or the mount, else
+    // each tier's own default gap (its manifest hint as a floor under its
+    // source's preference). The chain forwarded rerank and masks but dropped
+    // these, so a layered pack ignored them.
+    {
+        const ids = Array.from({ length: 100 }, (_, i) => i);
+        const corpus = buildCorpusSegment(ids.map(recBytes));
+        const buildGapBase = (hint) => assemblePikeletFile({
+            profile: PROFILE_V2, dim: CDIM, metric: 'cosine', encoder: ENC,
+            corpus: { ...corpus.corpus, ingest: ING }, index: {},
+            ...(hint === undefined ? {} : { recommendedGap: hint }),
+        }, [
+            { kind: 'index', bytes: sketchFor(ids, 'gap') },
+            { kind: 'corpus', bytes: corpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify({ dim: CDIM })), Buffer.from(JSON.stringify({ kind: 'retrieval-signals-v1', asset: null, vocabBloomBase64: '' }))) },
+        ], path.join(calTmp, `base-gap-${hint ?? 'none'}.pikelet`));
+        // Reads one chain query costs over sources that prefer `prefer`, on a
+        // base hinting `hint`; a fresh mount per measurement, so nothing is
+        // cached.
+        const readsFor = async ({ hint, prefer, queryOptions = {}, mountOptions = {} }) => {
+            const base = buildGapBase(hint);
+            // No bloom: this base carries no fit, and a layer bloom needs one
+            // whose geometry it matches (4.5).
+            const layer = buildLayer(base, 5, `gap-${hint ?? 'none'}`, false);
+            let reads = 0;
+            const src = (file) => {
+                const bytes = fs.readFileSync(file);
+                return {
+                    size: bytes.length, preferredParallelism: Infinity, preferredGapBytes: prefer,
+                    async read(offset, length) { reads++; return bytes.subarray(offset, offset + length); },
+                    async close() {},
+                };
+            };
+            const chain = await openPikeletChain([src(base.outPath), src(layer.outPath)], mountOptions);
+            const before = reads;
+            await chain.query(ladderVector(50), 5, { rerank: 60, showAbstained: true, ...queryOptions });
+            const n = reads - before;
+            await chain.close();
+            return n;
+        };
+        const tight = await readsFor({ prefer: 0 });
+        const wide = await readsFor({ prefer: 1 << 20 });
+        check('on this chain a wide gap costs fewer reads than none (the probe can tell them apart)', wide < tight, `${wide} vs ${tight}`);
+        check('a chain query\'s gap reaches the tiers', await readsFor({ prefer: 0, queryOptions: { gap: 1 << 20 } }) === wide);
+        check('a mount-level rerankGap reaches the tiers', await readsFor({ prefer: 0, mountOptions: { rerankGap: 1 << 20 } }) === wide);
+        check('a tier\'s manifest recommendedGap applies as its default', await readsFor({ hint: 1 << 20, prefer: 0 }) === wide);
+        check('a query gap overrides the tier default', await readsFor({ hint: 1 << 20, prefer: 0, queryOptions: { gap: 0 } }) === tight);
+        // maxRangeBytes splits a coalesced run: one row-block per request
+        // costs more reads than the same wide gap uncapped.
+        check('a chain query\'s maxRangeBytes reaches the tiers',
+            await readsFor({ prefer: 1 << 20, queryOptions: { maxRangeBytes: 1 } }) > wide);
+    }
+
     // 5.3/5.4: the tombstone mask must reach the lexical index BEFORE its cap,
     // and the chain-global stats must actually drive scoring. Both were
     // computed and then dropped: hits were capped at 24 per tier and filtered

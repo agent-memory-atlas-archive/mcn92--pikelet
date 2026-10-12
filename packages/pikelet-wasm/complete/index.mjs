@@ -1243,6 +1243,19 @@ export async function openPikeletFile(input, options = {}) {
             if (closed) throw new Error('.pikelet reader is closed');
         };
 
+        // The rerank's default coalescing gap. The identity-verified manifest
+        // may carry a fetch hint: cluster-ordered layouts only coalesce at a
+        // gap at least matched to their cluster geometry (the wiki pack's
+        // k-means layout needs ~16 KiB; a 2 KiB gap squanders it — measured
+        // 440 vs 200 requests/query at C=600). The hint is a floor: a wider
+        // gap merges a superset of the same runs, so a source that prefers
+        // more (HTTP's 256 KiB) keeps its own. undefined leaves the sketch
+        // reader on the source's preference. A chain reads it per tier
+        // through __chainTier.
+        const rerankGapHint = Number.isFinite(manifest.recommendedGap)
+            ? Math.max(manifest.recommendedGap, Number(source.preferredGapBytes) || 0)
+            : undefined;
+
         return {
             info() {
                 return {
@@ -1368,19 +1381,7 @@ export async function openPikeletFile(input, options = {}) {
                     searched = (await sketch.search(context.vector, k, {
                         rerank: queryOptions.rerank,
                         parallelism: queryOptions.parallelism ?? queryOptions.rerankParallelism ?? options.rerankParallelism,
-                        // The identity-verified manifest may carry a fetch
-                        // hint: cluster-ordered layouts only coalesce at a
-                        // gap at least matched to their cluster geometry
-                        // (the wiki pack's k-means layout needs ~16 KiB; a
-                        // 2 KiB gap squanders it — measured 440 vs 200
-                        // requests/query at C=600). The hint is a floor: a
-                        // wider gap merges a superset of the same runs, so
-                        // a source that prefers more (HTTP's 256 KiB) keeps
-                        // its own.
-                        gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap
-                            ?? (Number.isFinite(manifest.recommendedGap)
-                                ? Math.max(manifest.recommendedGap, Number(source.preferredGapBytes) || 0)
-                                : undefined),
+                        gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap ?? rerankGapHint,
                         maxRangeBytes: queryOptions.maxRangeBytes ?? options.rerankMaxRangeBytes,
                         // Present once background staging finished; the
                         // sketch reader ignores it for any query whose C
@@ -1593,6 +1594,10 @@ export async function openPikeletFile(input, options = {}) {
                     // the kernel. A getter, not a captured value, because
                     // staging completes after open() returns.
                     get scanner() { return scanner; },
+                    // The rerank's default coalescing gap for this member
+                    // (manifest hint as a floor under the source's own), so
+                    // a chain fetches each tier's rows as this member would.
+                    rerankGap: rerankGapHint,
                     // The base's OWN encoder, for `append` (6.1): "a kind-3
                     // base carries the teacher, and append loads it from the
                     // base's own query-interp segment — no model download, no

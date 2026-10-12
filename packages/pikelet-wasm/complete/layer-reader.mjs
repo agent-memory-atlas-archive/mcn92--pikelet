@@ -465,6 +465,13 @@ export async function openPikeletChain(members, options = {}) {
                     // tier has no live deletion (maskCounts, computed at mount).
                     const out = await t.reader.sketch.search(vector, Math.min(k, t.records), {
                         rerank: queryOptions.rerank,
+                        // The single-file reader's fetch tuning, with the same
+                        // precedence: the query's own value, then the mount's,
+                        // then this tier's default gap (its manifest hint as a
+                        // floor under its source's preference).
+                        parallelism: queryOptions.parallelism ?? queryOptions.rerankParallelism ?? options.rerankParallelism,
+                        gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap ?? t.reader.rerankGap,
+                        maxRangeBytes: queryOptions.maxRangeBytes ?? options.rerankMaxRangeBytes,
                         ...(maskCounts[j] > 0 ? { exclude: masks[j] } : {}),
                         // The tier's own staged scan kernel. Read per query, not
                         // captured at mount: staging finishes in the background
@@ -528,6 +535,7 @@ export async function openPikeletChain(members, options = {}) {
                 // to prevent.
                 let matchQuality = 'unscored';
                 let confidence;
+                let grounding = null;
                 if (calibration.status === 'inherited' && base.scoreQuality) {
                     // Coverage reads the fit's passagesNeeded from the FULL
                     // fused window; top.slice(0, 3) gave it one passage at k=1.
@@ -553,6 +561,13 @@ export async function openPikeletChain(members, options = {}) {
                     if (scored && scored.match_quality) {
                         matchQuality = scored.match_quality;
                         if (Number.isFinite(scored.confidence)) confidence = scored.confidence;
+                        // Which passage grounded the verdict and which query
+                        // words no passage contains, as the single-file
+                        // reader returns it; recordId is the chain-global id
+                        // of the passage coverage scored.
+                        if (scored.grounding) {
+                            grounding = { ...scored.grounding, recordId: passageOrder[scored.grounding.passageIndex]?.id ?? null };
+                        }
                     }
                 } else if (calibration.status === 'none') {
                     matchQuality = 'unscored';
@@ -567,6 +582,7 @@ export async function openPikeletChain(members, options = {}) {
                     matchQuality,
                     ...(confidence === undefined ? {} : { confidence }),
                     results: withheld ? [] : results,
+                    ...(grounding ? { grounding } : {}),
                     identity: chainMembers[chainMembers.length - 1].identity,
                     calibration: {
                         status: calibration.status,
