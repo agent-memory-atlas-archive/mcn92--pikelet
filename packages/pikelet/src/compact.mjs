@@ -19,9 +19,13 @@ import fssync from 'node:fs';
 import path from 'node:path';
 import { CliError } from './common.mjs';
 
-const log = (line) => console.log(line);
+const defaultLog = (line) => console.log(line);
 
-export async function compactChain(flags) {
+// `options.log` replaces the console logger for programmatic callers (the
+// journal, inside an MCP server whose stdout is the protocol channel).
+// Returns what was written.
+export async function compactChain(flags, options = {}) {
+  const log = options.log ?? defaultLog;
   if (!flags.head) throw new CliError('compact requires --head <file|url>[#identity], listing the chain base-first');
   if (!flags.out) throw new CliError('compact requires --out <file>');
   const outPath = path.resolve(process.cwd(), flags.out);
@@ -255,12 +259,14 @@ export async function compactChain(flags) {
     log(`  ${(written.fileBytes / 1024 / 1024).toFixed(2)} MB, ${plan.liveRecords} records, depth 0, `
       + `identity ${written.identity}`);
     log(`  compacted from ${info.identity.slice(0, 12)}… at depth ${info.layers - 1}`);
+    return { outPath, identity: written.identity, records: plan.liveRecords };
   } finally {
     await chain.close();
   }
 }
 
 export async function rebaseLayer(flags) {
+  const log = defaultLog;
   // 6.2: recompile a layer onto a different head. The layer's BYTES are copied
   // verbatim — u8 rows, sketch, records, postings, vocabulary bloom — and
   // nothing is re-embedded; local ids do not change. What is recomputed is the

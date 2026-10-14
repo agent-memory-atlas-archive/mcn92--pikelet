@@ -16,7 +16,7 @@ import path from 'node:path';
 import { CliError, loadCompleteModules, DEFAULT_CONFIG } from './common.mjs';
 import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, ingestDeclaration, INGEST_CHUNKER } from './ingest.mjs';
 
-const log = (line) => console.log(line);
+const defaultLog = (line) => console.log(line);
 
 /**
  * @param {object} flags parsed CLI flags
@@ -74,7 +74,12 @@ export function resolveSupersedeTargets(pairs, chunks, sources) {
   });
 }
 
-export async function appendLayer(flags) {
+// `options` is for programmatic callers (the journal): `log` replaces the
+// console logger — an MCP server's stdout is its protocol channel — and
+// `chunks` supplies ready-made records instead of ingesting --source, one
+// record per chunk, unchunked. Returns what was written.
+export async function appendLayer(flags, options = {}) {
+  const log = options.log ?? defaultLog;
   if (!flags.parent) throw new CliError('append requires --parent <file|url>[#identity]');
   if (!flags.out) throw new CliError('append requires --out <file>');
   const outPath = path.resolve(process.cwd(), flags.out);
@@ -85,7 +90,9 @@ export async function appendLayer(flags) {
   const removeIds = toIdList(flags.remove, '--remove');
   const supersedePairs = toSupersedeList(flags.supersede);
   const sources = flags.source ? [].concat(flags.source) : [];
-  if (!sources.length && !removeIds.length && !supersedePairs.length) {
+  const givenChunks = Array.isArray(options.chunks) ? options.chunks : null;
+  if (givenChunks && sources.length) throw new CliError('append takes --source or ready-made chunks, not both');
+  if (!sources.length && !givenChunks?.length && !removeIds.length && !supersedePairs.length) {
     // 6.1's "a layer must do something", caught before any work: the planner
     // enforces it too, but failing here costs no mount and no embedding.
     throw new CliError('append needs at least one of --source, --remove or --supersede: a layer that introduces neither a record nor a tombstone is refused (6.1)');
@@ -149,7 +156,7 @@ export async function appendLayer(flags) {
       + `${plan0.ingestAsserted ? ', ingestion declaration asserted by the operator' : ''}`);
 
     // --- 3. Ingest and chunk under the chain's declaration (6.1 step 2) ------
-    let chunks = [];
+    let chunks = givenChunks ? [...givenChunks] : [];
     if (sources.length) {
       const docs = [];
       for (const src of sources) {
@@ -328,6 +335,10 @@ export async function appendLayer(flags) {
     log(`  calibrationDrift ${drift.drift.toFixed(4)}`
       + `${drift.exceedsLimit ? ' (drift-exceeded: the chain serves unscored)' : ''}`);
     log(`Mount the chain: openPikeletChain([base, ..., '${path.basename(outPath)}'])`);
+    return {
+      outPath, identity: written.identity, fileBytes: written.fileBytes,
+      rowBase: plan.rowBase, records: plan.records, depth: plan.depth,
+    };
   } finally {
     await chain.close();
   }
