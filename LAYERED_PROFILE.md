@@ -1600,11 +1600,12 @@ own commitments as an attack, not a hint.
   the budgets of 5.9; `fuseCandidates` and `createAbstentionScorer` are
   unchanged.
 - **CLI (`packages/pikelet`).** `append`, `rebase`, `compact`; `compile`
-  gains `--drift-limit` (writes `calibration.driftLimit`, the producer
-  envelope) and records `corpus.ingest`; `mcp` learns `lineage` entries,
-  `--no-resolve-parents` and `--drift-limit` (the reader limit); `doctor`
-  reports chain depth, drift, both limits, `ingestAsserted` and the
-  budgets a mount consumed.
+  records `corpus.ingest`; `append` takes `--reader-drift-limit` (the
+  reader limit its drift check applies); `mcp` learns `lineage` entries.
+  Parent-locator resolution and the reader drift limit are reader options
+  (`openPikeletChain`'s `resolveParents` and `readerDriftLimit`), not
+  `mcp` flags; `doctor` reports chain depth, drift, both limits,
+  `ingestAsserted` and the budgets a mount consumed.
 - **MCP.** `search` results add `layer` and the response carries the head
   `identity`; `get_record` takes an optional `identity` and adds
   `tombstoned`, `supersededBy`, `successors`, `currentSuccessor` and, on a

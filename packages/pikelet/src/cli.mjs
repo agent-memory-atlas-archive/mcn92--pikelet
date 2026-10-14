@@ -246,6 +246,26 @@ const BOOLEAN_FLAGS = new Set([
   'no-refit',
 ]);
 
+// Every flag that takes a value. An unregistered flag is refused rather than
+// guessed at: guessing that it takes a value swallowed the next argument
+// (`mcp --no-resolve-parents pack.pikelet` ate the pack path and mounted
+// nothing), and guessing boolean would silently ignore a typo.
+const VALUE_FLAGS = new Set([
+  'name', 'source', 'runtime', 'mode', 'artifact', 'out', 'license', 'model', 'epochs',
+  'include', 'exclude', 'include-url', 'exclude-url', 'max-pages',
+  'calibration', 'calibration-queries',
+  'encoder-model', 'encoder-vocab', 'encoder-weights', 'encoder-pooling',
+  'encoder-query-prefix', 'encoder-passage-prefix',
+  'student-model', 'student-vectors', 'student-abstention',
+  // mcp
+  'pack', 'shelf', 'client', 'server-name', 'journal',
+  // append / compact / rebase (LAYERED_PROFILE.md 6)
+  'parent', 'parent-locator', 'layer', 'remove', 'supersede', 'on-conflict', 'on-foreign',
+  'assert-ingest', 'reader-drift-limit', 'max-depth', 'head', 'onto', 'old-parent',
+  // journal
+  'kind', 'tag', 'limit',
+]);
+
 export function parseArgs(args) {
   const flags = {};
   // Flags that may appear more than once collect into an array. A flag that is
@@ -282,6 +302,7 @@ export function parseArgs(args) {
       flags.deploy = false;
       continue;
     }
+    if (!VALUE_FLAGS.has(name)) throw new CliError(`Unknown flag --${name}\nNext: run pikelet --help for the flags each command takes`);
     if (i + 1 >= args.length) throw new CliError(`Missing value for --${name}`);
     const value = args[++i];
     if (repeated.has(name)) {
