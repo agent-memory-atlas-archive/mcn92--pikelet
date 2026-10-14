@@ -39,6 +39,11 @@ export async function main(argv) {
     await rebaseLayer(parsed.flags);
     return;
   }
+  if (parsed.positionals[0] === 'journal') {
+    const { runJournalCommand } = await import('./journal-cli.mjs');
+    await runJournalCommand(parsed.positionals.slice(1), parsed.flags);
+    return;
+  }
   if (parsed.positionals[0] === 'mcp') {
     const { runMcpServer, loadShelf, installMcpConfig } = await import('./mcp.mjs');
     const { loadCompleteModules, CLI_VERSION } = await import('./common.mjs');
@@ -50,6 +55,7 @@ export async function main(argv) {
       const written = await installMcpConfig({
         packPaths,
         shelf: parsed.flags.shelf,
+        journal: parsed.flags.journal,
         client: parsed.flags.client || 'claude-code',
         serverName: parsed.flags['server-name'] || 'knowledge-packs',
         force: parsed.flags.force === true,
@@ -65,6 +71,7 @@ export async function main(argv) {
     const { reader } = await loadCompleteModules();
     await runMcpServer({
       packPaths,
+      journal: parsed.flags.journal ?? null,
       openPikeletFile: reader.openPikeletFile,
       httpRangeSource: reader.httpRangeSource,
       serverVersion: CLI_VERSION,
@@ -103,8 +110,11 @@ Usage:
   pikelet rebase --layer <file> --onto <base> [--onto <layer> ...] --out rebased.pikelet
                  [--old-parent <file> ...] [--on-conflict refuse|skip|keep-both]
                  [--on-foreign refuse|drop]
-  pikelet mcp --pack <file-or-url> [--pack ... | --shelf <file-or-url>]
-  pikelet mcp install --pack <file-or-url> [--client claude-code|claude-desktop]
+  pikelet mcp --pack <file-or-url> [--pack ... | --shelf <file-or-url>] [--journal <name|dir>]
+  pikelet mcp install --pack <file-or-url> [--journal <name|dir>] [--client claude-code|claude-desktop]
+  pikelet journal init <name|dir> [--force]
+  pikelet journal list <name|dir> [--kind <kind>] [--tag <tag>] [--limit <n>]
+  pikelet journal compact <name|dir>
 
 mcp serves knowledge packs over the Model Context Protocol on stdio, so an
 MCP client (Claude Code, Claude Desktop, an agent framework) can attach
@@ -117,6 +127,14 @@ either form takes '#<sha256>' to pin the manifest identity (mismatches
 refuse to serve). --shelf mounts every pack on a static packs.json listing
 (see packs/README.md). mcp install writes the MCP client config instead of
 running the server (--server-name names the entry, --force replaces it).
+
+--journal mounts a private journal the agent may write to (docs/agent-journal.md):
+write_note appends a note (handoff, decision, dead-end, measurement, summary,
+todo, preference) as an immutable layer, and latest lists notes newest first.
+Every other pack stays read-only. A bare name lives in ~/.pikelet/journals/;
+journal init creates one (unscored, one seed record), journal list prints its
+notes, journal compact folds its layers into one base (writes do this on
+their own every 8 notes).
 
 append, compact and rebase work on layered chains (LAYERED_PROFILE.md).
 append writes a small layer on top of a pack: new records from --source,
@@ -463,7 +481,7 @@ function makeConfig(options) {
 // use, digest-pinned (resolveInlineEncoderInputs in complete-build.mjs).
 const INLINE_ENCODER_DIR = fileURLToPath(new URL('./inline-encoder/', import.meta.url));
 
-async function compileArtifact(flags) {
+export async function compileArtifact(flags) {
   if (!flags.source) throw new CliError('compile requires --source <path|url>');
   const unsupported = ['mode', 'runtime', 'artifact', 'deploy', 'student-model', 'student-vectors', 'student-abstention', 'epochs', 'skip-abstention', 'model']
     .filter((name) => flags[name] !== undefined);

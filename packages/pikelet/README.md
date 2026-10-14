@@ -205,7 +205,7 @@ yourself:
 }
 ```
 
-The model gets four tools. `search` queries one pack or all of them;
+The model gets four tools (six with a journal, below). `search` queries one pack or all of them;
 results stay grouped per pack (distances are only comparable within one
 pack's encoder and corpus) and every result carries its provenance —
 pack name, the pack's immutable manifest identity (sha256), title,
@@ -239,6 +239,32 @@ mount with an explanation. Set `compile --license <SPDX-id>` on anything
 meant for redistribution — it is recorded in the pack manifest, surfaced
 by `list_packs`, and result provenance carries attribution through to
 answers.
+
+### A journal the agent can write (experimental)
+
+Every pack above is read-only to the model. A **journal** is the one
+exception: a private pack an agent appends notes to while it works —
+handoffs, decisions, dead ends, measurements — so that a different agent,
+from any vendor, can later mount it and pick up where the work stands.
+
+```bash
+npx pikelet journal init myproject          # ~/.pikelet/journals/myproject/
+npx pikelet mcp install --client claude-code --pack ./docs.pikelet --journal myproject
+npx pikelet journal list myproject          # read what the agents wrote
+```
+
+With `--journal`, the server adds two tools. `write_note(kind, title,
+text, tags?, repo?, sources?)` appends one note and returns its citation;
+the server, not the model, records the time, the client and the session.
+`latest(kind?, tag?)` lists notes newest first, for orienting at the start
+of a session. Journal notes also come back from `search` and `get_record`,
+always marked `agentWritten` and unverified.
+
+A journal lives outside your project by default and is never published
+unless you move it. It is unscored by design (no calibration), each note is
+an immutable layer, and it folds itself back into one file every 8 notes.
+See [`docs/agent-journal.md`](https://github.com/mcn92/pikelet/blob/main/docs/agent-journal.md) for the design and
+what is still to come.
 
 ## Updating a pack: `append`, `compact`, `rebase`
 

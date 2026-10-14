@@ -961,6 +961,9 @@ function publicChunk(chunk) {
     sourcePath: chunk.sourcePath,
     text: chunk.text,
     preview: chunk.text.slice(0, 220),
+    // A journal note's metadata (kind, created, authoredBy, ...), kept on the
+    // record. Document chunks carry none.
+    ...(chunk.note ? { note: chunk.note } : {}),
   };
 }
 
