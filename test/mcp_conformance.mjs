@@ -67,7 +67,7 @@ function stubPack() {
     };
 }
 
-async function withServer(fn) {
+async function withServer(fn, { packPaths = ['stub.pikelet'], openPikeletFile = async () => stubPack(), onExit = null } = {}) {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     const replies = [];
@@ -81,8 +81,8 @@ async function withServer(fn) {
         }
     });
     const done = runMcpServer({
-        packPaths: ['stub.pikelet'],
-        openPikeletFile: async () => stubPack(),
+        packPaths,
+        openPikeletFile,
         httpRangeSource: () => { throw new Error('no network in conformance'); },
         serverVersion: '0.0.0-test',
         stdin,
@@ -102,7 +102,8 @@ async function withServer(fn) {
         await fn({ send, waitFor, replies });
     } finally {
         stdin.end();
-        await done;
+        if (onExit) onExit(await done.then(() => null, (err) => err));
+        else await done;
     }
 }
 
@@ -233,6 +234,55 @@ await withServer(async ({ send, waitFor }) => {
         unscoredStrict.sections[0].matchQuality === 'unscored' && unscoredStrict.sections[0].results.length === 1
         && typeof unscoredStrict.unscoredWarning === 'string');
 });
+
+
+console.log('mount isolation');
+{
+    // One pack that cannot mount (dead shelf host, refused pin) must not take
+    // down the packs listed after it: the survivors serve, list_packs names
+    // the missing one, and the process still exits non-zero.
+    let exitErr;
+    await withServer(async ({ send, waitFor }) => {
+        const meta = { [META_VERSION]: '2026-07-28' };
+        send({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta } });
+        const list = await waitFor(1);
+        check('tools/list answers despite an earlier failed mount', Array.isArray(list.result?.tools), JSON.stringify(list.error));
+        send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { _meta: meta, name: 'search', arguments: { query: 'what is a stub' } } });
+        const call = (await waitFor(2)).result;
+        check('the pack after the failed one serves searches', call && !call.isError && call.content[0].text.includes('stub text'),
+            call?.content?.[0]?.text);
+        send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { _meta: meta, name: 'list_packs', arguments: {} } });
+        const listed = JSON.parse((await waitFor(3)).result.content[0].text);
+        check('list_packs names the unavailable pack and why',
+            listed.packs.length === 1 && listed.unavailable?.length === 1
+            && listed.unavailable[0].location === 'dead.pikelet' && /host unreachable/.test(listed.unavailable[0].error),
+            JSON.stringify(listed.unavailable));
+    }, {
+        packPaths: ['dead.pikelet', 'stub.pikelet'],
+        openPikeletFile: async (target) => {
+            if (String(target).endsWith('dead.pikelet')) throw new Error('host unreachable');
+            return stubPack();
+        },
+        onExit: (err) => { exitErr = err; },
+    });
+    check('a partial mount failure still exits non-zero', exitErr?.exitCode === 1 && /dead\.pikelet/.test(exitErr.message),
+        exitErr?.message);
+
+    // Nothing mounted: every tool call reports why, rather than an empty server.
+    let allExit;
+    await withServer(async ({ send, waitFor }) => {
+        const meta = { [META_VERSION]: '2026-07-28' };
+        send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { _meta: meta, name: 'search', arguments: { query: 'x' } } });
+        const call = (await waitFor(1)).result;
+        check('with no pack mounted, a tool call reports the mount failure',
+            call?.isError === true && /no pack mounted.*host unreachable/.test(call.content[0].text), call?.content?.[0]?.text);
+    }, {
+        packPaths: ['dead.pikelet'],
+        openPikeletFile: async () => { throw new Error('host unreachable'); },
+        onExit: (err) => { allExit = err; },
+    });
+    check('a total mount failure exits non-zero', allExit?.exitCode === 1);
+}
 
 console.log(`\nMCP protocol conformance: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

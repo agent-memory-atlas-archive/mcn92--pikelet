@@ -413,8 +413,11 @@ export async function callVerifyPack(packs, args) {
   };
 }
 
-function callListPacks(packs) {
+function callListPacks(packs, mountFailures = []) {
   return {
+    // Packs the server was asked to mount but could not: named so a model
+    // does not read a missing pack's silence as "the corpus lacks this".
+    ...(mountFailures.length ? { unavailable: mountFailures.map((f) => ({ location: f.location, error: f.error })) } : {}),
     packs: [...packs.entries()].map(([name, mounted]) => {
       const info = mounted.search.info();
       // A chain reports `records` as the cumulative row total across every
@@ -771,9 +774,22 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
   // Tool calls DO need them, so each awaits `mountsReady` first. A client sees
   // a fast handshake and pays the mount cost on its first real call, the same
   // trade the warmup below already makes for encoder staging.
+  //
+  // Each mount is isolated: one unreachable shelf host, refused pin or
+  // unsupported pack must not take down the packs listed after it. Failures
+  // are recorded per location, reported by list_packs, and still make the
+  // process exit non-zero once the protocol loop drains.
+  const mountFailures = [];
   const mountsReady = (async () => {
+    const attempt = async (location, fn) => {
+      try { await fn(); } catch (err) {
+        const message = err?.message || String(err);
+        mountFailures.push({ location, error: message });
+        log(`mount failed: ${location}: ${message}`);
+      }
+    };
     for (const spec of specs) {
-      await mountPack(packs, spec, { openPikeletFile, httpRangeSource, log });
+      await attempt(spec.location ?? spec.name ?? '(lineage)', () => mountPack(packs, spec, { openPikeletFile, httpRangeSource, log }));
     }
     // Warm every pack in the background so the first tool call pays for
     // retrieval, not for staging: the query forces the deferred encoder,
@@ -787,18 +803,21 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
       mounted.warmup = mounted.search.query(probe, { k: 1 }).catch(() => {});
     }
   })();
-  // A mount failure must reach the operator rather than becoming an unhandled
-  // rejection; tool calls re-await it and surface it per call. It is also
-  // recorded so the process can still exit non-zero once the protocol loop
-  // drains: a supervisor or install script that pins `#sha256` and checks the
-  // status would otherwise read a refused mount as success. Recorded, not
-  // rethrown here, because the server must keep serving the packs that did
-  // mount -- that is the trade this concurrent mounting buys.
-  let mountFailure = null;
+  // Per-pack failures are caught above; this catches only a fault in the
+  // mount loop itself (e.g. the warmup's info() throwing), so it surfaces
+  // per call rather than as an unhandled rejection.
   mountsReady.catch((err) => {
-    mountFailure = err;
+    mountFailures.push({ location: null, error: err?.message || String(err) });
     log(`mount failed: ${err?.message || err}`);
   });
+  // A failed mount is reported per call only when nothing mounted at all;
+  // otherwise the survivors serve and list_packs names what is missing.
+  const mountsUsable = async () => {
+    await mountsReady;
+    if (packs.size === 0 && mountFailures.length) {
+      throw new Error(`no pack mounted: ${mountFailures.map((f) => (f.location ? `${f.location}: ${f.error}` : f.error)).join('; ')}`);
+    }
+  };
 
   const serverInfo = { name: 'pikelet-knowledge-packs', version: serverVersion };
   const supportedVersions = [...MODERN_VERSIONS, ...LEGACY_VERSIONS];
@@ -872,19 +891,19 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
         // answering early would advertise a shorter list than the server ends
         // up serving. `initialize` is the only handshake step that does not
         // wait, which is the point — see mountsReady above.
-        await mountsReady;
+        await mountsUsable();
         // Deterministic order (mount order) per the modern caching rules.
         reply(id, { tools: toolDefinitions(packs), ...(modern ? CACHE_HINTS : {}) });
       } else if (method === 'tools/call') {
         // Every tool reads the packs map, so a call made while mounting is
         // still in flight waits for it rather than seeing an empty server. A
         // mount failure surfaces here, per call, instead of being swallowed.
-        await mountsReady;
+        await mountsUsable();
         const toolName = params?.name;
         const args = params?.arguments ?? {};
         let result;
         if (toolName === 'search') result = await callSearch(packs, args);
-        else if (toolName === 'list_packs') result = callListPacks(packs);
+        else if (toolName === 'list_packs') result = callListPacks(packs, mountFailures);
         else if (toolName === 'get_record') result = await callGetRecord(packs, args);
         else if (toolName === 'verify_pack') result = await callVerifyPack(packs, args);
         else throw new Error(`unknown tool ${JSON.stringify(toolName)}`);
@@ -911,7 +930,7 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
   // Settle the mounts before reporting. A client that closes stdin without
   // calling a tool (or any run whose input drains faster than a URL mount's
   // `source.init()` round trip) reaches here while `mountsReady` is still
-  // pending, so checking `mountFailure` first would read null and exit 0 on a
+  // pending, so checking `mountFailures` first would read empty and exit 0 on a
   // pack that was in fact refused. Awaiting is safe: the promise is already
   // caught above, so this observes the outcome without a second rejection.
   await mountsReady.catch(() => {});
@@ -921,7 +940,7 @@ export async function runMcpServer({ packPaths, openPikeletFile, httpRangeSource
   // Exit non-zero if any pack never mounted. Deferred to here so the
   // handshake stays fast and the surviving packs stay queryable for the
   // session's life; `bin/pikelet.mjs` maps `exitCode` onto the status.
-  if (mountFailure) {
-    throw Object.assign(new Error(`mount failed: ${mountFailure?.message || mountFailure}`), { exitCode: 1 });
+  if (mountFailures.length) {
+    throw Object.assign(new Error(`mount failed: ${mountFailures.map((f) => (f.location ? `${f.location}: ${f.error}` : f.error)).join('; ')}`), { exitCode: 1 });
   }
 }
