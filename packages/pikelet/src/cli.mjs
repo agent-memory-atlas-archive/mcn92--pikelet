@@ -286,9 +286,27 @@ export function parseArgs(args) {
 async function createProject(flags) {
   const answers = await resolveCreateOptions(flags);
   const targetDir = path.resolve(process.cwd(), answers.name);
-  if (fssync.existsSync(targetDir)) {
+  const replacing = fssync.existsSync(targetDir);
+  if (replacing) {
     if (!flags.force) throw new CliError(`Target directory already exists: ${targetDir}\nNext: rerun with --force or choose --name`);
-    await fs.rm(targetDir, { recursive: true, force: true });
+    // --force replaces the project only after the new one has built, and
+    // never a directory the run itself depends on.
+    const within = (child, parent) => {
+      const rel = path.relative(parent, child);
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    };
+    if (within(process.cwd(), targetDir)) {
+      throw new CliError(`Refusing --force: ${targetDir} is the current directory or contains it\nNext: choose a --name outside it`);
+    }
+    if (!/^https?:\/\//i.test(answers.source)) {
+      const sourceDir = path.resolve(process.cwd(), answers.source);
+      if (within(sourceDir, targetDir)) {
+        throw new CliError(`Refusing --force: the source ${sourceDir} is inside ${targetDir}, which --force would replace\nNext: move the source out or choose another --name`);
+      }
+      if (within(targetDir, sourceDir)) {
+        throw new CliError(`Refusing --force: ${targetDir} is inside the source ${sourceDir}, so the project being replaced would be ingested\nNext: remove ${targetDir} first or choose a --name outside the source`);
+      }
+    }
   }
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pikelet-'));
@@ -297,7 +315,7 @@ async function createProject(flags) {
     await writeProject(tmpDir, config);
     await stageStudentInputs(tmpDir, answers);
     await buildAssets(tmpDir, config, { sourceBaseDir: targetDir });
-    await fs.rename(tmpDir, targetDir);
+    await installProject(tmpDir, targetDir, replacing);
     console.log(`Scaffolded ${targetDir}`);
     console.log(`Rebuild: cd ${answers.name} && npm run reindex`);
     if (answers.deploy) await deployProject(targetDir);
@@ -305,6 +323,29 @@ async function createProject(flags) {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
+}
+
+// Move the built project into place. The old project (with --force) is set
+// aside first and restored if the move fails, so a failure at any point
+// leaves it intact. The build dir lives in os.tmpdir(), often another
+// filesystem than the target (WSL /tmp vs /mnt/c), where rename is EXDEV.
+async function installProject(builtDir, targetDir, replacing) {
+  const backup = replacing ? `${targetDir}.pikelet-old-${process.pid}` : null;
+  if (backup) await fs.rename(targetDir, backup);
+  try {
+    try {
+      await fs.rename(builtDir, targetDir);
+    } catch (err) {
+      if (err.code !== 'EXDEV') throw err;
+      await fs.cp(builtDir, targetDir, { recursive: true });
+      await fs.rm(builtDir, { recursive: true, force: true }).catch(() => {});
+    }
+  } catch (err) {
+    await fs.rm(targetDir, { recursive: true, force: true }).catch(() => {});
+    if (backup) await fs.rename(backup, targetDir);
+    throw err;
+  }
+  if (backup) await fs.rm(backup, { recursive: true, force: true });
 }
 
 async function resolveCreateOptions(flags) {
