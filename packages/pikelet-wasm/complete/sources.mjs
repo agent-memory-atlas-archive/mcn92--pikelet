@@ -43,6 +43,7 @@ export function httpRangeSource(url, options = {}) {
     let resolvedTarget = null; // { target, viaRedirect } | null (unresolved or unresolvable)
     let resolving = null;
     let sizeFromHead = null;
+    let pinnedOnce = false;
     const resolveTarget = async () => {
         if (resolvedTarget) return resolvedTarget;
         resolving ??= (async () => {
@@ -71,16 +72,34 @@ export function httpRangeSource(url, options = {}) {
                         viaRedirect = false;
                     } else if (probe.ok) {
                         const len = Number(probe.headers.get('content-length'));
-                        if (Number.isFinite(len) && len > 0) sizeFromHead = len;
-                        stats.acceptRanges = probe.headers.get('accept-ranges');
-                        stats.etag = probe.headers.get('etag');
+                        const etag = probe.headers.get('etag');
+                        // Re-resolution (a signed URL expired) must land on
+                        // the artifact first pinned. Adopting the new HEAD's
+                        // ETag would make the If-Range / ARTIFACT_CHANGED
+                        // check compare a replaced file against itself.
+                        if (pinnedOnce) {
+                            const sizeChanged = sizeFromHead !== null && Number.isFinite(len) && len > 0 && len !== sizeFromHead;
+                            if ((stats.etag && etag && etag !== stats.etag) || sizeChanged) {
+                                throw Object.assign(pikeletError(
+                                    PIKELET_ERROR_CODES.ARTIFACT_CHANGED,
+                                    `artifact changed on the host: expected ETag ${stats.etag || '(none)'}, size ${sizeFromHead ?? '(unknown)'}; `
+                                        + `re-resolved ${etag || '(none)'}, size ${Number.isFinite(len) ? len : '(unknown)'}`,
+                                    { expectedEtag: stats.etag, actualEtag: etag },
+                                ), { artifactChanged: true });
+                            }
+                        } else {
+                            if (Number.isFinite(len) && len > 0) sizeFromHead = len;
+                            stats.acceptRanges = probe.headers.get('accept-ranges');
+                            stats.etag = etag;
+                        }
                     }
                     break;
                 }
             } catch (err) {
                 // A refused hop is a verdict, not a probe failure: falling back
-                // to the original URL would retry the same redirect.
-                if (redirectGuard && err?.redirectRefused) {
+                // to the original URL would retry the same redirect. So is a
+                // replaced artifact.
+                if ((redirectGuard && err?.redirectRefused) || err?.artifactChanged) {
                     resolving = null;
                     throw err;
                 }
@@ -89,6 +108,7 @@ export function httpRangeSource(url, options = {}) {
                 viaRedirect = false;
             }
             resolvedTarget = { target, viaRedirect };
+            pinnedOnce = true;
             resolving = null;
             return resolvedTarget;
         })();
@@ -122,7 +142,9 @@ export function httpRangeSource(url, options = {}) {
             stats.bytes += length;
             const end = offset + length - 1;
             const headers = { Range: `bytes=${offset}-${end}` };
-            if (stats.etag) headers['If-Range'] = stats.etag;
+            // RFC 9110: If-Range takes a strong validator only; a strict host
+            // ignores Range when given a weak one, forcing the full download.
+            if (stats.etag && !stats.etag.startsWith('W/')) headers['If-Range'] = stats.etag;
             const pinned = await resolveTarget();
             // The per-range cache-key query defeats Chromium's same-URL
             // cache-entry lock (concurrent fetches of one cacheable URL

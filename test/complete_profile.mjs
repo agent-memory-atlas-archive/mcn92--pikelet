@@ -1037,7 +1037,8 @@ console.log('\nD. lexical segment and hybrid retrieval');
     // (signed query strings); and an expired pin (403) must re-resolve.
     const http = await import('node:http');
     const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/sources.mjs');
-    const payload = Buffer.from(A.bytes);
+    let payload = Buffer.from(A.bytes);
+    let etag = '"v1"';
     let frontDoorHits = 0;
     let signedHits = 0;
     let paramOnSigned = 0;
@@ -1056,13 +1057,19 @@ console.log('\nD. lexical segment and hybrid retrieval');
         if (u.searchParams.has('r')) paramOnSigned += 1;
         const range = req.headers.range && /^bytes=(\d+)-(\d+)$/.exec(req.headers.range);
         if (!range) {
-            res.writeHead(200, { 'accept-ranges': 'bytes', 'content-length': payload.length });
+            res.writeHead(200, { 'accept-ranges': 'bytes', 'content-length': payload.length, etag });
             res.end(req.method === 'HEAD' ? undefined : payload);
+            return;
+        }
+        // If-Range: a validator that no longer matches gets the whole file.
+        if (req.headers['if-range'] && req.headers['if-range'] !== etag) {
+            res.writeHead(200, { 'accept-ranges': 'bytes', 'content-length': payload.length, etag });
+            res.end(payload);
             return;
         }
         const from = Number(range[1]);
         const to = Math.min(Number(range[2]), payload.length - 1);
-        res.writeHead(206, { 'content-range': `bytes ${from}-${to}/${payload.length}`, 'content-length': to - from + 1 });
+        res.writeHead(206, { 'content-range': `bytes ${from}-${to}/${payload.length}`, 'content-length': to - from + 1, etag });
         res.end(payload.subarray(from, to + 1));
     });
     await new Promise((resolve) => host.listen(0, '127.0.0.1', resolve));
@@ -1085,6 +1092,16 @@ console.log('\nD. lexical segment and hybrid retrieval');
         Buffer.compare(Buffer.from(afterExpiry), payload.subarray(0, 16)) === 0 && frontDoorHits === 2,
         `frontDoorHits ${frontDoorHits}`);
     check('stats count the resolution hops', src.stats.redirects >= 2, `redirects ${src.stats.redirects}`);
+    // The asset is re-uploaded under the same name (same size, new bytes and
+    // ETag) and the signed URL expires: re-resolution must not adopt the new
+    // ETag — that would make the If-Range check compare the replaced file
+    // against itself and silently serve its bytes.
+    payload = Buffer.from(payload).map((b) => b ^ 0xff);
+    etag = '"v2"';
+    token = 'sig-3';
+    await rejects('re-resolution onto a replaced artifact is reported as a changed artifact',
+        () => src.read(0, 16), /artifact changed.*expected ETag "v1".*re-resolved "v2"/);
+    check('the replaced artifact\'s bytes were never served', src.stats.fullFallback === false);
     host.close();
 }
 
