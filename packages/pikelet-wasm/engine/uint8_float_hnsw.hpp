@@ -995,6 +995,19 @@ public:
         }
 
         if (count_ > 0 && observed_max_level != max_level_) return fail();
+        // Traversal indexes upper_[n][l-1] unchecked: descent starts at the
+        // entry point's top level and follows a level-l edge into its target's
+        // level-l list. A snapshot whose entry sits below max_level_, or whose
+        // level-l edge names a node below level l, would read (and insert()
+        // would write) past that node's upper_ vector.
+        if (count_ > 0 && levels_[entry_point_] != max_level_) return fail();
+        for (size_t i = 0; i < count_; ++i) {
+            for (int l = 1; l <= levels_[i]; ++l) {
+                for (const Edge& e : upper_edges(static_cast<uint32_t>(i), l)) {
+                    if (levels_[e.neighbor] < l) return fail();
+                }
+            }
+        }
 
         // NOTE: this zeroes all soft-delete state on load. Ghost entries were
         // serialized as regular data, so they come back live. Callers must

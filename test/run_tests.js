@@ -2001,6 +2001,55 @@ async function testRawEngineImportValidation() {
             assert(msg.includes('Import failed'), `${testCase.label}: rejects invalid neighbor id`);
             idx.dispose();
         }
+
+        // Level consistency. Traversal indexes a node's upper-level edge list
+        // by level without a bounds check, so a level-l edge into a node below
+        // level l, or an entry point below max_level, must fail the import —
+        // otherwise search reads, and add() writes, out of bounds.
+        const version = new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getUint32(8, true);
+        const edgeBytes = testCase.quantized && version >= 2 ? 8 : 4;
+        const craft = (entry, nodes) => {
+            const header = new Uint8Array(raw.subarray(0, 40));
+            const hv = new DataView(header.buffer);
+            hv.setUint32(12, 2, true);
+            hv.setUint32(16, entry, true);
+            hv.setUint32(20, 2, true);
+            const body = [];
+            const f32 = (x) => { const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x, true); body.push(...b); };
+            const u32 = (x) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, x, true); body.push(...b); };
+            if (testCase.quantized) {
+                f32(1); f32(1); f32(0); f32(0);
+                for (let i = 0; i < 2 * cfg.dim; i++) body.push(i < cfg.dim ? 0 : 255);
+            } else {
+                for (let i = 0; i < 2 * cfg.dim; i++) f32(i < cfg.dim ? 0 : 1);
+            }
+            for (const levels of nodes) {
+                u32(levels.length - 1);
+                for (const edges of levels) {
+                    u32(edges.length);
+                    for (const n of edges) { u32(n); if (edgeBytes === 8) f32(1); }
+                }
+            }
+            const out = new Uint8Array(40 + body.length);
+            out.set(header, 0);
+            out.set(body, 40);
+            return out;
+        };
+        for (const shape of [
+            { label: 'accepts a well-formed two-level graph', ok: true, entry: 1, nodes: [[[1], [1]], [[0], [0], []]] },
+            { label: 'rejects a level-2 edge into a level-1 node', ok: false, entry: 1, nodes: [[[1], [1]], [[0], [0], [0]]] },
+            { label: 'rejects an entry point below max_level', ok: false, entry: 1, nodes: [[[1], [1], []], [[0], [0]]] },
+        ]) {
+            const idx = await Pikelet.create(cfg);
+            let msg = '';
+            try { idx.import(craft(shape.entry, shape.nodes)); } catch (e) { msg = e.message; }
+            if (shape.ok) {
+                assert(msg === '' && idx.count === 2, `${testCase.label}: ${shape.label}${msg ? ` (${msg})` : ''}`);
+            } else {
+                assert(msg.includes('Import failed') && idx.count === 0, `${testCase.label}: ${shape.label}`);
+            }
+            idx.dispose();
+        }
     }
 }
 
