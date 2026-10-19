@@ -1316,6 +1316,16 @@ export async function openPikeletFile(input, options = {}) {
                         }
                         : null,
                     sampleQueries: Array.isArray(manifest.sampleQueries) ? manifest.sampleQueries : [],
+                    // Where each part of the file lives, in file order: the
+                    // header (fixed header, manifest and segment table, up to
+                    // the first segment's aligned offset) and every segment of
+                    // a known kind. Lets a viewer attribute range reads to
+                    // what they fetched.
+                    layout: [
+                        { kind: 'header', offset: 0, length: align16(HEADER_BYTES + manifestBytes + tableBytes) },
+                        ...[...segments].map(([kind, seg]) => ({ kind, offset: seg.offset, length: seg.length }))
+                            .sort((a, b) => a.offset - b.offset),
+                    ],
                 };
             },
 
@@ -1494,6 +1504,16 @@ export async function openPikeletFile(input, options = {}) {
             async record(id) {
                 assertOpen();
                 return hydrate(id);
+            },
+
+            /** The absolute byte range one corpus record's stored bytes occupy in the file. */
+            recordRange(id) {
+                assertOpen();
+                if (!Number.isSafeInteger(id) || id < 0 || id >= recordCount) {
+                    throw new Error(`.pikelet record id ${id} is outside the corpus`);
+                }
+                const start = recordOffsets[id];
+                return { offset: corpus.offset + start, length: recordOffsets[id + 1] - start };
             },
 
             /**

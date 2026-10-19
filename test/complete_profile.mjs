@@ -224,6 +224,22 @@ const A = buildSynthetic();
     check('evaluation segment loads and digest-verifies', ev && ev.goldenQueries[0].expectedTopId === 17);
     const sized = info.fileBytes;
     check('info.fileBytes matches the file', sized === A.bytes.length);
+
+    const truth = layoutOf(A.bytes);
+    const layout = info.layout;
+    check('info.layout starts with the header and lists every segment at its table offset',
+        layout[0].kind === 'header' && layout[0].offset === 0
+        && layout.length === 1 + Object.keys(truth.segments).length
+        && layout.slice(1).every((s) => truth.segments[s.kind]?.offset === s.offset && truth.segments[s.kind].length === s.length),
+        JSON.stringify(layout));
+    check('info.layout is in file order, header ending at the first segment',
+        layout[0].length === layout[1].offset && layout.every((s, i) => i === 0 || s.offset >= layout[i - 1].offset + layout[i - 1].length));
+    const range = search.recordRange(17);
+    const json = JSON.parse(A.bytes.subarray(range.offset, range.offset + range.length).toString('utf8'));
+    check('recordRange(id) locates the record bytes inside the corpus segment',
+        json.title === 'rec 17' && range.offset >= truth.segments.corpus.offset
+        && range.offset + range.length <= truth.segments.corpus.offset + truth.segments.corpus.length);
+    check('recordRange rejects ids outside the corpus', (() => { try { search.recordRange(COUNT); return false; } catch (err) { return /outside the corpus/.test(err.message); } })());
     await search.close();
 }
 

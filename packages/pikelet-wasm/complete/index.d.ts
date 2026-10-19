@@ -177,6 +177,13 @@ export interface CompleteSearch {
      */
     residentScan: 'engine' | 'js';
     sampleQueries: string[];
+    /**
+     * The file's parts in file order: 'header' (fixed header, manifest and
+     * segment table) followed by each segment of a known kind ('index',
+     * 'corpus', 'lexical', 'query-interp', 'evaluation', ...). Absolute
+     * byte offsets.
+     */
+    layout: Array<{ kind: string; offset: number; length: number }>;
   };
   /**
    * Verify the index's lazy vector rows against the identity-anchored
@@ -212,6 +219,8 @@ export interface CompleteSearch {
   }): Promise<CompleteQueryResult>;
   /** Hydrate one corpus record by id (verified per record on format 2). */
   record(id: number): Promise<Record<string, unknown>>;
+  /** The absolute byte range one corpus record's stored bytes occupy in the file. */
+  recordRange(id: number): { offset: number; length: number };
   /** The evaluation segment's JSON object, or null when the artifact carries none. */
   evaluation(): Promise<Record<string, unknown> | null>;
   close(): Promise<void>;
