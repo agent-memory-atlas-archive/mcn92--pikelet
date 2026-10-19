@@ -40,6 +40,20 @@ const els = {
     transferBanner: document.getElementById('transfer-banner'),
     transferHeadline: document.getElementById('transfer-headline'),
     suggestedQueries: document.getElementById('suggested-queries'),
+    mapPanel: document.getElementById('map-panel'),
+    mapFilename: document.getElementById('map-filename'),
+    mapSize: document.getElementById('map-size'),
+    mapStrip: document.getElementById('map-strip'),
+    mapCanvas: document.getElementById('map-canvas'),
+    mapNote: document.getElementById('map-note'),
+    mapNow: document.getElementById('map-now'),
+    mapLegend: document.getElementById('map-legend'),
+    mapZoomLabel: document.getElementById('map-zoom-label'),
+    mapZoomStrip: document.getElementById('map-zoom-strip'),
+    mapZoomCanvas: document.getElementById('map-zoom-canvas'),
+    mapRecord: document.getElementById('map-record'),
+    mapDetails: document.getElementById('map-details'),
+    resultsPanel: document.getElementById('results-panel'),
 };
 
 function escapeHtml(value) {
@@ -110,6 +124,270 @@ function updateCounters() {
     }
 }
 
+// --- File map: the mounted file's parts drawn to scale, with every range
+// read painted onto them as it lands, so "one file" is something a visitor
+// watches happen rather than takes on trust. Parts too small to see at true
+// scale (the header, the built-in tests) get a minimum width, and the note
+// under the strip says so.
+const SECTIONS = {
+    header: { label: 'Header & table of contents', detail: 'identity hash, manifest, where each part starts', activity: 'Reading the header' },
+    index: { label: 'Vector index', detail: 'compact sketches scanned per query, full vectors for reranking', activity: 'Searching the vector index' },
+    corpus: { label: 'Article text', detail: 'every article, stored record by record', activity: 'Reading matching passages' },
+    lexical: { label: 'Keyword index', detail: 'BM25 terms and postings', activity: 'Looking up keywords' },
+    'query-interp': { label: 'Query encoder', detail: 'the model that turns your question into a vector, plus calibration', activity: 'Loading the query encoder' },
+    evaluation: { label: 'Built-in tests', detail: 'golden queries the file checks itself against', activity: 'Reading built-in tests' },
+};
+const sectionInfo = (kind) => SECTIONS[kind] || { label: kind, detail: '', activity: `Reading ${kind}` };
+const MIN_SEGMENT_PX = 8;
+
+// epoch 0 is the mount; each query bumps it, so "this query" is every read
+// tagged with the current epoch.
+const fileMap = { filename: null, fileBytes: 0, layout: null, reads: [], epoch: 0, zoomKind: null, zoomPinned: false, record: null };
+
+function filenameOf(url) {
+    try { return new URL(String(url), location.href).pathname.split('/').pop() || String(url); } catch { return String(url); }
+}
+
+function sectionAt(offset) {
+    let found = fileMap.layout[0];
+    for (const s of fileMap.layout) if (s.offset <= offset) found = s;
+    return found;
+}
+
+// Bytes of each read [a, b] (inclusive) that land in each section, keyed by kind.
+function bytesBySection(reads) {
+    const out = {};
+    for (const s of fileMap.layout) out[s.kind] = 0;
+    for (const r of reads) {
+        for (const [i, s] of fileMap.layout.entries()) {
+            const end = i + 1 < fileMap.layout.length ? fileMap.layout[i + 1].offset : fileMap.fileBytes;
+            const overlap = Math.min(r.b + 1, end) - Math.max(r.a, s.offset);
+            if (overlap > 0) out[s.kind] += overlap;
+        }
+    }
+    return out;
+}
+
+function geometry(width) {
+    const small = new Set(fileMap.layout.filter((s) => (s.length / fileMap.fileBytes) * width < MIN_SEGMENT_PX));
+    const largeBytes = fileMap.layout.reduce((n, s) => n + (small.has(s) ? 0 : s.length), 0);
+    const rest = width - MIN_SEGMENT_PX * small.size;
+    let x = 0;
+    return fileMap.layout.map((s) => {
+        const w = small.has(s) ? MIN_SEGMENT_PX : (s.length / largeBytes) * rest;
+        const g = { ...s, x, w };
+        x += w;
+        return g;
+    });
+}
+
+function mapX(geo, offset) {
+    let g = geo[0];
+    for (const s of geo) if (s.offset <= offset) g = s;
+    return g.x + Math.min(1, Math.max(0, (offset - g.offset) / g.length)) * g.w;
+}
+
+function cssVar(name, fallback) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+const sectionColor = (kind) => cssVar(`--sec-${kind}`, cssVar('--accent', '#0f7d70'));
+
+function sizedContext(canvas, width, height) {
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    return ctx;
+}
+
+function paintReads(ctx, height, toX, filter) {
+    for (const r of fileMap.reads) {
+        if (filter && !filter(r)) continue;
+        const x0 = toX(r.a);
+        const x1 = toX(r.b + 1);
+        ctx.globalAlpha = r.epoch === fileMap.epoch ? 1 : 0.3;
+        ctx.fillStyle = sectionColor(sectionAt(r.a).kind);
+        ctx.fillRect(x0, 0, Math.max(1.5, x1 - x0), height);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function paintRecord(ctx, height, toX) {
+    const rec = fileMap.record;
+    if (!rec) return;
+    const x0 = toX(rec.offset);
+    const w = Math.max(3, toX(rec.offset + rec.length) - x0);
+    ctx.strokeStyle = cssVar('--ink', '#16181a');
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0 - 1, 1, w + 2, height - 2);
+}
+
+function drawMap() {
+    if (!fileMap.layout) return;
+    const width = els.mapStrip.clientWidth;
+    const height = els.mapStrip.clientHeight;
+    const geo = geometry(width);
+    for (const g of geo) {
+        const seg = els.mapStrip.querySelector(`[data-kind="${g.kind}"]`);
+        if (seg) {
+            seg.style.width = `${g.w}px`;
+            seg.classList.toggle('zoomed', g.kind === fileMap.zoomKind);
+        }
+    }
+    const ctx = sizedContext(els.mapCanvas, width, height);
+    const toX = (offset) => mapX(geo, offset);
+    paintReads(ctx, height, toX);
+    paintRecord(ctx, height, toX);
+
+    const zoom = fileMap.layout.find((s) => s.kind === fileMap.zoomKind) || fileMap.layout[0];
+    const zw = els.mapZoomStrip.clientWidth;
+    const zh = els.mapZoomStrip.clientHeight;
+    els.mapZoomStrip.style.setProperty('--seg-color', sectionColor(zoom.kind));
+    const zctx = sizedContext(els.mapZoomCanvas, zw, zh);
+    const ztoX = (offset) => ((offset - zoom.offset) / zoom.length) * zw;
+    paintReads(zctx, zh, ztoX, (r) => r.b >= zoom.offset && r.a < zoom.offset + zoom.length);
+    if (fileMap.record && fileMap.record.offset >= zoom.offset && fileMap.record.offset < zoom.offset + zoom.length) {
+        paintRecord(zctx, zh, ztoX);
+    }
+    els.mapZoomLabel.innerHTML = `Zoomed in: <strong>${escapeHtml(sectionInfo(zoom.kind).label)}</strong>`
+        + ` · bytes ${zoom.offset.toLocaleString()}–${(zoom.offset + zoom.length - 1).toLocaleString()}`
+        + ` · 1 px ≈ ${formatBytes(Math.max(1, Math.round(zoom.length / Math.max(1, zw))))}`
+        + ' <span class="dim">— click a part of the file to zoom into it</span>';
+}
+
+let mapFrame = 0;
+function scheduleMapDraw() {
+    if (mapFrame) return;
+    mapFrame = requestAnimationFrame(() => {
+        mapFrame = 0;
+        drawMap();
+        renderLegend();
+    });
+}
+
+function renderLegend() {
+    if (!fileMap.layout) return;
+    const now = bytesBySection(fileMap.reads.filter((r) => r.epoch === fileMap.epoch));
+    const total = bytesBySection(fileMap.reads);
+    const nowLabel = fileMap.epoch === 0 ? 'Opening' : 'This query';
+    els.mapLegend.innerHTML = `<span></span><span class="head">Part</span><span class="head size">Size</span><span class="head read">${nowLabel} / all reads</span>`
+        + fileMap.layout.map((s) => {
+            const info = sectionInfo(s.kind);
+            const pct = (100 * s.length) / fileMap.fileBytes;
+            return `<span class="sw" style="--seg-color:${sectionColor(s.kind)}"></span>`
+                + `<span class="name">${escapeHtml(info.label)}<small>${escapeHtml(info.detail)}</small></span>`
+                + `<span class="size">${formatBytes(s.length)} · ${pct < 0.1 ? '<0.1' : pct.toFixed(0)}%</span>`
+                + `<span class="read${now[s.kind] ? ' hot' : ''}">${formatBytes(now[s.kind])} / ${formatBytes(total[s.kind])}</span>`;
+        }).join('');
+}
+
+// Plain-language summary of one epoch's reads, largest part first.
+function summarizeEpoch(epoch) {
+    const reads = fileMap.reads.filter((r) => r.epoch === epoch);
+    const bytes = reads.reduce((n, r) => n + (r.b - r.a + 1), 0);
+    const parts = Object.entries(bytesBySection(reads))
+        .filter(([, n]) => n > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([kind, n]) => `${sectionInfo(kind).label} ${formatBytes(n)}`)
+        .join(', ');
+    const allBytes = fileMap.reads.reduce((n, r) => n + (r.b - r.a + 1), 0);
+    const untouched = 100 - (100 * allBytes) / fileMap.fileBytes;
+    const lead = epoch === 0 ? 'Opened the file' : 'This query';
+    return `${lead}: ${reads.length} reads · ${formatBytes(bytes)} from ${fileMap.filename}${parts ? ` — ${parts}` : ''}. `
+        + `${untouched.toFixed(1)}% of the file has never left the server.`;
+}
+
+function onMapRead(url, a, b) {
+    if (!fileMap.filename || filenameOf(url) !== fileMap.filename) return;
+    const read = { a: Number(a), b: Number(b), epoch: fileMap.epoch };
+    fileMap.reads.push(read);
+    if (!fileMap.layout) return;
+    const kind = sectionAt(read.a).kind;
+    if (!fileMap.zoomPinned) fileMap.zoomKind = busiestSection();
+    els.mapNow.textContent = `${sectionInfo(kind).activity}… bytes ${read.a.toLocaleString()}–${read.b.toLocaleString()}`;
+    // Reads keep landing after open resolves (the encoder streams in behind
+    // it), so the summary replaces the live line once reads go quiet rather
+    // than at a fixed point.
+    clearTimeout(mapIdleTimer);
+    mapIdleTimer = setTimeout(() => { els.mapNow.textContent = summarizeEpoch(fileMap.epoch); }, 700);
+    scheduleMapDraw();
+}
+let mapIdleTimer = 0;
+
+function busiestSection() {
+    const now = Object.entries(bytesBySection(fileMap.reads.filter((r) => r.epoch === fileMap.epoch)));
+    now.sort((x, y) => y[1] - x[1]);
+    return now[0]?.[1] > 0 ? now[0][0] : fileMap.zoomKind;
+}
+
+function resetMap(url) {
+    fileMap.filename = filenameOf(url);
+    fileMap.fileBytes = 0;
+    fileMap.layout = null;
+    fileMap.reads = [];
+    fileMap.epoch = 0;
+    fileMap.zoomKind = null;
+    fileMap.zoomPinned = false;
+    fileMap.record = null;
+    clearTimeout(mapIdleTimer);
+    els.mapRecord.hidden = true;
+    els.mapPanel.hidden = true;
+}
+
+// Called once the reader is open: reads made while opening were buffered,
+// so the map shows the mount's reads as soon as it appears.
+function showMap(info) {
+    if (!Array.isArray(info.layout) || info.layout.length === 0) return;
+    fileMap.layout = info.layout;
+    fileMap.fileBytes = info.fileBytes;
+    fileMap.zoomKind = busiestSection() || 'corpus';
+    els.mapFilename.textContent = fileMap.filename;
+    els.mapSize.textContent = `${formatBytes(info.fileBytes)} · ${info.records.toLocaleString()} records`;
+    els.mapStrip.querySelectorAll('.map-seg').forEach((el) => el.remove());
+    for (const s of fileMap.layout) {
+        const seg = document.createElement('button');
+        seg.type = 'button';
+        seg.className = 'map-seg';
+        seg.dataset.kind = s.kind;
+        seg.style.setProperty('--seg-color', sectionColor(s.kind));
+        seg.title = `${sectionInfo(s.kind).label} · ${formatBytes(s.length)}`;
+        seg.setAttribute('aria-label', `Zoom into ${sectionInfo(s.kind).label}, ${formatBytes(s.length)}`);
+        els.mapStrip.insertBefore(seg, els.mapCanvas);
+    }
+    els.mapPanel.hidden = false;
+    const enlarged = fileMap.layout.filter((s) => (s.length / fileMap.fileBytes) * els.mapStrip.clientWidth < MIN_SEGMENT_PX);
+    els.mapNote.textContent = enlarged.length
+        ? `Drawn to scale, except ${enlarged.map((s) => sectionInfo(s.kind).label.toLowerCase()).join(' and ')}, enlarged so you can see them.`
+        : 'Drawn to scale.';
+    els.mapNow.textContent = summarizeEpoch(0);
+    scheduleMapDraw();
+}
+
+function zoomTo(kind) {
+    fileMap.zoomKind = kind;
+    fileMap.zoomPinned = true;
+    scheduleMapDraw();
+}
+
+function locateResult(hit) {
+    const id = Number(hit.dataset.id);
+    const range = search.recordRange(id);
+    const kind = sectionAt(range.offset).kind;
+    fileMap.record = { id, ...range };
+    zoomTo(kind);
+    els.results.querySelectorAll('.hit').forEach((el) => el.classList.toggle('located', el === hit));
+    const fetched = fileMap.reads.some((r) => r.a <= range.offset + range.length - 1 && r.b >= range.offset);
+    const title = hit.querySelector('h3')?.textContent || `record ${id}`;
+    els.mapRecord.innerHTML = `<strong>“${escapeHtml(title)}”</strong> is record #${id}, stored at bytes `
+        + `<strong>${range.offset.toLocaleString()}–${(range.offset + range.length - 1).toLocaleString()}</strong> of ${escapeHtml(fileMap.filename)}`
+        + ` (${formatBytes(range.length)}, inside ${escapeHtml(sectionInfo(kind).label)}, outlined above). `
+        + (fetched ? 'This page range-read exactly those bytes to show you the passage.' : 'Those bytes have not been fetched yet.');
+    els.mapRecord.hidden = false;
+    els.mapPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function setStatus(text, cls) {
     els.status.textContent = text;
     els.status.className = `status${cls ? ` ${cls}` : ''}`;
@@ -124,6 +402,7 @@ async function mount(url) {
     stats.bytes = 0;
     renderLog();
     updateCounters();
+    resetMap(url);
 
     try {
         source = httpRangeSource(url);
@@ -138,6 +417,7 @@ async function mount(url) {
         updateCounters();
         setStatus(`Mounted — hash verified: ${info.residentVerified}`, 'ok');
         renderIdentity(url, info);
+        showMap(info);
         els.queryInput.disabled = false;
         els.queryInput.focus();
     } catch (err) {
@@ -169,6 +449,12 @@ async function runQuery() {
     els.verdict.textContent = 'Searching…';
     els.verdict.className = 'verdict';
     els.results.innerHTML = '';
+    els.resultsPanel.hidden = false;
+    fileMap.epoch++;
+    fileMap.record = null;
+    fileMap.zoomPinned = false;
+    els.mapRecord.hidden = true;
+    scheduleMapDraw();
     const before = { ...stats };
     const t0 = performance.now();
     try {
@@ -183,11 +469,13 @@ async function runQuery() {
         els.results.innerHTML = out.results.length === 0
             ? '<p class="empty">No results — the file knows this corpus cannot answer that.</p>'
             : out.results.map((r) => `
-                <article class="hit">
+                <article class="hit" data-id="${escapeHtml(String(r.id))}">
                   <h3>${escapeHtml(r.title)}</h3>
                   <p class="meta">${escapeHtml(r.sourcePath || r.url || '')}${r.anchor ? `#${escapeHtml(r.anchor)}` : ''} · distance ${r.distance?.toFixed(3)}</p>
                   <p class="excerpt">${escapeHtml((r.preview || r.text || '').slice(0, 240))}…</p>
+                  ${fileMap.layout ? '<button type="button" class="locate">Show where this lives in the file</button>' : ''}
                 </article>`).join('');
+        if (fileMap.layout) els.mapNow.textContent = summarizeEpoch(fileMap.epoch);
     } catch (err) {
         els.verdict.textContent = String(err?.message || err);
         els.verdict.className = 'verdict error';
@@ -197,6 +485,20 @@ async function runQuery() {
 }
 
 wireFetchLogging();
+rangeReadListeners.push(onMapRead);
+
+els.mapStrip.addEventListener('click', (event) => {
+    const seg = event.target.closest('.map-seg');
+    if (seg) zoomTo(seg.dataset.kind);
+});
+els.results.addEventListener('click', (event) => {
+    const button = event.target.closest('.locate');
+    if (button) locateResult(button.closest('.hit'));
+});
+// The close-up has no width while its <details> is closed; draw it on open.
+els.mapDetails.addEventListener('toggle', scheduleMapDraw);
+new ResizeObserver(scheduleMapDraw).observe(els.mapStrip);
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', scheduleMapDraw);
 
 els.mountBtn.addEventListener('click', () => mount(els.packUrl.value.trim() || DEFAULT_PACK_URL));
 els.queryForm.addEventListener('submit', (event) => {

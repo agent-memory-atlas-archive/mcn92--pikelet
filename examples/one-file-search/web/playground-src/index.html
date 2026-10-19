@@ -457,6 +457,7 @@
   }
   #query-input {
     flex: 1;
+    min-width: 0;
     font-family: 'Inter', sans-serif;
     font-size: 15px;
   }
@@ -495,6 +496,7 @@
   }
   .hit .meta {
     margin: 0 0 6px;
+    overflow-wrap: anywhere;
     font: 400 11px 'JetBrains Mono', monospace;
     color: var(--ink-dim);
   }
@@ -549,8 +551,139 @@
   }
   footer a { color: var(--accent); }
 
+  /* File map: one color per part of the file. */
+  :root {
+    --sec-header: #8b8378;
+    --sec-index: #0f7d70;
+    --sec-corpus: #2f6fb5;
+    --sec-lexical: #a3690b;
+    --sec-query-interp: #7a4fb0;
+    --sec-evaluation: #5d7a3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --sec-header: #8b98a5;
+      --sec-index: #39d9c4;
+      --sec-corpus: #6aa8ff;
+      --sec-lexical: #e3a53a;
+      --sec-query-interp: #b48cf0;
+      --sec-evaluation: #9cc46a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --sec-header: #8b98a5;
+    --sec-index: #39d9c4;
+    --sec-corpus: #6aa8ff;
+    --sec-lexical: #e3a53a;
+    --sec-query-interp: #b48cf0;
+    --sec-evaluation: #9cc46a;
+  }
+
+  .map-title {
+    margin: 0;
+    font: 400 13px/1.4 'JetBrains Mono', monospace;
+    color: var(--ink-dim);
+  }
+  .map-title strong { color: var(--ink); font-weight: 700; }
+  .map-strip {
+    position: relative;
+    display: flex;
+    height: 46px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+  }
+  .map-seg {
+    height: 100%;
+    background: color-mix(in srgb, var(--seg-color) 16%, var(--surface));
+    border-right: 1px solid var(--surface);
+    padding: 0;
+    border-radius: 0;
+    cursor: pointer;
+  }
+  .map-seg:last-of-type { border-right: none; }
+  .map-seg.zoomed { background: color-mix(in srgb, var(--seg-color) 30%, var(--surface)); }
+  .map-strip canvas, .map-zoom-strip canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .map-note {
+    margin: -6px 0 0;
+    font: 400 11px/1.4 'JetBrains Mono', monospace;
+    color: var(--ink-dim);
+  }
+  .map-now {
+    font: 500 13px/1.5 'JetBrains Mono', monospace;
+    color: var(--ink);
+    min-height: 1.5em;
+  }
+  .map-legend {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 6px 12px;
+    align-items: baseline;
+    font: 400 12px/1.4 'JetBrains Mono', monospace;
+  }
+  .map-legend .sw {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--seg-color);
+    align-self: start;
+    margin-top: 3px;
+  }
+  .map-legend .name { color: var(--ink); min-width: 0; }
+  .map-legend .name small { display: block; color: var(--ink-dim); font-size: 11px; }
+  .map-legend .size, .map-legend .read { color: var(--ink-dim); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .map-legend .read.hot { color: var(--ink); font-weight: 700; }
+  .map-legend .head { color: var(--ink-dim); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .map-zoom-label {
+    font: 400 12px/1.4 'JetBrains Mono', monospace;
+    color: var(--ink-dim);
+  }
+  .map-zoom-label strong { color: var(--ink); }
+  .map-zoom-strip {
+    position: relative;
+    height: 30px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: color-mix(in srgb, var(--seg-color, var(--rule)) 12%, var(--surface));
+    overflow: hidden;
+  }
+  .map-details summary {
+    cursor: pointer;
+    font: 500 12px/1.4 'JetBrains Mono', monospace;
+    color: var(--accent);
+  }
+  .map-details[open] summary { margin-bottom: 12px; }
+  .map-details .map-zoom-label { margin: 12px 0 8px; }
+  .map-record {
+    font: 400 12px/1.5 'JetBrains Mono', monospace;
+    color: var(--ink-dim);
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    overflow-wrap: anywhere;
+  }
+  .map-record strong { color: var(--ink); }
+  .hit .locate {
+    margin-top: 6px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--rule);
+    padding: 5px 10px;
+    font: 500 12px/1.2 'Inter', sans-serif;
+  }
+  .hit .locate:hover { border-color: var(--accent); }
+  .hit.located { border-top-color: var(--accent); }
+
   @media (max-width: 480px) {
     h1 { font-size: 26px; }
+    .map-legend { grid-template-columns: auto 1fr auto; }
+    .map-legend .size { display: none; }
     .counters { grid-template-columns: 1fr; }
     .identity-card { grid-template-columns: 1fr; }
   }
@@ -565,7 +698,7 @@
       <strong>wikipedia.pikelet</strong> is a 648.5&nbsp;MB static file — 456,153 Simple English
       Wikipedia articles, an embedded query encoder, and a search index, sealed into one file
       on a plain HTTP host. There is no application server behind it. Every answer below comes
-      from byte-range reads against that one file, visible in the log as they happen.
+      from byte-range reads against that one file, lit up on a map of the file as they happen.
     </p>
   </header>
 
@@ -600,20 +733,6 @@
     </section>
 
     <section class="panel">
-      <div class="panel-label">Network activity</div>
-      <div class="counters">
-        <div class="counter"><span class="n" id="req-count">0</span><span class="l">Range reads</span></div>
-        <div class="counter"><span class="n" id="byte-count">0 B</span><span class="l">Bytes fetched</span></div>
-        <div class="counter"><span class="n" id="pct-count">—</span><span class="l">Of the file</span></div>
-      </div>
-      <div id="transfer-banner" class="transfer-banner" hidden>
-        <span id="transfer-headline">—</span>
-      </div>
-      <div id="request-log" aria-live="off"></div>
-      <div class="no-endpoints"><span class="x">✕</span>No /search · <span class="x">✕</span>No /embed · <span class="x">✕</span>No /query · <span class="x">✕</span>No /api — only <code>bytes=X-Y</code> against one URL.</div>
-    </section>
-
-    <section class="panel">
       <div class="panel-label">Ask it something</div>
       <p class="lede small">
         The badge on each answer is match quality, not a fact-check: it measures how well the
@@ -634,8 +753,45 @@
         <input type="text" id="query-input" placeholder="ask anything…" disabled autocomplete="off">
         <button type="submit">Search</button>
       </form>
+    </section>
+
+    <section class="panel" id="map-panel" hidden>
+      <div class="panel-label">Inside the file</div>
+      <p class="map-title"><strong id="map-filename">—</strong> · one file · <span id="map-size">—</span></p>
+      <div class="map-strip" id="map-strip">
+        <canvas id="map-canvas" aria-hidden="true"></canvas>
+      </div>
+      <p class="map-note" id="map-note"></p>
+      <div class="map-now" id="map-now" aria-live="polite">Waiting for the first read…</div>
+      <div class="map-record" id="map-record" hidden></div>
+      <details class="map-details" id="map-details">
+        <summary>Details: each part's size, bytes read, and a close-up</summary>
+        <div class="map-legend" id="map-legend"></div>
+        <div class="map-zoom-label" id="map-zoom-label"></div>
+        <div class="map-zoom-strip" id="map-zoom-strip">
+          <canvas id="map-zoom-canvas" aria-hidden="true"></canvas>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel" id="results-panel" hidden>
+      <div class="panel-label">Results</div>
       <div id="verdict" class="verdict"></div>
       <div id="results"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-label">Network activity</div>
+      <div class="counters">
+        <div class="counter"><span class="n" id="req-count">0</span><span class="l">Range reads</span></div>
+        <div class="counter"><span class="n" id="byte-count">0 B</span><span class="l">Bytes fetched</span></div>
+        <div class="counter"><span class="n" id="pct-count">—</span><span class="l">Of the file</span></div>
+      </div>
+      <div id="transfer-banner" class="transfer-banner" hidden>
+        <span id="transfer-headline">—</span>
+      </div>
+      <div id="request-log" aria-live="off"></div>
+      <div class="no-endpoints"><span class="x">✕</span>No /search · <span class="x">✕</span>No /embed · <span class="x">✕</span>No /query · <span class="x">✕</span>No /api — only <code>bytes=X-Y</code> against one URL.</div>
     </section>
 
     <p class="agent-proof-link">
