@@ -130,6 +130,20 @@ book's content is not crawled twice. The scaffold-only flags (`--mode`,
 `--runtime`, `--artifact`, deploy and student options) are rejected:
 compile always builds the complete kind-3 profile.
 
+`--sentence-windows 2` also indexes every pair of consecutive sentences in
+each chunk, as extra vectors that point back to that chunk. A chunk's single
+vector averages everything it says, so a question answered by one sentence
+can lose to a chunk that is merely about the same thing; a window keeps that
+sentence close to the question. Results, citations and the corpus are still
+whole chunks — only the index has more rows (spec `COMPLETE_PROFILE.md`
+3.9). Measured on a 3,742-chunk docs corpus (a public project's docs, 51 judged
+questions): vector-only nDCG@10 rose from 0.551 to 0.595 and hybrid from
+0.592 to 0.600, at about 9.4 index rows per chunk — the file grew from 31.9
+to 47.2 MiB, an HTTP mount from 1.3 to 4.5 MiB, and a query from about
+1.1 to 1.4 MiB, 49 to 111 ms (32 to 80 ms on a local file). Build time
+grows with the row count. A windowed pack cannot be extended with
+`append` yet.
+
 A build is deterministic apart from the time it records, and that time
 is part of the pack's identity, so two builds of the same inputs differ
 only by it. Set `SOURCE_DATE_EPOCH` (whole seconds since 1970, the

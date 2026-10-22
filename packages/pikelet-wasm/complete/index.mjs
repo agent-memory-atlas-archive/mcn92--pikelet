@@ -25,6 +25,7 @@ import { loadStudentModel, embedTextWithStudent } from './student-embedder.mjs';
 import { computeMatchQuality, computePreSearchAbstention } from './student-abstention.mjs';
 import { createAbstentionScorer } from './retrieval-abstention.mjs';
 import { openLexicalIndex, openLexicalIndexLazy } from './lexical.mjs';
+import { parseRowMapSegment } from './rowmap.mjs';
 import { PikeletSketchArtifact } from '../src/artifact/pikelet-artifact.js';
 import { MAGIC, HEADER_BYTES, TABLE_ENTRY_BYTES, KINDS, KIND_NAMES } from './format.mjs';
 
@@ -769,7 +770,7 @@ export async function openPikeletFile(input, options = {}) {
         // influences a returned result. Small segments (kinds 1/2) keep the
         // one-read eager path unchanged.
         const qiDeferrable = qi.length > LAZY_QI_BYTES;
-        const [qiFirst, sketch, tables, lexicalBytes] = await Promise.all([
+        const [qiFirst, sketch, tables, lexicalBytes, rowMapBytes] = await Promise.all([
             (async () => {
                 if (qiDeferrable) {
                     return readChecked(source, qi.offset, Math.min(16, qi.length), 'query-interp header', maxReadBytes, fileBytes);
@@ -812,6 +813,17 @@ export async function openPikeletFile(input, options = {}) {
                     throw new Error('.pikelet lexical segment failed hash verification');
                 }
                 return { bytes };
+            })() : null,
+            // Row map (kind 8, OPTIONAL): a few bytes per record, read
+            // eagerly and digest-verified. Present when the index holds
+            // several vectors per record (sentence windows).
+            segments.has('rowmap') ? (async () => {
+                const seg = segments.get('rowmap');
+                const bytes = await readChecked(source, seg.offset, seg.length, 'row map segment', maxReadBytes, fileBytes);
+                if (await sha256hex(bytes) !== seg.sha256) {
+                    throw new Error('.pikelet row map segment failed hash verification');
+                }
+                return bytes;
             })() : null,
         ]);
 
@@ -1057,7 +1069,18 @@ export async function openPikeletFile(input, options = {}) {
 
         // Index: the embedded sketch artifact, opened in the wave above
         // against a segment-windowed source (resident hash verified there).
-        if (sketch.count !== declaredRecords) {
+        // The index binds to the corpus positionally (3.4) unless a row map
+        // (3.9) says how its rows group into records; the manifest names the
+        // policy that produced the rows, so a row map can neither be dropped
+        // nor added without changing the identity.
+        const rowMapPolicy = manifest.index?.rowMap ?? null;
+        if (!!rowMapPolicy !== !!rowMapBytes) {
+            throw new Error(rowMapPolicy
+                ? '.pikelet manifest declares index.rowMap but carries no row map segment'
+                : '.pikelet carries a row map segment its manifest does not declare (index.rowMap)');
+        }
+        const rowMap = rowMapBytes ? parseRowMapSegment(rowMapBytes, declaredRecords, sketch.count) : null;
+        if (!rowMap && sketch.count !== declaredRecords) {
             throw new Error(`.pikelet index count ${sketch.count} != corpus records ${declaredRecords}`);
         }
         if (sketch.dim !== undefined && sketch.dim !== dim) {
@@ -1306,14 +1329,26 @@ export async function openPikeletFile(input, options = {}) {
             const excluded = excludeIds && excludeIds.size ? excludeIds : null;
             let excludeBits = null;
             if (excluded) {
-                excludeBits = new Uint8Array(Math.ceil(recordCount / 8));
-                for (const id of excluded) excludeBits[id >> 3] |= 1 << (id & 7);
+                excludeBits = new Uint8Array(Math.ceil(sketch.count / 8));
+                for (const id of excluded) {
+                    // With a row map, excluding a record masks every row it owns.
+                    const [from, to] = rowMap ? [rowMap.offsets[id], rowMap.offsets[id + 1]] : [id, id + 1];
+                    for (let row = from; row < to; row++) excludeBits[row >> 3] |= 1 << (row & 7);
+                }
             }
             const lexicalRaw = lexicalIndex && retrieval !== 'vector'
                 ? await lexicalIndex.search(trimmed, LEXICAL_CANDIDATES, excluded ? { exclude: (id) => excluded.has(id) } : {})
                 : [];
             const lexicalHits = lexicalRaw.filter((h) => h.score >= lexicalRaw[0].score / LEXICAL_CUTOFF);
-            const searched = (await sketch.search(context.vector, k, {
+            // With a row map (3.9) the sketch searches rows: a record's lexical
+            // match joins the rerank with every row it owns, k is scaled to the
+            // mean rows per record, and the reranked rows collapse to records
+            // below, each scored by its best row.
+            const extraRows = rowMap
+                ? lexicalHits.flatMap((h) => Array.from({ length: rowMap.offsets[h.id + 1] - rowMap.offsets[h.id] }, (_, i) => rowMap.offsets[h.id] + i))
+                : lexicalHits.map((h) => h.id);
+            const searchK = rowMap ? Math.min(sketch.count, Math.ceil(k * sketch.count / recordCount)) : k;
+            const rerankedRows = (await sketch.search(context.vector, searchK, {
                 rerank: queryOptions.rerank,
                 parallelism: queryOptions.parallelism ?? queryOptions.rerankParallelism ?? options.rerankParallelism,
                 gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap ?? rerankGapHint,
@@ -1322,7 +1357,7 @@ export async function openPikeletFile(input, options = {}) {
                 // sketch reader ignores it for any query whose C
                 // exceeds the scanner's buffers.
                 ...(scanner ? { scanner } : {}),
-                ...(lexicalHits.length ? { extraCandidates: lexicalHits.map((h) => h.id) } : {}),
+                ...(extraRows.length ? { extraCandidates: extraRows } : {}),
                 ...(excludeBits ? { exclude: excludeBits } : {}),
                 // Always return the full reranked candidate list
                 // (already fetched and exactly scored) rather than
@@ -1332,6 +1367,18 @@ export async function openPikeletFile(input, options = {}) {
                 // consistently — see retrieval-abstention.mjs.
                 fullRerankOutput: true,
             })).results;
+            // The rerank output is distance-ordered, so a record's first row
+            // is its best: keeping first occurrences gives the records in
+            // order of their best row's distance.
+            let searched = rerankedRows;
+            if (rowMap) {
+                const seen = new Set();
+                searched = [];
+                for (const row of rerankedRows) {
+                    const id = rowMap.owner[row.id];
+                    if (!seen.has(id)) { seen.add(id); searched.push({ id, distance: row.distance }); }
+                }
+            }
             const hits = searched.slice(0, k);
             // Full-window fused order (not k-truncated) for scoring:
             // coverage grounds its verdict in the passage fusion
@@ -1420,6 +1467,11 @@ export async function openPikeletFile(input, options = {}) {
                     license: typeof manifest.corpus?.provenance?.license === 'string'
                         ? manifest.corpus.provenance.license : null,
                     records: recordCount,
+                    // Index rows and the policy that produced them when the
+                    // index holds several vectors per record (row map, 3.9);
+                    // otherwise one row per record and rowMap is null.
+                    indexRows: sketch.count,
+                    rowMap: rowMapPolicy ? { ...rowMapPolicy } : null,
                     dim,
                     metric: manifest.metric,
                     encoder: encoderInfo,
@@ -1636,6 +1688,9 @@ export async function openPikeletFile(input, options = {}) {
                     recordCount,
                     dim,
                     sketch,
+                    // A chain maps sketch rows to records positionally, so
+                    // it needs to know when a member's rows are not records.
+                    rowMap,
                     lexicalIndex,
                     hydrate,
                     readRecordBytes,

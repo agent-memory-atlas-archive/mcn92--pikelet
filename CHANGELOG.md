@@ -29,6 +29,19 @@ first.
 
 ### Added
 
+- **Sentence windows (`compile --sentence-windows <n>`, opt-in).** The
+  index also holds a vector for every run of `n` consecutive sentences of
+  each chunk, mapped back to the chunk by a new row-map segment (kind 8,
+  `COMPLETE_PROFILE.md` 3.9); results, citations and the corpus stay whole
+  chunks. A chunk's single vector averages everything it says, so a
+  one-sentence answer could lose to a chunk merely about the same topic.
+  On a 3,742-chunk docs corpus with 51 judged questions, `n = 2` raised
+  vector-only nDCG@10 from 0.551 to 0.595 (hybrid 0.592 to 0.600), at
+  9.4 rows per chunk: file 31.9 to 47.2 MiB, HTTP query 49 to 111 ms.
+  Readers without kind-8 support refuse such a pack (row-count check)
+  rather than misread it; `append`, `compact` and chain mounts refuse it
+  until the layered profile defines rows. `info()` gains `indexRows` and
+  `rowMap`.
 - **Reproducible builds.** `compile` honours `SOURCE_DATE_EPOCH` for the
   build time it records in the evaluation segment (and `create`/`rebuild`
   in the project manifest). The build time was the only nondeterministic

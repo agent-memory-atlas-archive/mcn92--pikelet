@@ -7,7 +7,7 @@ import fssync from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { sha256, CLI_VERSION, DEFAULT_CONFIG, RANGE_ARTIFACT_MAGIC, MODEL_MAP, CliError, buildTimestamp, loadPikelet } from './common.mjs';
-import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, applySourceRoutes, publicChunk } from './ingest.mjs';
+import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, applySourceRoutes, publicChunk, sentenceWindows } from './ingest.mjs';
 import { ingestGit } from './git-source.mjs';
 import { ingestConversations } from './conversation-source.mjs';
 import { buildCompleteArtifact } from './complete-build.mjs';
@@ -56,14 +56,35 @@ async function buildAssets(projectDir, config, options = {}) {
   applySourceRoutes(chunks, config);
   log(`Ingested ${docs.length} docs -> ${chunks.length} chunks`);
 
-  const vectors = await embedChunks(chunks, config, log, projectDir);
+  // With sentence windows (index.sentenceWindows) the index holds each
+  // chunk's own vector followed by one vector per window of its sentences;
+  // rowOffsets records which rows belong to which chunk (the row map).
+  const windowSize = config.index?.sentenceWindows || 0;
+  let rows = chunks;
+  let rowOffsets = null;
+  if (windowSize) {
+    if (config.runtime?.mode !== 'complete') {
+      throw new CliError('index.sentenceWindows needs the complete runtime: build with `pikelet compile --sentence-windows`', 1);
+    }
+    rows = [];
+    rowOffsets = [0];
+    for (const chunk of chunks) {
+      rows.push(chunk);
+      for (const text of sentenceWindows(chunk.text, windowSize)) rows.push({ text });
+      rowOffsets.push(rows.length);
+    }
+    log(`Sentence windows: ${rows.length - chunks.length} windows of ${windowSize} sentences over ${chunks.length} chunks (${rows.length} index rows)`);
+  }
+  const vectors = await embedChunks(rows, config, log, projectDir);
   const Pikelet = await loadPikelet();
-  const maxElements = Math.max(chunks.length, Math.ceil(chunks.length * 1.25));
-  const index = await Pikelet.create({ ...config.index, dim: config.embedding.dims, maxElements });
+  const maxElements = Math.max(rows.length, Math.ceil(rows.length * 1.25));
+  // sentenceWindows is a build policy, not an engine option.
+  const { sentenceWindows: _windowPolicy, ...engineIndex } = config.index;
+  const index = await Pikelet.create({ ...engineIndex, dim: config.embedding.dims, maxElements });
   let snapshot;
   try {
     index.addBatch(vectors);
-    validateSelfRecall(index, chunks, vectors, log);
+    validateSelfRecall(index, rows, vectors, log);
     snapshot = index.export();
   } finally {
     index.dispose();
@@ -103,6 +124,7 @@ async function buildAssets(projectDir, config, options = {}) {
       chunks,
       snapshot,
       vectors,
+      ...(rowOffsets ? { rowOffsets, windowSize } : {}),
       log,
     });
     manifest.artifactSha256 = artifactInfo.sha256;

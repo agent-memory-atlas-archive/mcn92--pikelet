@@ -5,14 +5,14 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { sha256, loadCompleteModules, CliError, buildTimestamp, loadArtifactContract } from './common.mjs';
-import { publicChunk, ingestDeclaration } from './ingest.mjs';
+import { publicChunk, ingestDeclaration, SENTENCE_WINDOWS_KIND } from './ingest.mjs';
 import { calibrateRetrievalAbstention } from './calibrate.mjs';
 
-async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, snapshot, vectors, log = () => {} }) {
+async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, snapshot, vectors, rowOffsets = null, windowSize = 0, log = () => {} }) {
   const artifactContract = await loadArtifactContract();
   const {
     assemblePikeletFile, buildCorpusSegment, buildInlineTransformerEncoderSegment, PROFILE_V2,
-    buildQueryInterpSegment, buildLexicalSegment, measureRecommendedRerank, loadInlineEncoderKernel,
+    buildQueryInterpSegment, buildLexicalSegment, measureRecommendedRerank, loadInlineEncoderKernel, buildRowMapSegment,
   } = (await loadCompleteModules()).builder;
   const { createInlineTransformerEmbedder, buildInlineTestVectors, openPikeletFile } = (await loadCompleteModules()).reader;
   const runtime = config.runtime || {};
@@ -142,6 +142,7 @@ async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, sn
   }), 'utf8');
   const outPath = path.join(assetsDir, runtime.fileName || 'search.pikelet');
   const corpusSegment = buildCorpusSegment(records);
+  const rowMapBytes = rowOffsets ? buildRowMapSegment(rowOffsets) : null;
   // lexical (BM25 segment for hybrid retrieval, kind 5) was built earlier,
   // above, so calibration could fit against the same fused ranking it backs
   // at serve time. Older readers skip the segment.
@@ -173,12 +174,16 @@ async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, sn
     recommendedRerank: rerankSweep.recommendedRerank,
     lexical: lexical.meta,
     sampleQueries: runtime.sampleQueries || [],
+    // Several index rows per record (sentence windows): the policy that made
+    // the rows, committed under the identity alongside the row map itself.
+    ...(rowMapBytes ? { index: { rowMap: { kind: SENTENCE_WINDOWS_KIND, sentences: windowSize, rows: rowOffsets[rowOffsets.length - 1] } } } : {}),
   }, [
     { kind: 'index', bytes: Buffer.from(sketch.bytes) },
     { kind: 'corpus', bytes: corpusSegment.bytes },
     { kind: 'query-interp', bytes: buildQueryInterpSegment(3, inlineEncoderBytes, calibration) },
     { kind: 'evaluation', bytes: evaluationBytes(goldens) },
     { kind: 'lexical', bytes: lexical.bytes },
+    ...(rowMapBytes ? [{ kind: 'rowmap', bytes: Buffer.from(rowMapBytes) }] : []),
   ], target);
   try {
     if (encoder.calibrationPath) {

@@ -8,6 +8,8 @@ export const TABLE_ENTRY_BYTES = 48;
 // layer carries exactly one tombstones segment, and a base compacted from a
 // chain carries at most one lineage segment. They are registered here so the
 // shared table has one definition; a complete-profile artifact never has
-// either, and the required-segment tables stay per-profile.
-export const KINDS = { index: 1, corpus: 2, 'query-interp': 3, evaluation: 4, lexical: 5, tombstones: 6, lineage: 7 };
+// either, and the required-segment tables stay per-profile. Kind 8, the row
+// map, is OPTIONAL in the complete profile (COMPLETE_PROFILE.md 3.9): present
+// when the index holds several vectors per record.
+export const KINDS = { index: 1, corpus: 2, 'query-interp': 3, evaluation: 4, lexical: 5, tombstones: 6, lineage: 7, rowmap: 8 };
 export const KIND_NAMES = Object.fromEntries(Object.entries(KINDS).map(([name, kind]) => [kind, name]));

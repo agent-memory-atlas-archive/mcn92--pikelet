@@ -200,6 +200,14 @@ export async function openPikeletChain(members, options = {}) {
         if (base.manifest.profile === LAYER_PROFILE) {
             throw new Error('the first chain member is a layer, not a base: a layer opened alone would serve a fraction of a corpus (4.1)');
         }
+        // A chain maps each member's sketch rows to records positionally
+        // (rowBase + local id). A member whose index holds several rows per
+        // record (row map, COMPLETE_PROFILE.md 3.9) would be misread, so it is
+        // refused until the layered profile defines rows.
+        if (tiersRaw.some((t) => t && t.rowMap)) {
+            throw new Error('a pack whose index holds several rows per record (sentence windows) cannot be part of a layered chain yet: '
+                + 'mount it on its own, or rebuild it without --sentence-windows to append to it');
+        }
 
         const chainMembers = [{
             depth: 0, identity: base.identity, rowBase: 0, records: base.recordCount,

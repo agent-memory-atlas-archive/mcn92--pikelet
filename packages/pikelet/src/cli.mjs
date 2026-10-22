@@ -255,6 +255,13 @@ Flags:
   --conversations <file|folder>
                         compile only: build from Claude Code, Claude.ai or
                         ChatGPT conversation exports
+  --sentence-windows <n>
+                        compile only: also index every run of n consecutive
+                        sentences of each chunk (2 recommended), so a
+                        one-sentence answer is not averaged away by the rest
+                        of its chunk. Results are still whole chunks. Costs
+                        roughly 8x the index rows and build time; the pack
+                        cannot be extended with append.
   --deploy / --no-deploy
   --yes
   --force               Replace an existing target directory (or output file for compile)
@@ -279,7 +286,7 @@ const BOOLEAN_FLAGS = new Set([
 const VALUE_FLAGS = new Set([
   'name', 'source', 'runtime', 'mode', 'artifact', 'out', 'license', 'model', 'epochs',
   'include', 'exclude', 'include-url', 'exclude-url', 'max-pages',
-  'calibration', 'calibration-queries', 'git', 'git-rev', 'conversations',
+  'calibration', 'calibration-queries', 'git', 'git-rev', 'conversations', 'sentence-windows',
   'encoder-model', 'encoder-vocab', 'encoder-weights', 'encoder-pooling',
   'encoder-query-prefix', 'encoder-passage-prefix',
   'student-model', 'student-vectors', 'student-abstention',
@@ -533,6 +540,8 @@ export async function compileArtifact(flags) {
   if (sources.length > 1) throw new CliError(`compile takes one of --source, --git or --conversations, got --${sources.join(' and --')}`);
   if (!sources.length) throw new CliError('compile requires --source <path|url>, --git <repo> or --conversations <file|folder>');
   if (flags['git-rev'] && !flags.git) throw new CliError('--git-rev requires --git');
+  const sentenceWindowSize = flags['sentence-windows'] === undefined ? 0 : parsePositiveInt(flags['sentence-windows'], '--sentence-windows');
+  if (sentenceWindowSize > 8) throw new CliError('--sentence-windows must be 8 or less (2 is the measured default)');
   const sourceFilters = ['include', 'exclude', 'include-url', 'exclude-url', 'max-pages'].filter((f) => flags[f] !== undefined);
   if (flags.git && sourceFilters.length) {
     throw new CliError('--include, --exclude, --include-url, --exclude-url and --max-pages filter --source; --git takes --git-rev');
@@ -620,7 +629,7 @@ export async function compileArtifact(flags) {
       pooling: encoderPooling,
       normalize: true,
     },
-    index: { ...DEFAULT_CONFIG.index },
+    index: { ...DEFAULT_CONFIG.index, ...(sentenceWindowSize ? { sentenceWindows: sentenceWindowSize } : {}) },
     runtime: {
       mode: 'complete',
       profile: 'kind3',

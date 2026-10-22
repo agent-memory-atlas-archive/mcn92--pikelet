@@ -1623,6 +1623,60 @@ console.log('rerank gap: a manifest recommendedGap is a floor under the source\'
 }
 
 // ---------------------------------------------------------------------------
+// Row map (kind 8): several index rows per record
+// ---------------------------------------------------------------------------
+console.log('row map: index rows group into records');
+{
+    const { buildRowMapSegment } = await import('../packages/pikelet-wasm/complete/builder.mjs');
+    const { parseRowMapSegment } = await import('../packages/pikelet-wasm/complete/rowmap.mjs');
+    // The synthetic sketch's COUNT rows become COUNT/2 records of two rows
+    // each: record r owns rows 2r and 2r+1, so row 17 belongs to record 8.
+    const HALF = COUNT / 2;
+    const halfCorpus = buildCorpusSegment(RECORDS.slice(0, HALF), { pageRecords: PAGE_RECORDS });
+    const pairs = Array.from({ length: HALF + 1 }, (_, r) => 2 * r);
+    const policy = { kind: 'sentence-windows-v1', sentences: 2, rows: COUNT };
+    const windowed = (name, { rowMap = buildRowMapSegment(pairs), declare = policy } = {}) => {
+        const out = path.join(tmp, `${name}.pikelet`);
+        assemblePikeletFile({
+            profile: PROFILE_V2, corpus: { ...halfCorpus.corpus, provenance: null }, dim: DIM, metric: 'cosine',
+            encoder: { kind: 'external-transformers-v1' }, recommendedRerank: 40, sampleQueries: [],
+            ...(declare ? { index: { rowMap: declare } } : {}),
+        }, [
+            { kind: 'index', bytes: SKETCH },
+            { kind: 'corpus', bytes: halfCorpus.bytes },
+            { kind: 'query-interp', bytes: buildQueryInterpSegment(2, Buffer.from(JSON.stringify(kind2Declaration()), 'utf8'), CALIBRATION) },
+            { kind: 'evaluation', bytes: EVALUATION },
+            ...(rowMap ? [{ kind: 'rowmap', bytes: Buffer.from(rowMap) }] : []),
+        ], out);
+        return out;
+    };
+    const pack = await openPikeletFile(windowed('rowmap'), { encodeQuery: hostEncode });
+    const info = pack.info();
+    check('info reports records and index rows separately', info.records === HALF && info.indexRows === COUNT, `${info.records}/${info.indexRows}`);
+    check('info reports the row policy', info.rowMap?.kind === 'sentence-windows-v1' && info.rowMap?.sentences === 2);
+    const out = await pack.query('rec 17', { k: 10, showAbstained: true });
+    check('a row hit returns the record that owns it', out.results[0]?.id === 8, String(out.results[0]?.id));
+    check('each record appears once, however many of its rows matched',
+        new Set(out.results.map((r) => r.id)).size === out.results.length && out.results.every((r) => r.id < HALF));
+    const ev = await pack.__calibrationEvidence('rec 17', { excludeIds: new Set([8]) });
+    check('excluding a record masks every row it owns', ev.vector.every((h) => h.id !== 8) && ev.fused.every((h) => h.id !== 8));
+    await pack.close();
+
+    await rejects('a declared row map with no row map segment is refused',
+        () => openPikeletFile(windowed('rowmap-undeclared-segment', { rowMap: null }), { encodeQuery: hostEncode }), /declares index\.rowMap but carries no row map/);
+    await rejects('a row map segment the manifest does not declare is refused',
+        () => openPikeletFile(windowed('rowmap-undeclared-policy', { declare: null }), { encodeQuery: hostEncode }), /does not declare \(index\.rowMap\)/);
+    // Valid on its own (the last record owns one row) but spans 299 of the index's 300 rows.
+    const short = pairs.slice(0, -1).concat([COUNT - 1]);
+    await rejects('a row map that does not span the index is refused',
+        () => openPikeletFile(windowed('rowmap-short', { rowMap: buildRowMapSegment(short) }), { encodeQuery: hostEncode }), /row map covers \d+ rows, index holds/);
+    check('a record with no rows cannot be built', (() => { try { buildRowMapSegment([0, 2, 2, 4]); return false; } catch { return true; } })());
+    const good = buildRowMapSegment(pairs);
+    const zeroRow = new Uint8Array(good); new DataView(zeroRow.buffer).setUint32(16 + 4 * 2, 2, true);
+    check('a parsed row map rejects a record with no rows', (() => { try { parseRowMapSegment(zeroRow, HALF, COUNT); return false; } catch { return true; } })());
+}
+
+// ---------------------------------------------------------------------------
 // Compile-time calibration: matchQuality is retrieval relevance (v6)
 // ---------------------------------------------------------------------------
 console.log('calibration: a compiled pack scores relevance, fit against off-topic queries');
@@ -1764,6 +1818,31 @@ console.log('calibration: a compiled pack scores relevance, fit against off-topi
     check('the compacted pack scores an off-topic question "none"', offTopic === 'none', offTopic);
     await folded.close();
 
+    // Sentence windows: compile indexes each chunk plus its 2-sentence
+    // windows, maps the rows back to chunks, and calibrates through the same
+    // windowed retrieval it serves.
+    console.log('sentence windows: compile, serve and calibrate over windowed rows');
+    const windowedOut = path.join(tmp, 'windowed.pikelet');
+    cli(['compile', '--source', docs, '--out', windowedOut, '--sentence-windows', '2']);
+    const wpack = await openPikeletFile(windowedOut);
+    const winfo = wpack.info();
+    check('a windowed pack indexes more rows than records', winfo.indexRows > winfo.records && winfo.rowMap?.sentences === 2,
+        `${winfo.indexRows} rows / ${winfo.records} records`);
+    let wSame = 0;
+    for (const q of probes) {
+        const ev = await wpack.__calibrationEvidence(q);
+        const served = await wpack.query(q, { k: 10, showAbstained: true });
+        const augmented = await wpack.query(q, { k: 10, showAbstained: true, retrieval: 'augmented' });
+        if (ids(ev.fused.slice(0, 10)) === ids(served.results) && ids(ev.vector.slice(0, 10)) === ids(augmented.results)
+            && new Set(served.results.map((r) => r.id)).size === served.results.length) wSame++;
+    }
+    check('windowed calibration evidence matches what query() serves, one result per record', wSame === probes.length, `${wSame}/${probes.length}`);
+    const wverdict = (await wpack.query('how do bees tell each other where flowers are', { k: 5, showAbstained: true })).matchQuality;
+    check('a windowed pack is calibrated and scores an on-topic question', wverdict === 'strong' || wverdict === 'weak', wverdict);
+    await wpack.close();
+    let appendRefusal = '';
+    try { cli(['append', '--parent', windowedOut, '--source', more, '--out', path.join(tmp, 'windowed.0001.pikelet')]); } catch (error) { appendRefusal = String(error.stderr); }
+    check('append refuses a windowed pack rather than misreading its rows', /sentence windows/.test(appendRefusal), appendRefusal.slice(0, 200));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

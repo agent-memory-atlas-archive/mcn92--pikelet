@@ -129,7 +129,7 @@ fields MUST be ignored by readers (and are covered by the identity digest).
 
 | Offset | Type | Field |
 | ---: | --- | --- |
-| 0 | u32 | kind (`1` index, `2` corpus, `3` query-interp, `4` evaluation, `5` lexical) |
+| 0 | u32 | kind (`1` index, `2` corpus, `3` query-interp, `4` evaluation, `5` lexical, `8` row map) |
 | 4 | u32 | reserved (zero) |
 | 8 | u64 | offset (16-byte aligned) |
 | 16 | u64 | bytes |
@@ -137,13 +137,17 @@ fields MUST be ignored by readers (and are covered by the identity digest).
 
 Exactly one segment of each kind 1–3 is REQUIRED; evaluation (kind 4) is
 REQUIRED for conformance but a reader MAY serve queries without reading it.
-At most one lexical segment (kind 5, section 3.8) MAY be present.
+At most one lexical segment (kind 5, section 3.8) MAY be present, and at
+most one row map (kind 8, section 3.9). Kinds 6 and 7 belong to the layered
+profile.
 Unknown kinds MUST be skipped (they are still committed via the manifest).
 
 ### 3.4 Index segment (kind 1)
 
 A byte-for-byte valid `.pikelet-sketch` artifact (magic `PSA1`), row ids
-`[0, count)` binding positionally to corpus records. Readers open it with
+`[0, count)` binding positionally to corpus records — unless a row map
+(section 3.9) groups the rows into records, in which case `count` is the
+row map's row count instead of `corpus.records`. Readers open it with
 the sketch reader against a range source offset by the segment's `offset`;
 `staged` open is RECOMMENDED for interactive hosts.
 
@@ -338,6 +342,42 @@ b = 0.75, idf = ln(1 + (N − df + 0.5)/(df + 0.5)).
 The regions MUST tile the segment exactly in the order above; a reader
 MUST reject a segment whose offsets disagree with its counts, whose
 postings run past `postingsBytes`, or whose doc ids reach `docCount`.
+
+### 3.9 Row map segment (kind 8, OPTIONAL)
+
+Present when the index holds several vectors per corpus record: the
+reference builder's `sentence-windows-v1` policy indexes each chunk's own
+vector followed by one vector per run of `n` consecutive sentences of that
+chunk (`compile --sentence-windows n`), so a single answering sentence is
+not averaged away by the rest of its chunk. Records stay the unit of
+results, citations and the corpus; only the index has more rows.
+
+```
+[0,4)   u32 version = 1
+[4,8)   u32 records    MUST equal manifest corpus.records
+[8,12)  u32 rows       MUST equal the index segment's row count
+[12,16) reserved, zero
+offsets u32[records + 1]
+```
+
+Record `i` owns rows `[offsets[i], offsets[i+1])`; `offsets[0]` is 0,
+`offsets[records]` is `rows`, and offsets strictly increase, so every
+record owns at least one row and every row maps to exactly one record. The
+manifest MUST declare the policy that produced the rows as
+`index.rowMap` (`{ kind, sentences, rows }`), and a reader MUST refuse a
+file where a row map segment and `index.rowMap` are not both present or
+both absent, or whose segment disagrees with the counts above. The segment
+is small (4 bytes per record) and read eagerly with its digest verified.
+
+Query semantics (section 4) apply to records: the scan and rerank run over
+rows; a lexical candidate joins the rerank with every row its record owns;
+an excluded record masks all of its rows before the top-C cut; and the
+distance-ordered rerank output collapses to records, each at its best
+row's distance, before fusion, abstention and hydration. A reader that
+predates kind 8 skips the segment (3.3) and then fails the row-count
+cross-check in 3.4, so it refuses the file rather than misreading it. The
+layered profile does not yet define rows; producers and chain readers MUST
+refuse to layer a member that carries a row map.
 
 ## 4. Execution semantics
 

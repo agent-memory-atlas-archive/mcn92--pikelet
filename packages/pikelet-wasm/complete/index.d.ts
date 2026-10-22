@@ -126,6 +126,10 @@ export interface CompleteSearch {
      */
     license: string | null;
     records: number;
+    /** Rows in the index: equal to records unless a row map groups several rows per record. */
+    indexRows: number;
+    /** The policy behind a multi-row index (COMPLETE_PROFILE.md 3.9), e.g. sentence windows; null otherwise. */
+    rowMap: { kind: string; sentences: number; rows: number } | null;
     dim: number;
     metric: string | number;
     encoder: Record<string, unknown>;

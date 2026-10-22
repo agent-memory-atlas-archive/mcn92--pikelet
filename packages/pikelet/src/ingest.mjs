@@ -975,6 +975,37 @@ function publicChunk(chunk) {
   };
 }
 
+// Sentence windows (an opt-in index policy, compile --sentence-windows):
+// short runs of a chunk's own sentences, each indexed as an extra vector row
+// that maps back to the chunk (the row map, COMPLETE_PROFILE.md 3.9). A
+// chunk's single vector averages everything it says, which dilutes a
+// one-sentence answer; a window keeps that sentence close to the question it
+// answers. Windows carry the chunk's heading (its first line) so a sentence
+// keeps the context that gives it meaning. Only the corpus's own text is used.
+const SENTENCE_WINDOWS_KIND = 'sentence-windows-v1';
+const SENTENCE_WINDOW_MIN_WORDS = 5;
+
+function sentenceWindows(text, size) {
+  const nl = text.indexOf('\n');
+  const heading = nl === -1 ? '' : text.slice(0, nl).trim();
+  const body = nl === -1 ? text : text.slice(nl + 1);
+  const sentences = [];
+  for (const piece of body.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean)) {
+    // Fragments under SENTENCE_WINDOW_MIN_WORDS words (list stubs, code
+    // tokens) join the piece that follows them.
+    const last = sentences.length - 1;
+    if (last >= 0 && sentences[last].split(/\s+/).length < SENTENCE_WINDOW_MIN_WORDS) sentences[last] += ` ${piece}`;
+    else sentences.push(piece);
+  }
+  // A chunk no longer than one window is already indexed by its own vector.
+  if (sentences.length <= size) return [];
+  const windows = [];
+  for (let i = 0; i + size <= sentences.length; i++) {
+    windows.push(`${heading}\n${sentences.slice(i, i + size).join(' ')}`);
+  }
+  return windows;
+}
+
 export {
   MAX_CRAWL_BODY_BYTES,
   ingestFolder,
@@ -999,4 +1030,6 @@ export {
   dedupeChunks,
   applySourceRoutes,
   publicChunk,
+  sentenceWindows,
+  SENTENCE_WINDOWS_KIND,
 };
