@@ -117,72 +117,6 @@ export async function compactChain(flags, options = {}) {
     log(`Rebuilt lexical index: ${lexical.meta.terms.toLocaleString()} terms over `
       + `${lexical.meta.docCount.toLocaleString()} live record(s) — statistics are now exact`);
 
-    // --- 4. Calibration ----------------------------------------------------
-    // 6.3 step 4: "Refit calibration with the chain's encoder ... If the
-    // producer cannot refit, it MUST ship `unscored`, never the inherited fit."
-    // The refit is the normative path and `unscored` is the fallback, so this
-    // refits when it can. It is opt-OUT rather than opt-in (--no-refit) because
-    // shipping unscored silently turns every query on the compacted pack into
-    // an unverdicted one.
-    //
-    // The cost is real and worth naming: the verbatim row copy above removed
-    // the per-record forward pass, and a refit puts one back, because the
-    // calibrator fits against float vectors and generated queries rather than
-    // the quantized rows on disk. That is a build-time cost paid once per
-    // compaction, not a serve-time one.
-    let calibration = Buffer.from(JSON.stringify({
-      kind: 'retrieval-signals-v1', asset: null, vocabBloomBase64: '',
-    }), 'utf8');
-    if (flags['no-refit']) {
-      log('Calibration: shipping unscored at --no-refit; the compacted pack reports '
-        + 'match_quality "unscored" for every query (6.3)');
-    } else {
-      const enc = await head.passageEmbedder();
-      if (!enc) {
-        log(`Calibration: shipping unscored — the base's query-interpretation kind ${head.qiKind} `
-          + 'carries no encoder to refit with, and the inherited fit must never be carried '
-          + 'across a compaction (6.3)');
-      } else {
-        const { loadPikelet } = await import('./common.mjs');
-        const Pikelet = await loadPikelet();
-        const { calibrateRetrievalAbstention } = await import('./calibrate.mjs');
-        const { openLexicalIndex } = await import('pikelet-wasm/complete');
-        log(`Refitting calibration over ${liveChunks.length} live record(s) with the base's own encoder`
-          + `${enc.declaration.model ? ` (${enc.declaration.model})` : ''}`);
-        // Float vectors for the fit. The index above copies quantized rows; a
-        // fit needs the pre-quantization vectors, so these are embedded here
-        // and thrown away with this process.
-        const fitVectors = [];
-        for (const text of texts) fitVectors.push(await enc.embed(text));
-        const refit = await calibrateRetrievalAbstention({
-          Pikelet,
-          chunks: liveChunks,
-          vectors: fitVectors,
-          // The calibrator builds a scratch index for its probes, so it needs
-          // the metric as the string form create() takes (head.metricCode is
-          // the numeric one the artifact header carries) and the same
-          // quantization the base used.
-          config: {
-            embedding: { dims: head.dim },
-            index: { metric: head.metric, quantized: true },
-          },
-          embedQuery: enc.embedQuery,
-          embedWordVecs: enc.embedWords,
-          lexicalIndex: openLexicalIndex(lexical.bytes),
-          log,
-        });
-        if (refit) {
-          calibration = Buffer.from(JSON.stringify(refit.calibrationJson), 'utf8');
-          const s = refit.summary || {};
-          log(`Calibration: refit over the compacted corpus — 5-fold CV AUC ${s.cvAuc ?? 'n/a'} vs off-topic `
-            + `(in-domain-unanswerable ${s.cvAucHard ?? 'n/a'}), bloom over live records only`);
-        } else {
-          log('Calibration: shipping unscored — the refit declined (the calibrator reports why '
-            + 'above), and the inherited fit must never be carried across a compaction (6.3)');
-        }
-      }
-    }
-
     // --- 5. The lineage segment (kind 7), REQUIRED ---------------------------
     const heads = chainMembers.map((m, i) => ({
       identity: m.identity,
@@ -224,12 +158,11 @@ export async function compactChain(flags, options = {}) {
         + `in a ${baseQi.length}-byte segment; refusing to rebuild it`);
     }
     const encoderBytes = baseQi.subarray(16, 16 + qiEncoderLen);
-    const queryInterp = builder.buildQueryInterpSegment(qiKindRead, encoderBytes, calibration);
     if (qiVersion !== 1) {
       throw new CliError(`the base's query-interp segment is version ${qiVersion}; this build writes version 1`);
     }
 
-    const written = builder.assemblePikeletFile({
+    const assemble = (calibration, target) => builder.assemblePikeletFile({
       profile: builder.PROFILE_V2,
       dim: head.dim,
       metric: head.metric,
@@ -250,10 +183,75 @@ export async function compactChain(flags, options = {}) {
     }, [
       { kind: 'index', bytes: indexBytes },
       { kind: 'corpus', bytes: corpus.bytes },
-      { kind: 'query-interp', bytes: queryInterp },
+      { kind: 'query-interp', bytes: builder.buildQueryInterpSegment(qiKindRead, encoderBytes, calibration) },
       { kind: 'lexical', bytes: lexical.bytes },
       { kind: 'lineage', bytes: lineage },
-    ], outPath);
+    ], target);
+
+    // --- 4. Calibration ----------------------------------------------------
+    // 6.3 step 4: "Refit calibration with the chain's encoder ... If the
+    // producer cannot refit, it MUST ship `unscored`, never the inherited fit."
+    // The refit is the normative path and `unscored` is the fallback, so this
+    // refits when it can. It is opt-OUT rather than opt-in (--no-refit) because
+    // shipping unscored silently turns every query on the compacted pack into
+    // an unverdicted one.
+    //
+    // The refit retrieves through the compacted pack itself: it is assembled
+    // unscored, opened with the reader, and every calibration probe runs the
+    // reader's own retrieval over the quantized rows it will serve, so the
+    // fit sees the evidence the pack is later scored on. No record is
+    // re-embedded; the cost is the probe queries, paid once per compaction.
+    const unscored = Buffer.from(JSON.stringify({
+      kind: 'retrieval-signals-v1', asset: null, vocabBloomBase64: '',
+    }), 'utf8');
+    let calibration = unscored;
+    if (flags['no-refit']) {
+      log('Calibration: shipping unscored at --no-refit; the compacted pack reports '
+        + 'match_quality "unscored" for every query (6.3)');
+    } else {
+      const enc = await head.passageEmbedder();
+      if (!enc) {
+        log(`Calibration: shipping unscored — the base's query-interpretation kind ${head.qiKind} `
+          + 'carries no encoder to refit with, and the inherited fit must never be carried '
+          + 'across a compaction (6.3)');
+      } else {
+        const { calibrateRetrievalAbstention } = await import('./calibrate.mjs');
+        const { openPikeletFile } = await import('pikelet-wasm/complete');
+        log(`Refitting calibration over ${liveChunks.length} live record(s) with the base's own encoder`
+          + `${enc.declaration.model ? ` (${enc.declaration.model})` : ''}`);
+        const uncalibratedPath = `${outPath}.uncalibrated`;
+        let refit;
+        try {
+          assemble(unscored, uncalibratedPath);
+          const uncalibrated = await openPikeletFile(uncalibratedPath);
+          try {
+            refit = await calibrateRetrievalAbstention({
+              chunks: liveChunks,
+              config: { embedding: { dims: head.dim } },
+              embedQuery: enc.embedQuery,
+              embedWordVecs: enc.embedWords,
+              evidence: (text, options) => uncalibrated.__calibrationEvidence(text, options),
+              log,
+            });
+          } finally {
+            await uncalibrated.close();
+          }
+        } finally {
+          fssync.rmSync(uncalibratedPath, { force: true });
+        }
+        if (refit) {
+          calibration = Buffer.from(JSON.stringify(refit.calibrationJson), 'utf8');
+          const s = refit.summary || {};
+          log(`Calibration: refit over the compacted corpus — 5-fold CV AUC ${s.cvAuc ?? 'n/a'} vs off-topic `
+            + `(in-domain-unanswerable ${s.cvAucHard ?? 'n/a'}), bloom over live records only`);
+        } else {
+          log('Calibration: shipping unscored — the refit declined (the calibrator reports why '
+            + 'above), and the inherited fit must never be carried across a compaction (6.3)');
+        }
+      }
+    }
+
+    const written = assemble(calibration, outPath);
 
     log(`Wrote ${outPath}`);
     log(`  ${(written.fileBytes / 1024 / 1024).toFixed(2)} MB, ${plan.liveRecords} records, depth 0, `

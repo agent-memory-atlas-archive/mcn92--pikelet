@@ -1675,6 +1675,49 @@ console.log('calibration: a compiled pack scores relevance, fit against off-topi
     }
     await pack.close();
 
+    // Calibration retrieves through __calibrationEvidence, the same code
+    // query() serves from, so the evidence a fit sees is the evidence a
+    // query is scored on. Checked against query() itself, over the kinds of
+    // text calibration probes with: title questions, content words, and
+    // off-topic queries.
+    console.log('calibration evidence: the fit sees what query() scores');
+    const parity = await openPikeletFile(out);
+    const probes = ['what is tides', 'tell me about volcanoes', 'yeast ferments sugars flour',
+        'waggle dance direction distance', 'glaciers carve valleys', 'how do I renew my passport',
+        'nginx 502 bad gateway fix', 'qzvxk plorbit wendash'];
+    const ids = (list) => list.map((h) => h.id).join(',');
+    let vectorSame = 0, fusedSame = 0, distancesSame = 0, kStable = 0;
+    for (const q of probes) {
+        const ev = await parity.__calibrationEvidence(q);
+        const served = await parity.query(q, { k: 10, showAbstained: true });
+        const augmented = await parity.query(q, { k: 10, showAbstained: true, retrieval: 'augmented' });
+        if (ids(ev.vector.slice(0, 10)) === ids(augmented.results)) vectorSame++;
+        if (ev.vector.slice(0, 10).every((h, i) => h.distance === augmented.results[i]?.distance)) distancesSame++;
+        if (ids(ev.fused.slice(0, 10)) === ids(served.results)) fusedSame++;
+        // A caller's k up to the rerank depth changes how much is returned,
+        // never the evidence a verdict is scored on.
+        const atK = await Promise.all([1, 3, 5].map((k) => parity.query(q, { k, showAbstained: true })));
+        if (atK.every((r) => r.matchQuality === served.matchQuality && r.confidence === served.confidence
+            && JSON.stringify(r.grounding) === JSON.stringify(served.grounding)
+            && ids(r.results) === ids(served.results.slice(0, r.results.length)))) kStable++;
+    }
+    check('calibration evidence has the vector top 10 query() ranks', vectorSame === probes.length, `${vectorSame}/${probes.length}`);
+    check('calibration evidence has the exact distances query() reads', distancesSame === probes.length, `${distancesSame}/${probes.length}`);
+    check('calibration evidence has the fused top 10 query() serves', fusedSame === probes.length, `${fusedSame}/${probes.length}`);
+    check('verdict, confidence and ranking agree across k = 1, 3, 5, 10', kStable === probes.length, `${kStable}/${probes.length}`);
+    // Ablation: excluded records leave both candidate sources before they
+    // are cut to size, so they never come back through BM25, and the
+    // window refills from what remains instead of shrinking.
+    const ablate = 'the moon pulls on the ocean raising two bulges of water';
+    const full = await parity.__calibrationEvidence(ablate);
+    const excludeIds = new Set(full.vector.slice(0, 5).map((h) => h.id));
+    const ablated = await parity.__calibrationEvidence(ablate, { excludeIds });
+    check('an excluded record never reappears in the vector window', ablated.vector.every((h) => !excludeIds.has(h.id)));
+    check('an excluded record never reappears through BM25 into the fused window', ablated.fused.every((h) => !excludeIds.has(h.id)));
+    check('excluding the whole unfiltered top 5 still yields a full window',
+        ablated.vector.length >= Math.min(10, full.vector.length - excludeIds.size), `${ablated.vector.length} of ${full.vector.length}`);
+    await parity.close();
+
     // Reproducible builds: the evaluation segment's generatedAt is the only
     // wall-clock input, and SOURCE_DATE_EPOCH pins it, so two builds of the
     // same inputs are the same bytes and the same identity.
@@ -1694,6 +1737,32 @@ console.log('calibration: a compiled pack scores relevance, fit against off-topi
     let refused = null;
     try { compileAt(path.join(tmp, 'reproducible-bad.pikelet'), 'yesterday'); } catch (error) { refused = String(error.stderr); }
     check('a malformed SOURCE_DATE_EPOCH is refused', /SOURCE_DATE_EPOCH must be a whole number/.test(refused || ''), refused);
+
+    // Compaction refits calibration (LAYERED_PROFILE 6.3) through the
+    // compacted pack's own retrieval, so the refit runs end to end here
+    // rather than only its --no-refit fallback.
+    console.log('compaction: the refit fits through the compacted pack and scores');
+    const more = path.join(tmp, 'calibration-more');
+    fs.mkdirSync(more);
+    fs.writeFileSync(path.join(more, 'comets.md'), '# Comets\n\nA comet is a ball of ice and dust that grows a glowing coma and a long tail as it nears the sun.\n\n'
+        + 'The solar wind pushes the ion tail straight away from the sun, while the dust tail curves along the orbit.\n');
+    const cli = (args) => execFileSync(process.execPath, [path.join(ROOT, 'packages', 'pikelet', 'bin', 'pikelet.mjs'), ...args],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const layer = path.join(tmp, 'calibrated.0001.pikelet');
+    cli(['append', '--parent', out, '--source', more, '--out', layer]);
+    const compacted = path.join(tmp, 'compacted.pikelet');
+    const compactLog = cli(['compact', '--head', out, '--head', layer, '--out', compacted]);
+    check('compaction refits rather than shipping unscored', /Calibration: refit over the compacted corpus/.test(compactLog), compactLog.slice(-300));
+    check('the refit leaves no uncalibrated scratch file behind', !fs.existsSync(`${compacted}.uncalibrated`));
+    const folded = await openPikeletFile(compacted);
+    const foldedVerdict = async (q) => (await folded.query(q, { k: 5, showAbstained: true })).matchQuality;
+    for (const q of ['why does a comet grow a tail', 'what makes bread dough rise']) {
+        const v = await foldedVerdict(q);
+        check(`the compacted pack scores an on-topic question: ${q}`, v === 'strong' || v === 'weak', v);
+    }
+    const offTopic = await foldedVerdict('best mortgage refinance rates');
+    check('the compacted pack scores an off-topic question "none"', offTopic === 'none', offTopic);
+    await folded.close();
 
 }
 

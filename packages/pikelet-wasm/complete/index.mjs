@@ -1256,6 +1256,143 @@ export async function openPikeletFile(input, options = {}) {
             ? Math.max(manifest.recommendedGap, Number(source.preferredGapBytes) || 0)
             : undefined;
 
+        // The one retrieval path behind query(): resident sketch scan plus
+        // BM25 candidates, exact rerank, rank fusion and phrase pinning.
+        // Compile-time calibration fits on exactly this (through
+        // __calibrationEvidence below), so the evidence a verdict was fit on
+        // is the evidence query() scores. excludeIds removes records from
+        // both candidate sources before either is cut to size — calibration
+        // ablations use it; query() never does.
+        const retrieveCandidates = async (trimmed, context, k, queryOptions, excludeIds = null) => {
+            let fusedFull = null;
+            // Hybrid retrieval when the artifact carries a lexical
+            // segment: the BM25 top matches join the sketch's exact
+            // rerank as extra candidates (scored by true vector
+            // distance like any candidate — this is what recovers
+            // known-item lookups the sketch scan's top-C missed),
+            // and the final ordering fuses the distance ranking
+            // with the BM25 ranking by reciprocal rank (RRF, k=60,
+            // untuned). Abstention still scores the distance-sorted
+            // top-k exactly as calibrated; fusion affects result
+            // order only. fullRerankOutput returns every reranked
+            // candidate (all already fetched and exactly scored) so
+            // fusion sees the true distance of every lexical match.
+            // Common query terms give every matching document a
+            // small, near-tied BM25 score (idf collapses them);
+            // that flat mass carries no ranking information and
+            // dilutes rank fusion. Keep only hits within a factor
+            // of the best lexical score — for a known-item lookup
+            // that is typically the one document holding the rare
+            // terms.
+            // retrieval: 'hybrid' (default when the artifact
+            // carries a lexical segment) | 'vector' | 'lexical' —
+            // the last two exist for measurement and debugging
+            // (retrieval-quality bakeoffs run all three on one
+            // artifact). Abstention scores the distance-sorted
+            // top-k identically in every mode.
+            // 'augmented' unions the lexical candidates into the
+            // exact rerank but keeps pure distance order — the mode
+            // for workloads scored against exact nearest neighbors,
+            // where RRF's reordering reads as loss by definition.
+            const retrieval = queryOptions.retrieval ?? 'hybrid';
+            if (!['hybrid', 'vector', 'lexical', 'augmented'].includes(retrieval)) {
+                throw new Error(`query() retrieval must be hybrid, vector, lexical, or augmented, got ${retrieval}`);
+            }
+            // An excluded record must not take a candidate slot on either
+            // side, so both sources skip it before cutting to size — BM25
+            // before its top-n sort (scored with the full corpus's term
+            // statistics, the one way this differs from a corpus without
+            // those records) and the sketch before its top-C cut.
+            const excluded = excludeIds && excludeIds.size ? excludeIds : null;
+            let excludeBits = null;
+            if (excluded) {
+                excludeBits = new Uint8Array(Math.ceil(recordCount / 8));
+                for (const id of excluded) excludeBits[id >> 3] |= 1 << (id & 7);
+            }
+            const lexicalRaw = lexicalIndex && retrieval !== 'vector'
+                ? await lexicalIndex.search(trimmed, LEXICAL_CANDIDATES, excluded ? { exclude: (id) => excluded.has(id) } : {})
+                : [];
+            const lexicalHits = lexicalRaw.filter((h) => h.score >= lexicalRaw[0].score / LEXICAL_CUTOFF);
+            const searched = (await sketch.search(context.vector, k, {
+                rerank: queryOptions.rerank,
+                parallelism: queryOptions.parallelism ?? queryOptions.rerankParallelism ?? options.rerankParallelism,
+                gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap ?? rerankGapHint,
+                maxRangeBytes: queryOptions.maxRangeBytes ?? options.rerankMaxRangeBytes,
+                // Present once background staging finished; the
+                // sketch reader ignores it for any query whose C
+                // exceeds the scanner's buffers.
+                ...(scanner ? { scanner } : {}),
+                ...(lexicalHits.length ? { extraCandidates: lexicalHits.map((h) => h.id) } : {}),
+                ...(excludeBits ? { exclude: excludeBits } : {}),
+                // Always return the full reranked candidate list
+                // (already fetched and exactly scored) rather than
+                // truncating to k: abstention is fit at a fixed
+                // top-10 window (calibrate.mjs) independent of the
+                // caller's k, and needs that full window to score
+                // consistently — see retrieval-abstention.mjs.
+                fullRerankOutput: true,
+            })).results;
+            const hits = searched.slice(0, k);
+            // Full-window fused order (not k-truncated) for scoring:
+            // coverage grounds its verdict in the passage fusion
+            // actually ranks first, and calibrate.mjs fits it the
+            // same way — a k-truncated fused list would silently
+            // drop the fused top hit for callers requesting a small k.
+            if (retrieval === 'lexical') {
+                const byId = new Map(searched.map((hit) => [hit.id, hit]));
+                fusedFull = lexicalHits.map((h) => byId.get(h.id)).filter(Boolean);
+            } else if (retrieval !== 'augmented' && lexicalHits.length) {
+                const lexRank = new Map(lexicalHits.map((h, i) => [h.id, i]));
+                fusedFull = fuseCandidates(searched, lexicalHits.map((h) => h.id));
+                // One batched hydration for everything this block and
+                // scoreQuality's coverage term (below) will need, in
+                // place of two separate staged fetches (phrase-pin's
+                // own, then a later cold start for coverage): over a
+                // remote range-read source each hydrate() a caller
+                // hasn't already paid for is its own network round
+                // trip, and sequential/staged awaits pay that cost
+                // once per stage instead of once per query. The
+                // union of phrase-pin's candidates (top lexical
+                // hits) and coverage's (fusedFull's top few — phrase
+                // pinning only ever reorders that window, never
+                // changes its membership) is known right here, so
+                // both stages can share one round trip. A record
+                // that fails to hydrate here does not fail the
+                // query: the id is just missing from the map, and
+                // each site below falls through exactly as it would
+                // on a cold cache miss (recs[i] undefined; coverage
+                // sees fewer usable passages) — hydrate() raising
+                // for a bad id is still a real failure, but only
+                // once a site actually needs that specific record,
+                // not speculatively for every candidate touched here.
+                const phraseCandidates = lexicalHits.slice(0, 3);
+                const coverageCandidates = fusedFull.slice(0, COVERAGE_BATCH_COUNT);
+                const batchIds = [...new Set([...phraseCandidates, ...coverageCandidates].map((h) => h.id))];
+                const batch = new Map();
+                await Promise.all(batchIds.map(async (id) => {
+                    try { batch.set(id, await hydrate(id)); } catch { /* see comment above */ }
+                }));
+                // Phrase pinning: a verbatim occurrence of the query (>= 3
+                // content words) in one of the top lexical hits is the
+                // strongest evidence of support there is; rank it first.
+                const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+                const phrase = norm(trimmed);
+                if (phrase.split(' ').length >= 3) {
+                    for (const h of phraseCandidates) {
+                        if (norm(batch.get(h.id)?.text).includes(phrase)) {
+                            fusedFull = [searched.find((x) => x.id === h.id), ...fusedFull.filter((x) => x.id !== h.id)].filter(Boolean);
+                            break;
+                        }
+                    }
+                }
+                // Rank transparency: a consumer can see a verbatim hit sitting
+                // at fused rank 3 behind two semantic near-misses.
+                for (const [i, hit] of fusedFull.entries()) { hit.fusedRank = i + 1; hit.lexicalRank = lexRank.has(hit.id) ? lexRank.get(hit.id) + 1 : null; hit.vectorRank = searched.findIndex((x) => x.id === hit.id) + 1; }
+            }
+            const fused = retrieval === 'augmented' ? null : fusedFull?.slice(0, k) ?? null;
+            return { hits, fused, searched, fusedFull };
+        };
+
         return {
             info() {
                 return {
@@ -1351,120 +1488,7 @@ export async function openPikeletFile(input, options = {}) {
                 let fused = null;
                 let searched = null;
                 let fusedFull = null;
-                if (!pre) {
-                    // Hybrid retrieval when the artifact carries a lexical
-                    // segment: the BM25 top matches join the sketch's exact
-                    // rerank as extra candidates (scored by true vector
-                    // distance like any candidate — this is what recovers
-                    // known-item lookups the sketch scan's top-C missed),
-                    // and the final ordering fuses the distance ranking
-                    // with the BM25 ranking by reciprocal rank (RRF, k=60,
-                    // untuned). Abstention still scores the distance-sorted
-                    // top-k exactly as calibrated; fusion affects result
-                    // order only. fullRerankOutput returns every reranked
-                    // candidate (all already fetched and exactly scored) so
-                    // fusion sees the true distance of every lexical match.
-                    // Common query terms give every matching document a
-                    // small, near-tied BM25 score (idf collapses them);
-                    // that flat mass carries no ranking information and
-                    // dilutes rank fusion. Keep only hits within a factor
-                    // of the best lexical score — for a known-item lookup
-                    // that is typically the one document holding the rare
-                    // terms.
-                    // retrieval: 'hybrid' (default when the artifact
-                    // carries a lexical segment) | 'vector' | 'lexical' —
-                    // the last two exist for measurement and debugging
-                    // (retrieval-quality bakeoffs run all three on one
-                    // artifact). Abstention scores the distance-sorted
-                    // top-k identically in every mode.
-                    // 'augmented' unions the lexical candidates into the
-                    // exact rerank but keeps pure distance order — the mode
-                    // for workloads scored against exact nearest neighbors,
-                    // where RRF's reordering reads as loss by definition.
-                    const retrieval = queryOptions.retrieval ?? 'hybrid';
-                    if (!['hybrid', 'vector', 'lexical', 'augmented'].includes(retrieval)) {
-                        throw new Error(`query() retrieval must be hybrid, vector, lexical, or augmented, got ${retrieval}`);
-                    }
-                    const lexicalRaw = lexicalIndex && retrieval !== 'vector'
-                        ? await lexicalIndex.search(trimmed, LEXICAL_CANDIDATES) : [];
-                    const lexicalHits = lexicalRaw.filter((h) => h.score >= lexicalRaw[0].score / LEXICAL_CUTOFF);
-                    searched = (await sketch.search(context.vector, k, {
-                        rerank: queryOptions.rerank,
-                        parallelism: queryOptions.parallelism ?? queryOptions.rerankParallelism ?? options.rerankParallelism,
-                        gap: queryOptions.gap ?? queryOptions.rerankGap ?? options.rerankGap ?? rerankGapHint,
-                        maxRangeBytes: queryOptions.maxRangeBytes ?? options.rerankMaxRangeBytes,
-                        // Present once background staging finished; the
-                        // sketch reader ignores it for any query whose C
-                        // exceeds the scanner's buffers.
-                        ...(scanner ? { scanner } : {}),
-                        ...(lexicalHits.length ? { extraCandidates: lexicalHits.map((h) => h.id) } : {}),
-                        // Always return the full reranked candidate list
-                        // (already fetched and exactly scored) rather than
-                        // truncating to k: abstention is fit at a fixed
-                        // top-10 window (calibrate.mjs) independent of the
-                        // caller's k, and needs that full window to score
-                        // consistently — see retrieval-abstention.mjs.
-                        fullRerankOutput: true,
-                    })).results;
-                    hits = searched.slice(0, k);
-                    // Full-window fused order (not k-truncated) for scoring:
-                    // coverage grounds its verdict in the passage fusion
-                    // actually ranks first, and calibrate.mjs fits it the
-                    // same way — a k-truncated fused list would silently
-                    // drop the fused top hit for callers requesting a small k.
-                    if (retrieval === 'lexical') {
-                        const byId = new Map(searched.map((hit) => [hit.id, hit]));
-                        fusedFull = lexicalHits.map((h) => byId.get(h.id)).filter(Boolean);
-                    } else if (retrieval !== 'augmented' && lexicalHits.length) {
-                        const lexRank = new Map(lexicalHits.map((h, i) => [h.id, i]));
-                        fusedFull = fuseCandidates(searched, lexicalHits.map((h) => h.id));
-                        // One batched hydration for everything this block and
-                        // scoreQuality's coverage term (below) will need, in
-                        // place of two separate staged fetches (phrase-pin's
-                        // own, then a later cold start for coverage): over a
-                        // remote range-read source each hydrate() a caller
-                        // hasn't already paid for is its own network round
-                        // trip, and sequential/staged awaits pay that cost
-                        // once per stage instead of once per query. The
-                        // union of phrase-pin's candidates (top lexical
-                        // hits) and coverage's (fusedFull's top few — phrase
-                        // pinning only ever reorders that window, never
-                        // changes its membership) is known right here, so
-                        // both stages can share one round trip. A record
-                        // that fails to hydrate here does not fail the
-                        // query: the id is just missing from the map, and
-                        // each site below falls through exactly as it would
-                        // on a cold cache miss (recs[i] undefined; coverage
-                        // sees fewer usable passages) — hydrate() raising
-                        // for a bad id is still a real failure, but only
-                        // once a site actually needs that specific record,
-                        // not speculatively for every candidate touched here.
-                        const phraseCandidates = lexicalHits.slice(0, 3);
-                        const coverageCandidates = fusedFull.slice(0, COVERAGE_BATCH_COUNT);
-                        const batchIds = [...new Set([...phraseCandidates, ...coverageCandidates].map((h) => h.id))];
-                        const batch = new Map();
-                        await Promise.all(batchIds.map(async (id) => {
-                            try { batch.set(id, await hydrate(id)); } catch { /* see comment above */ }
-                        }));
-                        // Phrase pinning: a verbatim occurrence of the query (>= 3
-                        // content words) in one of the top lexical hits is the
-                        // strongest evidence of support there is; rank it first.
-                        const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
-                        const phrase = norm(trimmed);
-                        if (phrase.split(' ').length >= 3) {
-                            for (const h of phraseCandidates) {
-                                if (norm(batch.get(h.id)?.text).includes(phrase)) {
-                                    fusedFull = [searched.find((x) => x.id === h.id), ...fusedFull.filter((x) => x.id !== h.id)].filter(Boolean);
-                                    break;
-                                }
-                            }
-                        }
-                        // Rank transparency: a consumer can see a verbatim hit sitting
-                        // at fused rank 3 behind two semantic near-misses.
-                        for (const [i, hit] of fusedFull.entries()) { hit.fusedRank = i + 1; hit.lexicalRank = lexRank.has(hit.id) ? lexRank.get(hit.id) + 1 : null; hit.vectorRank = searched.findIndex((x) => x.id === hit.id) + 1; }
-                    }
-                    fused = retrieval === 'augmented' ? null : fusedFull?.slice(0, k) ?? null;
-                }
+                if (!pre) ({ hits, fused, searched, fusedFull } = await retrieveCandidates(trimmed, context, k, queryOptions));
                 // Abstention scores the full reranked candidate window
                 // (searched), not the k-truncated hits: calibrate.mjs fits
                 // its signals at a fixed top-10 (top-5 for coverage)
@@ -1498,6 +1522,26 @@ export async function openPikeletFile(input, options = {}) {
                 const passageOrder = fusedFull?.length ? fusedFull : (searched ?? hits);
                 const grounding = quality.grounding ? { ...quality.grounding, recordId: passageOrder[quality.grounding.passageIndex]?.id ?? null } : null;
                 return { matchQuality: quality.match_quality, confidence: quality.confidence, results, ...(grounding ? { grounding } : {}) };
+            },
+
+            /**
+             * The retrieval evidence query() scores, for compile-time
+             * calibration: `vector` is the distance-ordered rerank window
+             * d0/margin/mean10 read, `fused` the order coverage reads its
+             * passages from. Calibration consumes this instead of
+             * reimplementing retrieval, so a verdict is fit on the evidence
+             * it is later scored on. Not part of the documented reader API.
+             */
+            async __calibrationEvidence(text, { excludeIds = null } = {}) {
+                assertOpen();
+                const trimmed = String(text || '').trim();
+                if (!trimmed) throw new Error('query text is required');
+                // The 10-wide window calibration fits at; any k up to the
+                // pack's rerank depth gives query() the same candidates.
+                const k = Math.min(10, Math.max(recordCount, 1));
+                const { searched, fusedFull } = await retrieveCandidates(trimmed, await embed(trimmed), k, {}, excludeIds);
+                const plain = (list) => list.map((hit) => ({ id: hit.id, distance: hit.distance }));
+                return { vector: plain(searched), fused: plain(fusedFull?.length ? fusedFull : searched) };
             },
 
             /** Hydrate one corpus record by id (verified per record on format 2). */

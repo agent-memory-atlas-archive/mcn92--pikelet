@@ -97,7 +97,6 @@ async function buildAssets(projectDir, config, options = {}) {
   const manifest = makeManifest(config, chunks, snapshot, vectors, artifact, artifactInfo);
   if (config.runtime?.mode === 'complete') {
     artifactInfo = await buildCompleteArtifact({
-      Pikelet,
       projectDir,
       assetsDir,
       config,

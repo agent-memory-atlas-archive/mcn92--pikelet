@@ -46,11 +46,8 @@ import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import Pikelet from 'pikelet-wasm';
 import { calibrateRetrievalAbstention } from '../../packages/pikelet/src/calibrate.mjs';
 import { createAbstentionScorer } from '../../packages/pikelet-wasm/complete/retrieval-abstention.mjs';
-import { buildLexicalSegment } from '../../packages/pikelet-wasm/complete/builder.mjs';
-import { openLexicalIndex } from '../../packages/pikelet-wasm/complete/lexical.mjs';
 import { inlineEncoderDeclaration } from '../../packages/pikelet/src/complete-build.mjs';
 import { embedChunksWithInlineTransformer } from '../../packages/pikelet/src/embed.mjs';
 import { createInlineTransformerEmbedder } from '../../packages/pikelet-wasm/complete/inline-transformer.mjs';
@@ -144,10 +141,27 @@ console.error('embedding base...');
 const baseVectors = await embedAll(baseChunks.map((c) => c.text), 'base');
 
 console.error('fitting the base calibrator...');
-const baseLexical = openLexicalIndex(buildLexicalSegment(baseChunks.map((c) => c.text)).bytes);
+// The fit retrieves exactly the way this script scores its probes: exact
+// cosine over the float vectors, with coverage read in vector order. Fit and
+// probes then see the same evidence, so a measured verdict flip is the
+// scorer's, not a retrieval difference between the two (calibrate.mjs takes
+// its retrieval as `evidence`; compile passes the reader's own).
+const exactEvidence = (vectors) => async (text, { excludeIds = null } = {}) => {
+  const qv = await embedQuery(text);
+  const scored = [];
+  for (let i = 0; i < vectors.length; i++) {
+    if (excludeIds && excludeIds.has(i)) continue;
+    let dot = 0; const v = vectors[i];
+    for (let d = 0; d < qv.length; d++) dot += qv[d] * v[d];
+    scored.push({ id: i, distance: 1 - dot });
+  }
+  scored.sort((a, b) => a.distance - b.distance || a.id - b.id);
+  const vector = scored.slice(0, 60);
+  return { vector, fused: vector };
+};
 const fit = await calibrateRetrievalAbstention({
-  Pikelet, chunks: baseChunks, vectors: baseVectors, config,
-  embedQuery, embedWordVecs: async (t) => embedder.embedWords(t), lexicalIndex: baseLexical,
+  chunks: baseChunks, config,
+  embedQuery, embedWordVecs: async (t) => embedder.embedWords(t), evidence: exactEvidence(baseVectors),
   log: () => {}, projectDir: __dirname,
 });
 if (!fit) { console.error('calibration returned null; raise --base-frac'); process.exit(1); }

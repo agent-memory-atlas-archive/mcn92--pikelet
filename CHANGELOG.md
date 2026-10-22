@@ -10,6 +10,23 @@ first.
 
 ## Unreleased
 
+### Compatibility
+
+- **Calibration is fit on the reader's own retrieval.** `compile` and
+  `compact` now assemble the pack unscored, open it with the reader, and
+  run every calibration probe through the same retrieval `query()` serves
+  from (sketch scan, BM25 candidates, exact rerank, fusion, phrase pin),
+  then write the fitted pack. Before, calibration searched a separate
+  in-memory HNSW index and approximated fusion with 5 BM25 candidates
+  instead of 24 and a placeholder distance for lexical hits outside its
+  pool. Measured on a 1,608-record docs pack, the passages coverage was fit
+  on matched the ones the reader scores for only 27% of calibration
+  queries; they now match for all of them. Packs are unaffected until
+  rebuilt; a rebuilt pack ranks exactly as before, and on that pack 4 of
+  331 calibration queries changed `matchQuality` band, in both directions.
+- **`compact` no longer re-embeds every record to refit calibration**: the
+  refit runs on the compacted pack's own rows.
+
 ### Added
 
 - **Reproducible builds.** `compile` honours `SOURCE_DATE_EPOCH` for the
