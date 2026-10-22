@@ -38,7 +38,9 @@ only the `create` scaffold path uses. Measured on a clean project, omitting it
 takes the install from **82 packages / 257 MB / "6 vulnerabilities (5 high, 1
 critical)"** to **2 packages / 1.8 MB / "found 0 vulnerabilities"** — the
 advisories are all inside a dependency `compile` and `mcp` never load. The
-CLI requires Node 20+.
+CLI requires Node 20+. `npx pikelet --help` lists every command and flag; a
+flag the CLI does not know is refused (`Unknown flag --x`) rather than
+silently ignored.
 
 ## Scaffolding a search app
 
@@ -51,6 +53,11 @@ npx pikelet create --name my-docs-search --source ./docs --no-deploy --yes
 cd my-docs-search
 npm run dev
 ```
+
+An existing directory is refused unless you pass `--force`, which replaces
+it only once the new project has built: a failed build leaves the old one
+as it was. `--force` will not replace the current directory, a directory
+containing it, or one inside or containing the `--source`.
 
 The generated project contains a bundled Pikelet snapshot, corpus metadata, a
 Workers AI search worker, and a static UI. A second runtime,
@@ -180,8 +187,15 @@ listing (see `packs/README.md` in the main repo): a registry that is also
 just a file. Redirecting hosts are handled the cheap way: the reader
 resolves the redirect once and pins the signed target, so GitHub's
 rate-limited front door is charged per mount rather than per range read
-(and expired signed URLs re-resolve automatically); transient CDN
-pressure (429/502/503/504) is retried with backoff.
+(and expired signed URLs re-resolve automatically — but if the file behind
+them was replaced in the meantime, reads fail with `ARTIFACT_CHANGED`
+rather than mixing bytes from two artifacts); transient CDN pressure
+(429/502/503/504) is retried with backoff.
+
+Each pack mounts on its own. One that cannot mount — an unreachable host, a
+refused pin, an unsupported pack — does not take the others down: they
+serve, `list_packs` reports the missing one under `unavailable` with the
+reason, and the server exits non-zero when it stops.
 
 Instead of running the server by hand, write your MCP client's config:
 
@@ -205,9 +219,9 @@ yourself:
 }
 ```
 
-The model gets four tools (six with a journal, below). `search` queries one pack or all of them;
-results stay grouped per pack (distances are only comparable within one
-pack's encoder and corpus) and every result carries its provenance —
+The model gets four tools (six with a journal, below). `search` queries
+one pack or all of them; results stay grouped per pack (distances are
+only comparable within one pack's encoder and corpus) and every result carries its provenance —
 pack name, the pack's immutable manifest identity (sha256), title,
 heading path, anchor, and source — so an answer can cite the exact
 knowledge state it was derived from, and a pinned identity means the
@@ -259,6 +273,13 @@ the server, not the model, records the time, the client and the session.
 `latest(kind?, tag?)` lists notes newest first, for orienting at the start
 of a session. Journal notes also come back from `search` and `get_record`,
 always marked `agentWritten` and unverified.
+
+Several sessions can share one journal. Writes queue on a lock file (a
+writer waits up to 30 s for another to finish), and a running server picks
+up notes and compactions from other sessions on its next tool call, without
+a restart. Cite a note as `(pack, id)`: ids survive compaction. Who wrote a
+note is the MCP client's own name from the protocol, never something the
+model claims.
 
 A journal lives outside your project by default and is never published
 unless you move it. It is unscored by design (no calibration), each note is

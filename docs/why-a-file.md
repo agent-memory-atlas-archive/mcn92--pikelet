@@ -67,13 +67,15 @@ npx pikelet compile --source ./docs --out docs.pikelet
 ```
 
 ```js
-import { openPikeletFile } from 'pikelet-wasm/complete';
+import { openPikeletFile, httpRangeSource } from 'pikelet-wasm/complete';
 
-const pack = await openPikeletFile('https://example.com/docs.pikelet#<sha256>');
+const pack = await openPikeletFile(httpRangeSource('https://example.com/docs.pikelet'), {
+  expectedIdentity: '<sha256>',
+});
 const result = await pack.query('how do workers restore snapshots', { k: 5 });
 
 console.log(result.matchQuality);
-for (const hit of result.results) console.log(hit.title, hit.section);
+for (const hit of result.results) console.log(hit.title, hit.sourcePath);
 
 await pack.close();
 ```
