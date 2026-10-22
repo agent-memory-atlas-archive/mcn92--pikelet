@@ -32,6 +32,25 @@
             "excludeUrl": { "type": "array", "items": { "type": "string" } }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "git" },
+            "path": { "type": "string" },
+            "rev": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "conversations" },
+            "path": { "type": "string" }
+          },
+          "additionalProperties": false
         }
       ]
     },

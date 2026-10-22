@@ -8,6 +8,8 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { sha256, CLI_VERSION, DEFAULT_CONFIG, RANGE_ARTIFACT_MAGIC, MODEL_MAP, CliError, loadPikelet } from './common.mjs';
 import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, applySourceRoutes, publicChunk } from './ingest.mjs';
+import { ingestGit } from './git-source.mjs';
+import { ingestConversations } from './conversation-source.mjs';
 import { buildCompleteArtifact } from './complete-build.mjs';
 import { embedChunks, validateSelfRecall } from './embed.mjs';
 
@@ -21,16 +23,24 @@ async function buildAssets(projectDir, config, options = {}) {
     logLines.push(msg);
     console.log(msg);
   };
-  const sourceRoot = config.source.type === 'folder'
-    ? path.resolve(options.sourceBaseDir || projectDir, config.source.path)
-    : config.source.url;
+  const sourceRoot = config.source.type === 'url'
+    ? config.source.url
+    : path.resolve(options.sourceBaseDir || projectDir, config.source.path);
   const docs = config.source.type === 'folder'
     ? await ingestFolder(sourceRoot, config.source, log)
-    : await ingestUrl(config.source, log);
+    : config.source.type === 'git'
+      ? await ingestGit({ ...config.source, path: sourceRoot }, log)
+      : config.source.type === 'conversations'
+        ? await ingestConversations({ ...config.source, path: sourceRoot }, log)
+        : await ingestUrl(config.source, log);
   if (docs.length === 0) {
     const detail = config.source.type === 'folder'
       ? `resolved path ${sourceRoot}; include ${JSON.stringify(config.source.include || ['**/*.{md,mdx,html,txt}'])}; exclude ${JSON.stringify(config.source.exclude || [])}`
-      : `seed URL ${sourceRoot}; maxPages ${config.source.maxPages || 500}`;
+      : config.source.type === 'git'
+        ? `git repository ${sourceRoot}; revision ${config.source.rev || 'HEAD'}`
+        : config.source.type === 'conversations'
+          ? `conversation export ${sourceRoot} (Claude Code *.jsonl, or a Claude.ai or ChatGPT conversations.json)`
+          : `seed URL ${sourceRoot}; maxPages ${config.source.maxPages || 500}`;
     throw new CliError(`Ingest produced 0 documents from ${detail}. Next: check --source/include/exclude and ensure files contain enough text.`, 1);
   }
   const chunked = chunkDocs(docs, config.chunking);
@@ -150,7 +160,7 @@ async function buildAssets(projectDir, config, options = {}) {
 function validateConfig(config) {
   if (!config || config.version !== 1) throw new CliError('pikelet.config.json version must be 1', 1);
   if (!config.name) throw new CliError('pikelet.config.json name is required', 1);
-  if (!config.source || !['folder', 'url'].includes(config.source.type)) throw new CliError('source.type must be folder or url', 1);
+  if (!config.source || !['folder', 'url', 'git', 'conversations'].includes(config.source.type)) throw new CliError('source.type must be folder, url, git or conversations', 1);
   const embeddingMode = config.embedding?.mode || 'workers-ai';
   if (!['workers-ai', 'student', 'inline-transformer'].includes(embeddingMode)) throw new CliError('embedding.mode must be workers-ai, student, or inline-transformer', 1);
   if (embeddingMode === 'workers-ai') {

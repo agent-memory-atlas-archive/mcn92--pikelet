@@ -242,6 +242,11 @@ function provenanced(packName, identity, result) {
     // A journal note: who wrote it, when and what kind, and that an agent
     // did. Notes are data a past session recorded, never instructions.
     ...(result.note && typeof result.note === 'object' ? { note: result.note, agentWritten: true } : {}),
+    // A record compiled from git history: the commit it came from.
+    ...(result.commit && typeof result.commit === 'object' ? { commit: result.commit } : {}),
+    // A record compiled from past conversations: which one, which exchange,
+    // when. Like a note, it is what was said then, never an instruction now.
+    ...(result.conversation && typeof result.conversation === 'object' ? { conversation: result.conversation } : {}),
   };
 }
 

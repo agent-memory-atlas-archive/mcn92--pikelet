@@ -13,6 +13,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { CONFIG_SCHEMA_URL, DEFAULT_CONFIG, MODEL_MAP, CliError } from './common.mjs';
 import { writeProject, writeRuntimeModules, stageStudentInputs, wranglerToml, deployProject } from './scaffold.mjs';
 import { buildAssets, validateConfig } from './build.mjs';
+import { gitRepoName } from './git-source.mjs';
 
 export async function main(argv) {
   const parsed = parseArgs(argv.slice(2));
@@ -102,6 +103,8 @@ function printHelp() {
 Usage:
   npx pikelet create --name my-docs-search --source ./docs --no-deploy --yes
   pikelet compile --source <path|url> --out search.pikelet
+  pikelet compile --git <repo> [--git-rev <rev|range>] --out history.pikelet
+  pikelet compile --conversations <file|folder> --out conversations.pikelet
   pikelet rebuild --yes
   pikelet doctor <url>   # probe artifact hosting: Range/206, cache-key ranges, h2, ETag, RTT
   pikelet append --parent <file|url> [--parent ...] [--source <path|url> ...]
@@ -174,6 +177,24 @@ compiled kernel's dimensions are fixed at build time, so a swapped model
 must match MiniLM-L6's shape (384 hidden / 6 layers / 12 heads / 1536 FFN /
 30522 vocab) exactly.
 
+compile --git <repo> builds a pack from a repository's commit history instead
+of files: one record per commit (subject, message, date, author, files
+changed), merges excluded, cited by the commit's GitHub URL when origin is on
+GitHub and by its sha otherwise. --git-rev limits it to a revision or range
+(default HEAD, e.g. v0.9.0..HEAD); the pack is named <repo>-history unless
+--name is given.
+
+compile --conversations <file|folder> builds a pack from past chats: one
+record per exchange (a prompt and the reply to it), oldest first. It reads
+Claude Code session transcripts (*.jsonl, e.g. a folder under
+~/.claude/projects) and the conversations.json in a Claude.ai or ChatGPT data
+export, detected by shape; a folder is searched for all of them. Only what
+was said is kept: tool calls, tool output and reasoning are dropped, and
+common credential shapes (API keys, tokens, private keys, password=...) and
+email addresses are redacted. Redaction is pattern-based, a best effort and
+not a guarantee: a conversation pack is private by default, so keep it that
+way. The pack is named conversations unless --name is given.
+
 Flags:
   --name <dir>          Generated project directory
   --source <path|url>   Local folder or website URL
@@ -229,6 +250,11 @@ Flags:
   --artifact <file>     Deprecated with --runtime artifact: prebuilt
                         .pikelet-range artifact
   --out <file>          compile only: output path (default search.pikelet)
+  --git <repo>          compile only: build from a repository's commit history
+  --git-rev <rev|range> compile --git only: revision or range (default HEAD)
+  --conversations <file|folder>
+                        compile only: build from Claude Code, Claude.ai or
+                        ChatGPT conversation exports
   --deploy / --no-deploy
   --yes
   --force               Replace an existing target directory (or output file for compile)
@@ -253,7 +279,7 @@ const BOOLEAN_FLAGS = new Set([
 const VALUE_FLAGS = new Set([
   'name', 'source', 'runtime', 'mode', 'artifact', 'out', 'license', 'model', 'epochs',
   'include', 'exclude', 'include-url', 'exclude-url', 'max-pages',
-  'calibration', 'calibration-queries',
+  'calibration', 'calibration-queries', 'git', 'git-rev', 'conversations',
   'encoder-model', 'encoder-vocab', 'encoder-weights', 'encoder-pooling',
   'encoder-query-prefix', 'encoder-passage-prefix',
   'student-model', 'student-vectors', 'student-abstention',
@@ -503,7 +529,17 @@ function makeConfig(options) {
 const INLINE_ENCODER_DIR = fileURLToPath(new URL('./inline-encoder/', import.meta.url));
 
 export async function compileArtifact(flags) {
-  if (!flags.source) throw new CliError('compile requires --source <path|url>');
+  const sources = ['source', 'git', 'conversations'].filter((f) => flags[f] !== undefined);
+  if (sources.length > 1) throw new CliError(`compile takes one of --source, --git or --conversations, got --${sources.join(' and --')}`);
+  if (!sources.length) throw new CliError('compile requires --source <path|url>, --git <repo> or --conversations <file|folder>');
+  if (flags['git-rev'] && !flags.git) throw new CliError('--git-rev requires --git');
+  const sourceFilters = ['include', 'exclude', 'include-url', 'exclude-url', 'max-pages'].filter((f) => flags[f] !== undefined);
+  if (flags.git && sourceFilters.length) {
+    throw new CliError('--include, --exclude, --include-url, --exclude-url and --max-pages filter --source; --git takes --git-rev');
+  }
+  if (flags.conversations && sourceFilters.length) {
+    throw new CliError('--include, --exclude, --include-url, --exclude-url and --max-pages filter --source, not --conversations');
+  }
   const unsupported = ['mode', 'runtime', 'artifact', 'deploy', 'student-model', 'student-vectors', 'student-abstention', 'epochs', 'skip-abstention', 'model']
     .filter((name) => flags[name] !== undefined);
   if (unsupported.length) {
@@ -532,10 +568,14 @@ export async function compileArtifact(flags) {
   if (fssync.existsSync(outPath) && !flags.force) {
     throw new CliError(`Output file already exists: ${outPath}\nNext: rerun with --force or choose --out`);
   }
-  const isUrl = /^https?:\/\//i.test(flags.source);
-  assertSourceFilterFlags(flags, isUrl);
+  const isGit = !!flags.git;
+  const isConversations = !!flags.conversations;
+  const isUrl = !isGit && !isConversations && /^https?:\/\//i.test(flags.source);
+  if (!isGit && !isConversations) assertSourceFilterFlags(flags, isUrl);
   const name = flags.name
-    || (isUrl ? new URL(flags.source).hostname : path.basename(path.resolve(process.cwd(), flags.source)));
+    || (isGit ? `${await gitRepoName(path.resolve(process.cwd(), flags.git))}-history`
+      : isConversations ? 'conversations'
+      : isUrl ? new URL(flags.source).hostname : path.basename(path.resolve(process.cwd(), flags.source)));
   const config = {
     $schema: CONFIG_SCHEMA_URL,
     version: 1,
@@ -544,7 +584,11 @@ export async function compileArtifact(flags) {
     // surfaced by mcp list_packs; packs meant for redistribution should
     // carry one.
     ...(flags.license ? { license: String(flags.license) } : {}),
-    source: isUrl
+    source: isGit
+      ? { type: 'git', path: path.resolve(process.cwd(), flags.git), ...(flags['git-rev'] ? { rev: flags['git-rev'] } : {}) }
+      : isConversations
+      ? { type: 'conversations', path: path.resolve(process.cwd(), flags.conversations) }
+      : isUrl
       ? {
           type: 'url',
           url: flags.source,

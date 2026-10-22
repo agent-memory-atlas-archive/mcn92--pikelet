@@ -736,6 +736,10 @@ function chunkDocs(docs, options) {
       sourcePath: doc.sourcePath || doc.url,
       slug: doc.slug || null,
       text: '',
+      // A git source's commit (sha, date, author), kept on every chunk of it.
+      ...(doc.commit ? { commit: doc.commit } : {}),
+      // A conversation source's exchange (conversation id, title, date, ...).
+      ...(doc.conversation ? { conversation: doc.conversation } : {}),
     });
     if (!Array.isArray(doc.sections) || !doc.sections.length) {
       for (let start = 0; start < docTokens.length; start += Math.max(1, target - overlap)) {
@@ -964,6 +968,10 @@ function publicChunk(chunk) {
     // A journal note's metadata (kind, created, authoredBy, ...), kept on the
     // record. Document chunks carry none.
     ...(chunk.note ? { note: chunk.note } : {}),
+    // A git source's commit: sha, author date, author name.
+    ...(chunk.commit ? { commit: chunk.commit } : {}),
+    // A conversation source's exchange: which conversation, which turn, when.
+    ...(chunk.conversation ? { conversation: chunk.conversation } : {}),
   };
 }
 
