@@ -77,7 +77,8 @@ jobs:
 
   test-browser-entry:
     name: Bundled browser consumer (Vite + Playwright)
-    runs-on: ubuntu-latest
+    # Playwright 1.60 has no browser builds for ubuntu-latest's 26.04 image.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
