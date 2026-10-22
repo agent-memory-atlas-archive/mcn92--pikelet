@@ -1674,6 +1674,27 @@ console.log('calibration: a compiled pack scores relevance, fit against off-topi
         check(`an off-topic question is "none": ${q}`, v === 'none', v);
     }
     await pack.close();
+
+    // Reproducible builds: the evaluation segment's generatedAt is the only
+    // wall-clock input, and SOURCE_DATE_EPOCH pins it, so two builds of the
+    // same inputs are the same bytes and the same identity.
+    console.log('reproducible builds: SOURCE_DATE_EPOCH pins the build time');
+    const compileAt = (outPath, epoch) => execFileSync(process.execPath, [path.join(ROOT, 'packages', 'pikelet', 'bin', 'pikelet.mjs'),
+        'compile', '--source', docs, '--out', outPath], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SOURCE_DATE_EPOCH: epoch } });
+    const first = path.join(tmp, 'reproducible-a.pikelet');
+    const second = path.join(tmp, 'reproducible-b.pikelet');
+    compileAt(first, '1700000000');
+    compileAt(second, '1700000000');
+    check('two builds with the same SOURCE_DATE_EPOCH are byte-identical',
+        Buffer.compare(fs.readFileSync(first), fs.readFileSync(second)) === 0);
+    const stamped = await openPikeletFile(first);
+    check('generatedAt is the pinned time', (await stamped.evaluation()).generatedAt === '2023-11-14T22:13:20.000Z',
+        String((await stamped.evaluation()).generatedAt));
+    await stamped.close();
+    let refused = null;
+    try { compileAt(path.join(tmp, 'reproducible-bad.pikelet'), 'yesterday'); } catch (error) { refused = String(error.stderr); }
+    check('a malformed SOURCE_DATE_EPOCH is refused', /SOURCE_DATE_EPOCH must be a whole number/.test(refused || ''), refused);
+
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

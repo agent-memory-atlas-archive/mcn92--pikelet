@@ -239,6 +239,22 @@ class CliError extends Error {
     this.exitCode = exitCode;
   }
 }
+// The time stamped into build metadata (the evaluation segment's
+// generatedAt, the project manifest). Those bytes are inside the artifact's
+// identity, so a wall-clock stamp gives every rebuild of identical inputs a
+// new identity. SOURCE_DATE_EPOCH (reproducible-builds.org: integer seconds
+// since the epoch) pins it, making the build byte-for-byte reproducible;
+// unset, it is the current time as before.
+function buildTimestamp() {
+  const raw = process.env.SOURCE_DATE_EPOCH;
+  if (raw === undefined || raw === '') return new Date().toISOString();
+  const seconds = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  // 8.64e12 s is the last instant a JavaScript Date can represent.
+  if (!Number.isSafeInteger(seconds) || seconds > 8.64e12) {
+    throw new CliError(`SOURCE_DATE_EPOCH must be a whole number of seconds since 1970-01-01, got ${JSON.stringify(raw)}`, 1);
+  }
+  return new Date(seconds * 1000).toISOString();
+}
 async function loadArtifactContract() {
   let mod;
   try {
@@ -274,6 +290,7 @@ export {
   RANGE_ARTIFACT_MAGIC,
   MODEL_MAP,
   CliError,
+  buildTimestamp,
   loadArtifactContract,
   loadPikelet,
 };

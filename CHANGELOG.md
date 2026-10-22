@@ -8,6 +8,17 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## Unreleased
+
+### Added
+
+- **Reproducible builds.** `compile` honours `SOURCE_DATE_EPOCH` for the
+  build time it records in the evaluation segment (and `create`/`rebuild`
+  in the project manifest). The build time was the only nondeterministic
+  input, and it is part of a pack's identity, so every rebuild of the same
+  inputs used to get a new identity; with the variable set, the same
+  inputs give byte-identical packs.
+
 ## pikelet-wasm 0.10.1 / pikelet 0.10.1 — 2026-10-11
 
 Layered packs now serve the same grounding and fetch tuning as single

@@ -130,6 +130,13 @@ book's content is not crawled twice. The scaffold-only flags (`--mode`,
 `--runtime`, `--artifact`, deploy and student options) are rejected:
 compile always builds the complete kind-3 profile.
 
+A build is deterministic apart from the time it records, and that time
+is part of the pack's identity, so two builds of the same inputs differ
+only by it. Set `SOURCE_DATE_EPOCH` (whole seconds since 1970, the
+[reproducible-builds](https://reproducible-builds.org/docs/source-date-epoch/)
+convention) to pin it: the same inputs, encoder and CLI version then give
+the same bytes and the same identity.
+
 Match quality is calibrated from the corpus at build time, so queries
 the artifact does not cover return `matchQuality: "none"` (or `"weak"`,
 shown with a caveat) instead of confidently wrong results. The calibrator

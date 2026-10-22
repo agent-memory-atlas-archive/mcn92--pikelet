@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { sha256, CLI_VERSION, DEFAULT_CONFIG, RANGE_ARTIFACT_MAGIC, MODEL_MAP, CliError, loadPikelet } from './common.mjs';
+import { sha256, CLI_VERSION, DEFAULT_CONFIG, RANGE_ARTIFACT_MAGIC, MODEL_MAP, CliError, buildTimestamp, loadPikelet } from './common.mjs';
 import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, applySourceRoutes, publicChunk } from './ingest.mjs';
 import { ingestGit } from './git-source.mjs';
 import { ingestConversations } from './conversation-source.mjs';
@@ -243,7 +243,7 @@ function makeManifest(config, chunks, snapshot, vectors, artifact = null, artifa
     : null;
   return {
     version: 1,
-    generatedAt: new Date().toISOString(),
+    generatedAt: buildTimestamp(),
     cliVersion: CLI_VERSION,
     name: config.name,
     model: config.embedding.mode === 'student'

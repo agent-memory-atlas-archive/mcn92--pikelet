@@ -4,7 +4,7 @@
 import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
-import { sha256, loadCompleteModules, CliError, loadArtifactContract } from './common.mjs';
+import { sha256, loadCompleteModules, CliError, buildTimestamp, loadArtifactContract } from './common.mjs';
 import { publicChunk, ingestDeclaration } from './ingest.mjs';
 import { calibrateRetrievalAbstention } from './calibrate.mjs';
 
@@ -141,7 +141,7 @@ async function buildCompleteArtifact({ Pikelet, projectDir, assetsDir, config, c
     recommendedRerank: rerankSweep.recommendedRerank,
   });
   const records = chunks.map((chunk) => Buffer.from(JSON.stringify(publicChunk(chunk)), 'utf8'));
-  const generatedAt = new Date().toISOString();
+  const generatedAt = buildTimestamp();
   const evaluationBytes = (goldens) => Buffer.from(JSON.stringify({
     kind: 'docs-site-build-v1',
     generatedAt,
