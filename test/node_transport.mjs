@@ -113,6 +113,9 @@ console.log('nodeFetch');
     await rejects('a body cut off mid-stream rejects arrayBuffer() instead of hanging', () => withTimeout(truncated.arrayBuffer(), 5000), /aborted|terminated|ECONNRESET|socket|close/i);
     await rejects('an aborted request rejects', () => nodeFetch(`${base}/slow`, { signal: AbortSignal.timeout(5) }), /abort|timeout/i);
 
+    // The aborted /slow above is still counted until its server-side timer
+    // fires; start the burst from an idle server or it reads one high.
+    while (open > 0) await new Promise((resolve) => setTimeout(resolve, 10));
     maxOpen = 0;
     await Promise.all(Array.from({ length: 64 }, () => nodeFetch(`${base}/slow`).then((x) => x.text())));
     check('a 64-read burst opens at most 32 connections to one host', maxOpen > 1 && maxOpen <= 32, `max concurrent ${maxOpen}`);
