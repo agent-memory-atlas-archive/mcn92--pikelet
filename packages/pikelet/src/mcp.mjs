@@ -29,6 +29,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 import crypto from 'node:crypto';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 import {
   NOTE_KINDS, resolveJournalDir, journalMembers, shapeNote, appendNote, latestNotes,
 } from './journal.mjs';
@@ -582,7 +583,7 @@ async function mountChain(packs, spec, { httpRangeSource, log, head = null }) {
       opened.push(path.resolve(loc));
     }
   }
-  const chain = await openPikeletChain(opened);
+  const chain = await openPikeletChain(opened, { fetch: nodeFetch });
   const info = chain.info();
   // The head identity pins the whole chain: every layer commits to its parent,
   // so this one hash covers every byte a query can touch.
@@ -934,7 +935,7 @@ export async function loadShelf(location) {
   const isUrl = /^https?:\/\//i.test(location);
   let text;
   if (isUrl) {
-    const response = await fetch(location, { redirect: 'follow' });
+    const response = await nodeFetch(location, { redirect: 'follow' });
     if (!response.ok) throw new Error(`shelf ${location}: HTTP ${response.status}`);
     text = await response.text();
   } else {

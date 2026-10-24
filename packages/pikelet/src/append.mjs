@@ -14,6 +14,7 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { CliError, loadCompleteModules, DEFAULT_CONFIG } from './common.mjs';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 import { ingestFolder, ingestUrl, chunkDocs, dedupeChunks, ingestDeclaration, INGEST_CHUNKER } from './ingest.mjs';
 
 const defaultLog = (line) => console.log(line);
@@ -112,6 +113,7 @@ export async function appendLayer(flags, options = {}) {
   // Before the mount and any embedding, so a bad --parent-locator costs nothing.
   const parentLocator = await parentLocatorFor(flags, members[members.length - 1], outPath, log);
   const chain = await openPikeletChain(members, {
+    fetch: nodeFetch,
     ...(flags['reader-drift-limit'] ? { readerDriftLimit: Number(flags['reader-drift-limit']) } : {}),
   });
   try {

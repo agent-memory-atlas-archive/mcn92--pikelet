@@ -15,6 +15,7 @@
 //   - RTT — the multiplier on every dependent read round.
 
 import tls from 'node:tls';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 
 const MAGICS = {
   0x31465350: 'complete artifact (PSF1)',
@@ -44,7 +45,7 @@ function alpnProbe(url, timeoutMs = 5000) {
 async function timedRange(url, range, extraQuery) {
   const target = extraQuery ? `${url}${url.includes('?') ? '&' : '?'}${extraQuery}` : url;
   const t0 = performance.now();
-  const response = await fetch(target, { headers: { Range: `bytes=${range}` }, redirect: 'follow' });
+  const response = await nodeFetch(target, { headers: { Range: `bytes=${range}` }, redirect: 'follow' });
   const body = new Uint8Array(await response.arrayBuffer());
   return { ms: performance.now() - t0, status: response.status, headers: response.headers, body };
 }
@@ -57,7 +58,7 @@ export async function probeHosting(url) {
     if (level === 'WARN') report.warnings++;
   };
 
-  const head = await fetch(url, { method: 'HEAD', redirect: 'follow' }).catch((error) => {
+  const head = await nodeFetch(url, { method: 'HEAD', redirect: 'follow' }).catch((error) => {
     check('FAIL', 'reachable', `HEAD failed: ${error.message}`);
     return null;
   });

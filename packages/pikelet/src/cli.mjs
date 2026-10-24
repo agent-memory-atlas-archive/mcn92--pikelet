@@ -47,7 +47,12 @@ export async function main(argv) {
   }
   if (parsed.positionals[0] === 'mcp') {
     const { runMcpServer, loadShelf, installMcpConfig } = await import('./mcp.mjs');
-    const { loadCompleteModules, CLI_VERSION } = await import('./common.mjs');
+    const { loadCompleteModules, CLI_VERSION, plainHttpWarning } = await import('./common.mjs');
+    const warnInsecure = (location) => {
+      const warning = plainHttpWarning(location);
+      if (warning) process.stderr.write(`${warning}\n`);
+    };
+    const { nodeFetch } = await import('pikelet-wasm/complete/node-fetch.mjs');
     // Positional pack paths (and URLs, optionally `#sha256`-pinned)
     // compose with repeated --pack; --shelf mounts a static pack listing.
     const positionalPacks = parsed.positionals.slice(1).filter((p) => p !== 'install');
@@ -67,6 +72,7 @@ export async function main(argv) {
       return;
     }
     if (parsed.flags.shelf) {
+      warnInsecure(parsed.flags.shelf);
       packPaths.push(...await loadShelf(parsed.flags.shelf));
     }
     const { reader } = await loadCompleteModules();
@@ -74,7 +80,11 @@ export async function main(argv) {
       packPaths,
       journal: parsed.flags.journal ?? null,
       openPikeletFile: reader.openPikeletFile,
-      httpRangeSource: reader.httpRangeSource,
+      // Pack bytes never pass through Node fetch's response decoder.
+      httpRangeSource: (url, options = {}) => {
+        warnInsecure(url);
+        return reader.httpRangeSource(url, { fetch: nodeFetch, ...options });
+      },
       serverVersion: CLI_VERSION,
     });
     return;

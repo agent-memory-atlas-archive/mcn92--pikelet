@@ -2843,7 +2843,10 @@ console.log('rebase: the command, end to end (6.2)');
     // Every redirect on the way to a locator-named parent is confined too.
     {
         const http = await import('node:http');
-        const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/index.mjs');
+        // The Node entry, as 'pikelet-wasm/complete' resolves under Node: its
+        // httpRangeSource defaults to nodeFetch, and the walk must open every
+        // parent with the head's transport (npm run test:fetch-tripwire).
+        const { httpRangeSource } = await import('../packages/pikelet-wasm/complete/index.node.mjs');
         let redirectFork = null; // null | where /packs/fork.pikelet redirects to
         const host = http.createServer((req, res) => {
             const u = new URL(req.url, 'http://x');

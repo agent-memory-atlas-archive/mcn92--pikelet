@@ -56,7 +56,8 @@ export const CHAIN_DEFAULTS = Object.freeze({
  *   [base, layer1, layer2, ...]. Every member is opened through
  *   openPikeletFile(), so a string is a path and an object is a range source.
  * @param {object} [options] forwarded to each member's open, plus:
- *   readerDriftLimit, maxDepth.
+ *   readerDriftLimit, maxDepth, and fetch (the transport for any parent the
+ *   walk reaches over HTTP; default globalThis.fetch).
  */
 /**
  * 5.1.1: walk from a head to its base, resolving each parent by lineage
@@ -76,6 +77,7 @@ async function walkToBase(head, options) {
     const chain = [head];
     let cursor = head;
     let expectIdentity = null;
+    let childFetch = null;
     for (let hop = 0; hop <= maxDepth; hop++) {
         const peek = await readMemberManifest(cursor, options);
         if (expectIdentity !== null && peek.identity !== expectIdentity) {
@@ -89,6 +91,7 @@ async function walkToBase(head, options) {
         // string as a file path sent that second hop to fileSource.
         const childLocation = typeof cursor === 'string' ? cursor : (cursor.url ?? cursor.location ?? null);
         const childIsFile = typeof cursor === 'string' && !isHttpUrl(cursor);
+        if (typeof cursor === 'object' && typeof cursor?.fetch === 'function') childFetch = cursor.fetch;
         const located = await resolveParentLocation(peek.parent, {
             lineage,
             childLocation,
@@ -112,6 +115,9 @@ async function walkToBase(head, options) {
             // may name any origin, so its redirects are not confined.
             const confineTo = located.via === 'locator' ? childLocation : null;
             cursor = httpRangeSource(cursor, {
+                // The walk's transport: the caller's, else the one the
+                // child source was opened with.
+                ...((options.fetch || childFetch) ? { fetch: options.fetch || childFetch } : {}),
                 ...(confineTo ? { redirectGuard: (target) => assertConfined(target, confineTo) } : {}),
             });
             await cursor.init();

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { sha256, loadCompleteModules, CliError, buildTimestamp, loadArtifactContract } from './common.mjs';
 import { publicChunk, ingestDeclaration, SENTENCE_WINDOWS_KIND } from './ingest.mjs';
 import { calibrateRetrievalAbstention } from './calibrate.mjs';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 
 async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, snapshot, vectors, rowOffsets = null, windowSize = 0, log = () => {} }) {
   const artifactContract = await loadArtifactContract();
@@ -344,7 +345,7 @@ async function fetchInlineEncoderWeights(weightsPath) {
   const url = process.env.PIKELET_ENCODER_WEIGHTS_URL || INLINE_WEIGHTS_URL;
   let body;
   try {
-    const response = await fetch(url, { redirect: 'follow' });
+    const response = await nodeFetch(url, { redirect: 'follow' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     body = Buffer.from(await response.arrayBuffer());
   } catch (error) {

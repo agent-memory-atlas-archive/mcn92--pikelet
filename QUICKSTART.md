@@ -218,6 +218,11 @@ const pack = await openPikeletFile(httpRangeSource('https://example.com/docs.pik
 });
 ```
 
+Under Node, `pikelet-wasm/complete` reads over `nodeFetch`, a `node:http`
+transport that never decompresses and refuses any response a server
+encoded; browsers and Workers use their own `fetch`. Pass
+`httpRangeSource(url, { fetch })` to choose another transport.
+
 `expectedIdentity` pins the pack: a file whose identity differs is refused
 one 64-byte read in, before anything else is fetched:
 

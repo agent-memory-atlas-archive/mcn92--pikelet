@@ -27,8 +27,43 @@ first.
 - **`compact` no longer re-embeds every record to refit calibration**: the
   refit runs on the compacted pack's own rows.
 
+### Fixed
+
+- **Pack bytes on Node no longer pass through the runtime's response
+  decoder.** `pikelet-wasm` ships `nodeFetch`
+  (`pikelet-wasm/complete/node-fetch.mjs`), a fetch over
+  `node:http`/`node:https` that never decompresses, sends
+  `Accept-Encoding: identity`, and refuses any other `Content-Encoding`
+  (parsed as a list, any case). It refuses an `https` -> `http` redirect,
+  bounds itself to 32 keep-alive sockets per host (the range source's
+  default parallelism), and rejects `arrayBuffer()`/`text()` when a body is
+  cut off. Under Node, `pikelet-wasm/complete` now resolves to a Node entry
+  (export condition `node`; `workerd` and `browser` still get the portable
+  module) whose `httpRangeSource` defaults to it and which exports it.
+  `httpRangeSource` takes `options.fetch` to choose another transport, and
+  exposes it as `source.fetch`; a chain walk opens every parent it reaches
+  over HTTP with the head's transport (or `openPikeletChain`'s `fetch`
+  option). Every network read the CLI makes uses it: URL packs and chain
+  parents under `mcp`, `append` and `compact`, `--shelf`, `doctor`, the
+  encoder-weights download, and the URL crawler. `pikelet` therefore needs
+  this `pikelet-wasm` or later.
+- **`httpRangeSource` refuses an encoded response on any transport.** A
+  200 or 206 with a `Content-Encoding` other than `identity` fails closed,
+  next to the existing `Content-Range` checks: a pack is content-addressed
+  bytes, and an encoded range cannot be sliced. In browsers the header is
+  only visible on same-origin responses or when the host exposes it. Its
+  redirect walk also refuses `https` -> `http`.
+- **The URL crawler still reads sites that compress regardless.** A page
+  served with `gzip` or `deflate` despite `Accept-Encoding: identity` is
+  inflated with `node:zlib` (crawled HTML only; packs stay identity-only).
+  A page in any other coding is skipped with a warning naming the URL and
+  the header.
+
 ### Added
 
+- **`pikelet` warns on a plain `http://` pack or shelf URL** (loopback
+  excepted). The digests still refuse altered bytes, but anyone on the
+  path can see what is read and stall or block it.
 - **Sentence windows (`compile --sentence-windows <n>`, opt-in).** The
   index also holds a vector for every run of `n` consecutive sentences of
   each chunk, mapped back to the chunk by a new row-map segment (kind 8,

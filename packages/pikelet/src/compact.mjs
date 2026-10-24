@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { CliError } from './common.mjs';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 
 const defaultLog = (line) => console.log(line);
 
@@ -40,7 +41,7 @@ export async function compactChain(flags, options = {}) {
 
   const { resolveChainMembers } = await import('./common.mjs');
   const members = await resolveChainMembers([].concat(flags.head), log);
-  const chain = await openPikeletChain(members);
+  const chain = await openPikeletChain(members, { fetch: nodeFetch });
   try {
     const info = chain.info();
     const chainMembers = chain.__members;
@@ -323,7 +324,7 @@ export async function rebaseLayer(flags) {
   const oldChainMembers = await resolveChainMembers(oldParentSpec, log);
   let oldParent;
   try {
-    oldParent = await openPikeletChain(oldChainMembers, { followParents: false });
+    oldParent = await openPikeletChain(oldChainMembers, { followParents: false, fetch: nodeFetch });
   } catch (err) {
     // 6.2: "if that artifact is unavailable, the delta is unknowable and the
     // rebase MUST refuse." Say that, rather than leaking an ENOENT: the

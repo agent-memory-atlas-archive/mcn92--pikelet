@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 
 const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest();
 let completeModulesPromise = null;
@@ -41,6 +42,18 @@ function loadCompleteModules() {
  * caller opens anything. Chain links commit to parent identities, so pinning
  * the last member pins the whole chain.
  */
+// A pack's digests catch altered bytes on any transport, but plain http
+// still shows every observer which pack and which passages are read, and
+// lets one stall or block them. Loopback is exempt: that is local testing.
+function plainHttpWarning(location) {
+  let url;
+  try { url = new URL(location); } catch { return null; }
+  if (url.protocol !== 'http:') return null;
+  if (url.hostname === 'localhost' || url.hostname === '[::1]' || /^127\./.test(url.hostname)) return null;
+  return `warning: ${location} is plain http: the pack's digests still refuse altered bytes, but anyone on the path `
+    + 'can see what is read and can stall or block it. Serve packs over https.';
+}
+
 async function resolveChainMembers(locations, log = () => {}) {
   const { reader } = await loadCompleteModules();
   const resolved = [];
@@ -55,7 +68,9 @@ async function resolveChainMembers(locations, log = () => {}) {
     }
     let member;
     if (/^https?:\/\//i.test(loc)) {
-      const source = reader.httpRangeSource(loc);
+      const insecure = plainHttpWarning(loc);
+      if (insecure) log(insecure);
+      const source = reader.httpRangeSource(loc, { fetch: nodeFetch });
       await source.init();
       log(`Reading ${loc} over HTTP range requests`);
       member = source;
@@ -275,6 +290,7 @@ export {
   completeModulesPromise,
   loadCompleteModules,
   resolveChainMembers,
+  plainHttpWarning,
   parentLocatorFor,
   readChainMemberShellBytes,
   __filename,

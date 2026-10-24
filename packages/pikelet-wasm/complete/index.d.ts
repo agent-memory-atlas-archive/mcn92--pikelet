@@ -69,7 +69,32 @@ export declare function httpRangeSource(url: string, options?: {
    * the child's origin and directory (LAYERED_PROFILE.md 5.1.1).
    */
   redirectGuard?: (target: string) => void;
+  /**
+   * The fetch used for every request. Default nodeFetch under Node
+   * (the package's node export condition), else globalThis.fetch. A runtime
+   * whose fetch transparently decodes response bodies can pass one that does
+   * not.
+   */
+  fetch?: (input: string, init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    redirect?: 'follow' | 'manual' | 'error';
+  }) => Promise<any>;
 }): HttpRangeSource;
+
+/**
+ * Node only (the 'node' export condition): a fetch over node:http/node:https
+ * that never decompresses, sends Accept-Encoding: identity and refuses any
+ * other Content-Encoding. httpRangeSource defaults to it under Node.
+ */
+export declare function nodeFetch(input: string, init?: {
+  method?: 'GET' | 'HEAD';
+  headers?: Record<string, string>;
+  redirect?: 'follow' | 'manual' | 'error';
+  signal?: unknown;
+  /** Inflate a gzip/deflate body a server sent despite identity (crawled HTML); Brotli/zstd still refused. */
+  inflateGzip?: boolean;
+}): Promise<any>;
 
 export interface CompleteQueryResult {
   /**

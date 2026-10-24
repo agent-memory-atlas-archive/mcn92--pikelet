@@ -18,6 +18,11 @@ export function httpRangeSource(url, options = {}) {
         if (Number.isFinite(after) && after >= 0 && after <= 90) return after * 1000;
         return Math.min(15000, 250 * 2 ** attempt);
     };
+    // The transport is injectable so a runtime whose fetch decodes response
+    // bodies can hand in one that does not (the Node CLI passes a
+    // node:http-based fetch that never decompresses).
+    // The default is looked up per call, as a bare fetch() would be.
+    const fetch = typeof options.fetch === 'function' ? options.fetch : (input, init) => globalThis.fetch(input, init);
     const cacheKeyParam = options.cacheKeyParam === undefined ? 'r'
         : (options.cacheKeyParam === null || options.cacheKeyParam === false) ? null
             : String(options.cacheKeyParam);
@@ -55,6 +60,9 @@ export function httpRangeSource(url, options = {}) {
                     const location = probe.headers.get('location');
                     if (probe.status >= 300 && probe.status < 400 && location) {
                         const next = new URL(location, target).href;
+                        if (new URL(target).protocol === 'https:' && !next.startsWith('https:')) {
+                            throw Object.assign(new Error(`refused redirect from https to ${next}`), { redirectRefused: true });
+                        }
                         if (redirectGuard) {
                             try { redirectGuard(next); } catch (err) {
                                 throw Object.assign(new Error(`refused redirect to ${next}: ${err.message}`), { redirectRefused: true });
@@ -99,7 +107,7 @@ export function httpRangeSource(url, options = {}) {
                 // A refused hop is a verdict, not a probe failure: falling back
                 // to the original URL would retry the same redirect. So is a
                 // replaced artifact.
-                if ((redirectGuard && err?.redirectRefused) || err?.artifactChanged) {
+                if (err?.redirectRefused || err?.artifactChanged) {
                     resolving = null;
                     throw err;
                 }
@@ -120,6 +128,9 @@ export function httpRangeSource(url, options = {}) {
         // The location as given, before any redirect: what a child's parent
         // locator resolves against (5.1.1).
         url,
+        // The transport, when one was injected: a chain walk opens the
+        // parents it reaches over HTTP with the same one (layer-reader.mjs).
+        fetch: typeof options.fetch === 'function' ? options.fetch : undefined,
         size: undefined,
         preferredParallelism: options.preferredParallelism ?? 32,
         // Rows closer than this are fetched in one request, reading the
@@ -171,6 +182,16 @@ export function httpRangeSource(url, options = {}) {
                 response = await fetch(targetFor(resolvedTarget || pinned), readInit(headers));
             }
 
+            // A pack is content-addressed bytes: a body the host encoded is
+            // not those bytes, and an encoded range cannot be sliced anyway.
+            // Fail closed wherever the header is visible (a browser hides it
+            // on cross-origin responses unless the host exposes it).
+            const encoding = response.headers.get('content-encoding');
+            const codings = String(encoding || '').split(',').map((c) => c.trim().toLowerCase()).filter((c) => c && c !== 'identity');
+            if ((response.status === 206 || response.status === 200) && codings.length) {
+                await response.body?.cancel?.().catch(() => {});
+                throw new Error(`range read returned Content-Encoding: ${encoding}; a .pikelet must be served unencoded`);
+            }
             if (response.status === 206) {
                 // A 206 must be the range we asked for, and must say so: a
                 // host (or cache) answering with a different slice would

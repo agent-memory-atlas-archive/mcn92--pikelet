@@ -65,6 +65,9 @@
     },
     "./complete": {
       "types": "./complete/index.d.ts",
+      "workerd": "./complete/index.mjs",
+      "browser": "./complete/index.mjs",
+      "node": "./complete/index.node.mjs",
       "default": "./complete/index.mjs"
     },
     "./complete/builder": {
@@ -100,6 +103,9 @@
     },
     "./complete/layer-compact.mjs": {
       "default": "./complete/layer-compact.mjs"
+    },
+    "./complete/node-fetch.mjs": {
+      "node": "./complete/node-fetch.mjs"
     },
     "./engine.wasm": "./dist/engine.wasm",
     "./package.json": "./package.json"

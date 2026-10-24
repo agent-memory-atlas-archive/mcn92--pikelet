@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { CliError } from './common.mjs';
+import { nodeFetch } from 'pikelet-wasm/complete/node-fetch.mjs';
 
 const MAX_CRAWL_BODY_BYTES = 2 * 1024 * 1024;
 // Per-file ceiling for folder sources, the counterpart of the crawl cap: a
@@ -158,10 +159,13 @@ async function resolveSeedUrl(seed, log) {
   for (let hop = 0; hop < 5; hop++) {
     let response;
     try {
-      response = await fetch(current.href, {
+      response = await nodeFetch(current.href, {
         headers: { 'User-Agent': 'pikelet/0.1.0' },
         redirect: 'manual',
         signal: AbortSignal.timeout(15000),
+        // HTML only: a server that gzips despite Accept-Encoding: identity
+        // still crawls (inflated by node:zlib); Brotli and zstd are refused.
+        inflateGzip: true,
       });
     } catch {
       return current; // the crawl loop will surface the fetch error itself
@@ -210,10 +214,11 @@ async function ingestUrl(source, log) {
     seen.add(href);
     let response;
     try {
-      response = await fetch(href, {
+      response = await nodeFetch(href, {
         headers: { 'User-Agent': 'pikelet/0.1.0' },
         redirect: 'manual',
         signal: AbortSignal.timeout(15000),
+        inflateGzip: true,
       });
     } catch (error) {
       log(`warn: skipped ${href}: ${error.message}`);

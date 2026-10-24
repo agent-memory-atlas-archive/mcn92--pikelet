@@ -1,0 +1,225 @@
+// nodeFetch (packages/pikelet-wasm/complete/node-fetch.mjs), the portable
+// range source's Content-Encoding and downgrade checks, the Node entry's
+// default transport, the crawler, and the CLI's plain-http warning.
+
+import http from 'node:http';
+import https from 'node:https';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { nodeFetch, contentCodings } from '../packages/pikelet-wasm/complete/node-fetch.mjs';
+import { httpRangeSource } from '../packages/pikelet-wasm/complete/sources.mjs';
+import * as nodeEntry from '../packages/pikelet-wasm/complete/index.node.mjs';
+import { plainHttpWarning } from '../packages/pikelet/src/common.mjs';
+import { ingestUrl } from '../packages/pikelet/src/ingest.mjs';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let passed = 0;
+let failed = 0;
+function check(name, ok, detail = '') {
+    if (ok) { passed++; console.log(`  ok   ${name}`); } else { failed++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ''}`); }
+}
+async function rejects(name, fn, pattern) {
+    try { await fn(); check(name, false, 'did not throw'); } catch (err) { check(name, pattern.test(String(err?.message)), String(err?.message)); }
+}
+const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`hung for ${ms} ms`)), ms))]);
+
+const payload = Buffer.from(Array.from({ length: 4096 }, (_, i) => (i * 31) & 0xff));
+const seen = [];
+let open = 0;
+let maxOpen = 0;
+const ENCODED = { '/gzip': 'gzip', '/br': 'br', '/Identity': 'Identity', '/list': 'gzip, br', '/identity-gzip': 'identity, gzip' };
+const host = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    seen.push({ path: u.pathname, headers: req.headers });
+    if (u.pathname === '/front') { res.writeHead(302, { location: 'sub/../plain' }); res.end(); return; }
+    if (u.pathname === '/loop') { res.writeHead(302, { location: '/loop' }); res.end(); return; }
+    if (u.pathname === '/truncated') {
+        res.writeHead(200, { 'content-length': 1000 });
+        res.write(payload.subarray(0, 100));
+        setTimeout(() => res.socket.destroy(), 20);
+        return;
+    }
+    if (u.pathname === '/slow') {
+        open++; maxOpen = Math.max(maxOpen, open);
+        setTimeout(() => { open--; res.writeHead(200, { 'content-length': 2 }); res.end('ok'); }, 30);
+        return;
+    }
+    const coding = ENCODED[u.pathname];
+    if (u.pathname !== '/plain' && !coding) { res.writeHead(404); res.end(); return; }
+    const range = req.headers.range && /^bytes=(\d+)-(\d+)$/.exec(req.headers.range);
+    const extra = coding ? { 'content-encoding': coding } : {};
+    const encode = (b) => (coding === 'gzip' ? zlib.gzipSync(b) : coding === 'br' ? zlib.brotliCompressSync(b) : b);
+    if (!range) {
+        const body = encode(payload);
+        res.writeHead(200, { 'accept-ranges': 'bytes', 'content-length': body.length, etag: '"v1"', ...extra });
+        res.end(req.method === 'HEAD' ? undefined : body);
+        return;
+    }
+    const from = Number(range[1]);
+    const to = Math.min(Number(range[2]), payload.length - 1);
+    const body = encode(payload.subarray(from, to + 1));
+    res.writeHead(206, { 'content-range': `bytes ${from}-${to}/${payload.length}`, 'content-length': body.length, etag: '"v1"', ...extra });
+    res.end(body);
+});
+await new Promise((resolve) => host.listen(0, '127.0.0.1', resolve));
+const base = `http://127.0.0.1:${host.address().port}`;
+
+console.log('nodeFetch');
+{
+    const r = await nodeFetch(`${base}/plain`, { headers: { Range: 'bytes=10-19' } });
+    const body = Buffer.from(await r.arrayBuffer());
+    check('a range GET returns the exact slice', r.status === 206 && Buffer.compare(body, payload.subarray(10, 20)) === 0, `status ${r.status}`);
+    check('it asks for identity encoding', seen.at(-1).headers['accept-encoding'] === 'identity', seen.at(-1).headers['accept-encoding']);
+
+    seen.length = 0;
+    const followed = await nodeFetch(`${base}/front`, { headers: { Range: 'bytes=0-7', 'If-Range': '"v1"' } });
+    const hop = seen.find((s) => s.path === '/plain');
+    check('redirect: follow resolves a relative Location against the current URL', followed.status === 206 && !!hop);
+    check('Range and If-Range ride along across the hop', hop?.headers.range === 'bytes=0-7' && hop?.headers['if-range'] === '"v1"'
+        && Buffer.compare(Buffer.from(await followed.arrayBuffer()), payload.subarray(0, 8)) === 0);
+    const manual = await nodeFetch(`${base}/front`, { method: 'HEAD', redirect: 'manual' });
+    check('redirect: manual returns the 3xx with its Location', manual.status === 302 && manual.headers.get('location') === 'sub/../plain');
+    await rejects('redirect: error refuses the hop', () => nodeFetch(`${base}/front`, { redirect: 'error' }), /redirect refused/);
+    await rejects('a redirect loop is bounded at 20 hops', () => nodeFetch(`${base}/loop`), /too many redirects/);
+
+    await rejects('Content-Encoding: gzip fails closed', () => nodeFetch(`${base}/gzip`, { headers: { Range: 'bytes=0-15' } }), /Content-Encoding: gzip/);
+    await rejects('Content-Encoding: br fails closed', () => nodeFetch(`${base}/br`), /Content-Encoding: br/);
+    await rejects('a coding list "gzip, br" fails closed', () => nodeFetch(`${base}/list`), /Content-Encoding: gzip, br/);
+    await rejects('"identity, gzip" fails closed', () => nodeFetch(`${base}/identity-gzip`), /identity, gzip/);
+    const ident = await nodeFetch(`${base}/Identity`, { headers: { Range: 'bytes=0-3' } });
+    check('"Identity" (any case) is accepted', ident.status === 206 && (await ident.arrayBuffer()).byteLength === 4);
+    check('contentCodings parses lists and drops identity',
+        JSON.stringify(contentCodings(' GZip , identity,BR ')) === '["gzip","br"]' && contentCodings('Identity').length === 0 && contentCodings(null).length === 0);
+
+    const inflated = await nodeFetch(`${base}/gzip`, { inflateGzip: true });
+    check('inflateGzip inflates a gzip body and drops the coding headers',
+        Buffer.compare(Buffer.from(await inflated.arrayBuffer()), payload) === 0 && inflated.headers.get('content-encoding') === null);
+    await rejects('inflateGzip still refuses Brotli', () => nodeFetch(`${base}/br`, { inflateGzip: true }), /Content-Encoding: br/);
+    await rejects('inflateGzip still refuses a "gzip, br" list', () => nodeFetch(`${base}/list`, { inflateGzip: true }), /gzip, br/);
+
+    const head = await nodeFetch(`${base}/plain`, { method: 'HEAD' });
+    check('HEAD carries headers and no body', head.status === 200 && head.body === null && Number(head.headers.get('content-length')) === payload.length);
+
+    const truncated = await nodeFetch(`${base}/truncated`);
+    await rejects('a body cut off mid-stream rejects arrayBuffer() instead of hanging', () => withTimeout(truncated.arrayBuffer(), 5000), /aborted|terminated|ECONNRESET|socket|close/i);
+    await rejects('an aborted request rejects', () => nodeFetch(`${base}/slow`, { signal: AbortSignal.timeout(5) }), /abort|timeout/i);
+
+    maxOpen = 0;
+    await Promise.all(Array.from({ length: 64 }, () => nodeFetch(`${base}/slow`).then((x) => x.text())));
+    check('a 64-read burst opens at most 32 connections to one host', maxOpen > 1 && maxOpen <= 32, `max concurrent ${maxOpen}`);
+}
+
+console.log('https downgrade');
+{
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-tls-'));
+    let tlsHost = null;
+    try {
+        execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=127.0.0.1',
+            '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem')], { stdio: 'ignore' });
+        tlsHost = https.createServer({ key: fs.readFileSync(path.join(dir, 'key.pem')), cert: fs.readFileSync(path.join(dir, 'cert.pem')) }, (req, res) => {
+            res.writeHead(302, { location: `${base}/plain` });
+            res.end();
+        });
+        await new Promise((resolve) => tlsHost.listen(0, '127.0.0.1', resolve));
+        const tlsBase = `https://127.0.0.1:${tlsHost.address().port}`;
+        const prior = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // the throwaway self-signed cert above
+        process.removeAllListeners('warning');
+        try {
+            await rejects('nodeFetch refuses an https -> http redirect', () => nodeFetch(`${tlsBase}/pack`), /refused redirect from https to http/);
+        } finally {
+            if (prior === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED; else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prior;
+        }
+    } catch (err) {
+        check('https downgrade test ran (needs openssl)', false, err.message);
+    } finally {
+        tlsHost?.close();
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+    // The range source's own HEAD walk reads Location itself (redirect:
+    // 'manual'), so it must refuse the downgrade too, on any transport.
+    const stubFetch = async (url) => (String(url).startsWith('https:')
+        ? new Response(null, { status: 302, headers: { location: 'http://example.invalid/pack' } })
+        : new Response(null, { status: 200, headers: { 'content-length': '10' } }));
+    await rejects('the range source\'s redirect walk refuses https -> http', () => httpRangeSource('https://example.invalid/pack', { fetch: stubFetch }).init(), /refused redirect from https/);
+}
+
+console.log('httpRangeSource');
+{
+    const src = httpRangeSource(`${base}/front`, { fetch: nodeFetch });
+    await src.init();
+    const got = await src.read(100, 64);
+    check('an injected fetch serves the redirect walk and reads', src.size === payload.length
+        && Buffer.compare(Buffer.from(got), payload.subarray(100, 164)) === 0 && src.stats.redirects === 1, `size ${src.size}`);
+    check('the source exposes its injected transport for a chain walk', src.fetch === nodeFetch && httpRangeSource(`${base}/plain`).fetch === undefined);
+    // The portable check, on the runtime's own fetch: the body may have been
+    // decoded already, but the header still says it was encoded.
+    const portable = httpRangeSource(`${base}/gzip`);
+    await portable.init();
+    await rejects('globalThis.fetch: an encoded range response is refused', () => portable.read(0, 32), /Content-Encoding: gzip/);
+    const listed = httpRangeSource(`${base}/list`);
+    await rejects('globalThis.fetch: a coding list is refused', () => listed.read(0, 32), /Content-Encoding: gzip, br/);
+
+    check('the Node entry exports nodeFetch', nodeEntry.nodeFetch === nodeFetch);
+    check('the Node entry\'s httpRangeSource defaults to nodeFetch', nodeEntry.httpRangeSource(`${base}/plain`).fetch === nodeFetch);
+    check('options.fetch still overrides the Node default', nodeEntry.httpRangeSource(`${base}/plain`, { fetch: globalThis.fetch }).fetch === globalThis.fetch);
+    const resolved = import.meta.resolve('pikelet-wasm/complete');
+    check('\'pikelet-wasm/complete\' resolves to the Node entry under Node', resolved.endsWith('/complete/index.node.mjs'), resolved);
+    await rejects('a library mount of a Brotli-encoded pack fails with the identity error',
+        () => nodeEntry.openPikeletFile(nodeEntry.httpRangeSource(`${base}/br`)), /Content-Encoding: br/);
+}
+
+console.log('CLI');
+{
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pikelet-transport-'));
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# A\n\nSome text about range reads.\n');
+    // Async: a synchronous spawn would block this process's own server.
+    const run = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [path.join(REPO, 'packages/pikelet/bin/pikelet.mjs'), 'append',
+            '--parent', `${base}/br`, '--source', path.join(tmp, 'docs'), '--out', path.join(tmp, 'out.pikelet')],
+        { env: { ...process.env, PIKELET_NO_NODE_WARNING: '1' } });
+        let stderr = '';
+        child.stderr.on('data', (d) => { stderr += d; });
+        child.on('close', (status) => resolve({ status, stderr }));
+    });
+    check('a CLI mount of a Brotli-encoded parent fails with the identity error', run.status !== 0 && /Content-Encoding: br/.test(run.stderr),
+        `exit ${run.status}: ${run.stderr.slice(-300)}`);
+    fs.rmSync(tmp, { recursive: true, force: true });
+
+    check('plain http to a remote host warns', /plain http/.test(plainHttpWarning('http://packs.example.com/a.pikelet') || ''));
+    check('https does not warn', plainHttpWarning('https://packs.example.com/a.pikelet') === null);
+    check('loopback http does not warn', ['http://127.0.0.1:8080/a', 'http://localhost/a', 'http://[::1]/a'].every((u) => plainHttpWarning(u) === null));
+}
+host.close();
+
+console.log('crawler');
+{
+    const page = (title, links = '') => `<!doctype html><html><head><title>${title}</title></head><body><main><h1>${title}</h1>`
+        + `<p>${title} explains how range reads fetch only the bytes a query needs from a static host.</p>${links}</main></body></html>`;
+    const site = http.createServer((req, res) => {
+        const html = { '/docs/': page('Index', '<a href="/docs/gz">gz</a> <a href="/docs/br">br</a>'), '/docs/gz': page('Gzipped'), '/docs/br': page('Brotli') }[req.url];
+        if (!html) { res.writeHead(404); res.end(); return; }
+        // A server that compresses whatever it was asked for.
+        const coding = req.url.endsWith('gz') ? 'gzip' : req.url.endsWith('br') ? 'br' : null;
+        const body = coding === 'gzip' ? zlib.gzipSync(html) : coding === 'br' ? zlib.brotliCompressSync(html) : Buffer.from(html);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length, ...(coding ? { 'content-encoding': coding } : {}) });
+        res.end(body);
+    });
+    await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
+    const siteBase = `http://127.0.0.1:${site.address().port}`;
+    const lines = [];
+    const docs = await ingestUrl({ url: `${siteBase}/docs/`, maxPages: 10 }, (line) => lines.push(line));
+    site.close();
+    const titles = docs.map((d) => d.title).sort().join(',');
+    check('the crawler reads a page a server gzipped despite identity', titles === 'Gzipped,Index', titles);
+    check('a Brotli page is skipped with a warning naming the URL and the coding',
+        lines.some((l) => l.includes(`${siteBase}/docs/br`) && /Content-Encoding: br/.test(l)), lines.join(' | '));
+}
+
+console.log(`\nNode transport: ${passed} passed, ${failed} failed`);
+process.exit(failed > 0 ? 1 : 0);
