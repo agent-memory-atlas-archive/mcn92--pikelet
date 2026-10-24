@@ -267,9 +267,10 @@ async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, sn
   let result = assemble(goldenQueries, calibrationBytes);
   // Replay the candidate goldens through the assembled artifact's own
   // retrieval (sketch scan + rerank + hybrid ordering, inline encoder) —
-  // the configuration a reader will actually run, which the calibration
-  // index only approximates. A golden that does not reproduce there is
-  // dropped and the file reassembled: verify_pack and acceptance tests
+  // the configuration a reader will actually run, at k = 10, which the
+  // calibration's own checks need not match. A golden that does not
+  // reproduce there is dropped and the file reassembled (with the same
+  // calibration): verify_pack and acceptance tests
   // must pass by construction on the shipped bytes. (The evaluation
   // segment does not feed retrieval, so the replay stays valid across
   // the reassembly.)
@@ -290,7 +291,7 @@ async function buildCompleteArtifact({ projectDir, assetsDir, config, chunks, sn
     }
     if (kept.length !== goldenQueries.length) {
       log(`Golden replay against the assembled artifact: ${kept.length}/${goldenQueries.length} reproduce; embedding the ${kept.length} that do`);
-      result = assemble(kept);
+      result = assemble(kept, calibrationBytes);
     } else {
       log(`Golden replay against the assembled artifact: ${kept.length}/${kept.length} reproduce`);
     }
