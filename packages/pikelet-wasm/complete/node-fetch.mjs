@@ -63,7 +63,8 @@ function toResponse(res, method, body = res) {
     headers.delete('content-encoding');
     headers.delete('content-length');
   }
-  const bodyless = method === 'HEAD' || res.statusCode === 204 || res.statusCode === 304;
+  // Null-body statuses: new Response() throws if handed a stream for them.
+  const bodyless = method === 'HEAD' || [204, 205, 304].includes(res.statusCode);
   if (bodyless) res.resume();
   return new Response(bodyless ? null : Readable.toWeb(body), {
     status: res.statusCode,

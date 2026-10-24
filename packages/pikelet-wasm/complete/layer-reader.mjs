@@ -57,7 +57,8 @@ export const CHAIN_DEFAULTS = Object.freeze({
  *   openPikeletFile(), so a string is a path and an object is a range source.
  * @param {object} [options] forwarded to each member's open, plus:
  *   readerDriftLimit, maxDepth, and fetch (the transport for any parent the
- *   walk reaches over HTTP; default globalThis.fetch).
+ *   walk reaches over HTTP; default: the child source's own, else
+ *   globalThis.fetch).
  */
 /**
  * 5.1.1: walk from a head to its base, resolving each parent by lineage

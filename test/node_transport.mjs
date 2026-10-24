@@ -39,6 +39,7 @@ const host = http.createServer((req, res) => {
     seen.push({ path: u.pathname, headers: req.headers });
     if (u.pathname === '/front') { res.writeHead(302, { location: 'sub/../plain' }); res.end(); return; }
     if (u.pathname === '/loop') { res.writeHead(302, { location: '/loop' }); res.end(); return; }
+    if (u.pathname === '/reset') { res.writeHead(205); res.end(); return; }
     if (u.pathname === '/truncated') {
         res.writeHead(200, { 'content-length': 1000 });
         res.write(payload.subarray(0, 100));
@@ -103,6 +104,8 @@ console.log('nodeFetch');
     await rejects('inflateGzip still refuses Brotli', () => nodeFetch(`${base}/br`, { inflateGzip: true }), /Content-Encoding: br/);
     await rejects('inflateGzip still refuses a "gzip, br" list', () => nodeFetch(`${base}/list`, { inflateGzip: true }), /gzip, br/);
 
+    const reset = await nodeFetch(`${base}/reset`).then((x) => x.status, (err) => err.message);
+    check('a 205 (null-body status) resolves instead of throwing', reset === 205, String(reset));
     const head = await nodeFetch(`${base}/plain`, { method: 'HEAD' });
     check('HEAD carries headers and no body', head.status === 200 && head.body === null && Number(head.headers.get('content-length')) === payload.length);
 

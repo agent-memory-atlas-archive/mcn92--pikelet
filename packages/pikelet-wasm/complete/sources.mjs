@@ -19,9 +19,9 @@ export function httpRangeSource(url, options = {}) {
         return Math.min(15000, 250 * 2 ** attempt);
     };
     // The transport is injectable so a runtime whose fetch decodes response
-    // bodies can hand in one that does not (the Node CLI passes a
-    // node:http-based fetch that never decompresses).
-    // The default is looked up per call, as a bare fetch() would be.
+    // bodies can hand in one that does not (the Node entry, index.node.mjs,
+    // defaults to nodeFetch, which never decompresses). The default here is
+    // looked up per call, as a bare fetch() would be.
     const fetch = typeof options.fetch === 'function' ? options.fetch : (input, init) => globalThis.fetch(input, init);
     const cacheKeyParam = options.cacheKeyParam === undefined ? 'r'
         : (options.cacheKeyParam === null || options.cacheKeyParam === false) ? null
