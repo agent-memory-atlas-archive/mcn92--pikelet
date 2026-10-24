@@ -10,7 +10,7 @@ It is built for corpora that are static or change on a release cycle: documentat
 
 ## Quick start
 
-The `pikelet` CLI requires Node 20+; the `pikelet-wasm` library runs on Node 18+, browsers, and Cloudflare Workers.
+The `pikelet` CLI requires Node 22.23.4+, 24.22.1+ or 26.12.1+ (earlier releases' fetch decompresses whatever a server labels as encoded; 18.x and 20.x are end-of-life and cannot be fixed); the `pikelet-wasm` library runs on Node 18+, browsers, and Cloudflare Workers.
 
 ```bash
 npx pikelet compile --source ./docs --out docs.pikelet

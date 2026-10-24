@@ -12,6 +12,15 @@ first.
 
 ### Compatibility
 
+- **`pikelet` requires Node 22.23.4+, 24.22.1+ or 26.12.1+** (`engines`
+  was `>=20`). Earlier releases ship a fetch whose response decoder runs
+  on any body a server labels with a `Content-Encoding`; 18.x, 20.x, 23.x
+  and 25.x are end-of-life and will not get the fix. npm only warns on an
+  engines mismatch and an existing install never re-checks it, so the CLI
+  now prints a warning to stderr on every start under an unsupported
+  version (`PIKELET_NO_NODE_WARNING=1` silences it). CI tests Node 22, 24
+  and 26 instead of 18, 20 and 22. `pikelet-wasm`'s own range is unchanged.
+
 - **Calibration is fit on the reader's own retrieval.** `compile` and
   `compact` now assemble the pack unscored, open it with the reader, and
   run every calibration probe through the same retrieval `query()` serves

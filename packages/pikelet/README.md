@@ -38,7 +38,10 @@ only the `create` scaffold path uses. Measured on a clean project, omitting it
 takes the install from **82 packages / 257 MB / "6 vulnerabilities (5 high, 1
 critical)"** to **2 packages / 1.8 MB / "found 0 vulnerabilities"** — the
 advisories are all inside a dependency `compile` and `mcp` never load. The
-CLI requires Node 20+. `npx pikelet --help` lists every command and flag; a
+CLI requires Node 22.23.4+, 24.22.1+ or 26.12.1+: earlier releases ship a
+fetch that decompresses any response a server labels with a
+`Content-Encoding`, and 18.x, 20.x, 23.x and 25.x are end-of-life with no
+fix. The CLI warns on start under any other version. `npx pikelet --help` lists every command and flag; a
 flag the CLI does not know is refused (`Unknown flag --x`) rather than
 silently ignored.
 

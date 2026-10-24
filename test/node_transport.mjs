@@ -1,6 +1,7 @@
 // nodeFetch (packages/pikelet-wasm/complete/node-fetch.mjs), the portable
 // range source's Content-Encoding and downgrade checks, the Node entry's
-// default transport, the crawler, and the CLI's plain-http warning.
+// default transport, the crawler, and the CLI's supported-Node and plain-http
+// warnings.
 
 import http from 'node:http';
 import https from 'node:https';
@@ -13,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { nodeFetch, contentCodings } from '../packages/pikelet-wasm/complete/node-fetch.mjs';
 import { httpRangeSource } from '../packages/pikelet-wasm/complete/sources.mjs';
 import * as nodeEntry from '../packages/pikelet-wasm/complete/index.node.mjs';
+import { isSupportedNode, nodeSupportWarning } from '../packages/pikelet/src/node-support.mjs';
 import { plainHttpWarning } from '../packages/pikelet/src/common.mjs';
 import { ingestUrl } from '../packages/pikelet/src/ingest.mjs';
 
@@ -220,6 +222,17 @@ console.log('crawler');
     check('a Brotli page is skipped with a warning naming the URL and the coding',
         lines.some((l) => l.includes(`${siteBase}/docs/br`) && /Content-Encoding: br/.test(l)), lines.join(' | '));
 }
+
+console.log('supported Node versions');
+for (const [v, want] of [
+    ['18.20.8', false], ['20.20.2', false], ['22.23.3', false], ['22.23.4', true], ['22.30.0', true],
+    ['23.11.0', false], ['24.22.0', false], ['24.22.1', true], ['25.9.0', false], ['26.12.0', false],
+    ['26.12.1', true], ['27.0.0', true], ['v24.23.0', true],
+]) {
+    check(`${v} is ${want ? '' : 'not '}supported`, isSupportedNode(v) === want);
+}
+check('a supported version gets no warning', nodeSupportWarning('24.22.1') === null);
+check('an unsupported version gets one naming the range', /does not support Node 20\.20\.2.*>=22\.23\.4/.test(nodeSupportWarning('20.20.2') || ''));
 
 console.log(`\nNode transport: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
