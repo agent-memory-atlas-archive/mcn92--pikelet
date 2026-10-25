@@ -8,7 +8,17 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
-## Unreleased
+## pikelet-wasm 0.11.0 / pikelet 0.11.0 — 2026-10-24
+
+Pack reads on Node no longer go through the runtime's fetch, whose
+response decoder is vulnerable on unpatched Node releases, and the CLI now
+requires a patched Node 22, 24 or 26. Upgrade if you mount packs over HTTP
+from Node. This release also fixes an out-of-bounds read on crafted engine
+snapshots, a signed-URL refresh that could mix bytes from two artifacts,
+and an MCP server that stopped serving every pack when one failed to
+mount. It adds a writable agent journal, packs compiled from git history
+and past conversations, and sentence windows. Both packages move to 0.11.0
+together, and `pikelet` requires `pikelet-wasm` ^0.11.0.
 
 ### Compatibility
 
@@ -20,7 +30,15 @@ first.
   now prints a warning to stderr on every start under an unsupported
   version (`PIKELET_NO_NODE_WARNING=1` silences it). CI tests Node 22, 24
   and 26 instead of 18, 20 and 22. `pikelet-wasm`'s own range is unchanged.
-
+- **Under Node, `pikelet-wasm/complete` resolves to a Node entry** whose
+  `httpRangeSource` reads over `nodeFetch` (see Fixed) instead of
+  `globalThis.fetch`. Pass `options.fetch` to choose otherwise. Browsers
+  and Workers still get the portable module.
+- **The CLI refuses unknown flags** with `Unknown flag --x`. An
+  unregistered flag used to be read as taking a value and swallowed the
+  next argument (`pikelet mcp --no-resolve-parents pack.pikelet` mounted
+  nothing), and a typo was ignored. A script passing a flag pikelet never
+  read now exits with an error.
 - **Calibration is fit on the reader's own retrieval.** `compile` and
   `compact` now assemble the pack unscored, open it with the reader, and
   run every calibration probe through the same retrieval `query()` serves
@@ -55,7 +73,7 @@ first.
   option). Every network read the CLI makes uses it: URL packs and chain
   parents under `mcp`, `append` and `compact`, `--shelf`, `doctor`, the
   encoder-weights download, and the URL crawler. `pikelet` therefore needs
-  this `pikelet-wasm` or later.
+  `pikelet-wasm` 0.11.0 or later.
 - **`httpRangeSource` refuses an encoded response on any transport.** A
   200 or 206 with a `Content-Encoding` other than `identity` fails closed,
   next to the existing `Content-Range` checks: a pack is content-addressed
@@ -67,9 +85,52 @@ first.
   inflated with `node:zlib` (crawled HTML only; packs stay identity-only).
   A page in any other coding is skipped with a warning naming the URL and
   the header.
+- **Engine snapshots with inconsistent graph levels are refused.** An
+  entry point below the snapshot's max level, or a level-l edge into a node
+  whose top level is below l, made traversal read past a node's edge lists
+  (a segfault in the native build, an out-of-bounds read in WASM). Such a
+  snapshot now fails `import()` like any other malformed one. Both `.wasm`
+  builds are rebuilt.
+- **A signed URL re-resolved onto a replaced artifact fails.** When a
+  signed URL expired and was resolved again, the reader adopted the new
+  HEAD's ETag, so a pack re-uploaded under the same name was compared
+  against itself and its bytes served alongside the old ones. The first
+  ETag and size now stay pinned and a mismatch throws `ARTIFACT_CHANGED`.
+  `If-Range` is sent only with a strong ETag.
+- **One pack failing to mount no longer takes down `pikelet mcp`.** Each
+  pack mounts on its own; the rest keep serving, `list_packs` lists the
+  failures under `unavailable`, and the exit status is still non-zero.
+  Before, the first failure made every tool call, `tools/list` included,
+  return that error.
+- **`create --force` replaces a project only after the new one builds**,
+  and works when the temp directory is on another filesystem (WSL's `/tmp`
+  vs `/mnt/c` used to fail with `EXDEV`). It refuses to replace the
+  current directory, a parent of it, or a directory overlapping
+  `--source`.
 
 ### Added
 
+- **An agent journal** (`pikelet journal init|list|compact`, `mcp
+  --journal`): a private pack an agent writes to over MCP with
+  `write_note` and reads back with `latest`, `search` and `get_record`.
+  Each note is one immutable layer; the chain compacts itself at the depth
+  limit, writes are serialized across processes, and several sessions can
+  share one journal. Notes are labelled agent-written, and their author is
+  the MCP client, never the model's arguments.
+- **Packs from git history and past conversations.** `compile --git
+  <repo> [--git-rev <rev|range>]` makes one record per non-merge commit,
+  cited by commit URL or sha, with git run without a shell and with the
+  repository's program-running config neutralized. `compile
+  --conversations <file|folder>` makes one record per exchange from Claude
+  Code transcripts, Claude.ai exports and ChatGPT exports, with tool output,
+  credential shapes and email addresses redacted (best effort: keep such a
+  pack private).
+- **`info().layout` and `recordRange(id)`** report where each part of a
+  `.pikelet` file and each record's bytes live, without a read. The
+  playground draws its range reads on a map of the file with them.
+- **`appendLayer` and `compactChain` run programmatically**, with a `log`
+  option, ready-made `chunks` for `append`, and the written file's
+  identity and records returned.
 - **`pikelet` warns on a plain `http://` pack or shelf URL** (loopback
   excepted). The digests still refuse altered bytes, but anyone on the
   path can see what is read and stall or block it.
