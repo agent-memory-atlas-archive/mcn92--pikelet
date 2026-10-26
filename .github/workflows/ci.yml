@@ -90,6 +90,10 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0'
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:browser
+      # The inline-encoder kernel in all three engines: bit-identical to the
+      # Node build, and still verifying the f32 kernel's test vectors (packs
+      # compiled before the integer GEMM). CI=true makes every engine required.
+      - run: npm run test:browser-encoder
 
   native-build:
     # The native addon was previously never compiled in CI, so the x86 ISA

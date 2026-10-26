@@ -23,6 +23,7 @@
     "test": "node test/run_tests.js && node test/model_c_loader.js && node test/sketch_profile.js && node test/sketch_staged.js && node test/sketch_row_integrity.js && node test/artifact_hardening.js && node test/complete_profile.mjs && node --import ./test/fetch-tripwire.mjs test/layered_profile.mjs && node test/node_transport.mjs && node --import ./test/fetch-tripwire.mjs test/mcp_conformance.mjs && node --import ./test/fetch-tripwire.mjs test/journal.mjs && node --import ./test/fetch-tripwire.mjs test/ingestion/run.mjs && npm run test:types",
     "test:types": "tsc -p test/types/tsconfig.json",
     "test:browser": "node test/browser_smoke.js",
+    "test:browser-encoder": "node test/browser_encoder.mjs",
     "test:worker-web": "node test/test_worker_web_entry.js",
     "test:simd": "node test/simd_parity.js",
     "test:fuzz": "node test/fuzz_import.js",
@@ -30,7 +31,7 @@
     "test:scaffold": "node scripts/test-scaffold-e2e.mjs",
     "bench:range-storage": "node scripts/benchmark-range-storage.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs",
-    "prepublish-checks": "npm run build:all && npm test && npm run test:fuzz && npm run test:simd && npm run test:browser && npm run test:worker-web && npm run test:worker-example && npm run pack:dry-run"
+    "prepublish-checks": "npm run build:all && npm test && npm run test:fuzz && npm run test:simd && npm run test:browser && npm run test:browser-encoder && npm run test:worker-web && npm run test:worker-example && npm run pack:dry-run"
   },
   "engines": {
     "node": ">=18"
