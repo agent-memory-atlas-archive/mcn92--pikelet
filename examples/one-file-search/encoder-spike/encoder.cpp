@@ -1,12 +1,16 @@
 // BERT-style encoder forward (MiniLM-L6, or any model of the same shape
 // with up to MAXL layers) over the block-affine u8 weight blob emitted by
 // export_encoder_blob.py — the inline-encoder (kind 3) kernel.
-// Float weight tensors are never materialized: every GEMV dequantizes
-// inside the dot product, from u8 or u4 block-affine weights. LayerNorm, softmax, GELU, biases, and residuals
-// run in f32. Every projection runs over all tokens at once, TOKEN_TILE
-// tokens per pass over the weights (see gemm_tile), with bit-identical
-// results to a token-at-a-time GEMV; the FFN intermediate is materialized
-// for the whole sequence. Attention is direct (seq <= MAXSEQ, the score
+// Float weight tensors are never materialized. With SIMD (the shipped
+// builds) every projection is an integer GEMM (INT_GEMM, see gemm_int_tile):
+// u8 or u4 block-affine weights widened to int16 against activations
+// quantized to int16 per token, i32x4.dot_i16x8_s per block, the block and
+// token scales applied in f32 afterwards; GELU is vectorized
+// (gelu_f32x4). LayerNorm, softmax, biases, and residuals run in f32.
+// Projections run over INT_TILE tokens per pass over the weights; the FFN
+// intermediate is materialized for the whole sequence. INT_GEMM=0 builds the
+// earlier all-f32 path (bit-identical whatever its TOKEN_TILE).
+// Attention is direct (seq <= MAXSEQ, the score
 // tile is KBs) and O(seq^2) per head per layer, so MAXSEQ trades
 // embedding latency for window width — pinned to P (the position-embedding
 // table size, 512), since a wider window has no positions to encode past
@@ -26,6 +30,17 @@
 #include <wasm_simd128.h>
 #endif
 
+// PROFILE builds time each phase (encoder_profile() reads the totals).
+#ifdef PROFILE
+#include <emscripten.h>
+double g_prof[8];
+#define PROF_START double prof_t0 = emscripten_get_now();
+#define PROF_END(i) g_prof[i] += emscripten_get_now() - prof_t0;
+#else
+#define PROF_START
+#define PROF_END(i)
+#endif
+
 namespace {
 
 constexpr int V = 30522, P = 512, T = 2, D = 384, F = 1536, MAXL = 12;
@@ -36,6 +51,18 @@ constexpr int B8 = 64, B4 = 32;
 constexpr int MAXNB = F / B4;  // most blocks per row (F-wide, u4)
 constexpr int MAXSEQ = 512;
 constexpr float LN_EPS = 1e-12f;
+
+// INT_GEMM (SIMD builds): weights stay integer and activations are quantized
+// to int16 with one scale per token, so every GEMM inner loop is
+// i32x4.dot_i16x8_s (baseline SIMD128, so every engine) instead of widening
+// each weight to f32. One block's integer dot is exact; the only new error
+// is the activation rounding (15 bits, relative to the token's max), at
+// most ~3e-4 per output component, inside the 1e-3 test-vector tolerance.
+// INT_GEMM=0 builds the f32 path.
+#ifndef INT_GEMM
+#define INT_GEMM 1
+#endif
+constexpr int QB = 32;  // block of the exact activation sums (= B4; B8 is two)
 
 struct QuantMat {
     const uint8_t* q;
@@ -255,6 +282,104 @@ void gemm_q4(const QuantMat& m, int rows, int cols, const float* X, int seq, con
 }
 #endif
 
+#if defined(__wasm_simd128__) && INT_GEMM
+// The sequence's activations as int16 with one scale per token:
+// X[t][c] ~= xs[t] * xq[t*cols + c]. A per-token scale (not per block)
+// lets a whole weight block's integer dot run before any conversion, and
+// moves the activation scale out of the inner loop entirely. xsum keeps
+// each QB-wide block's exact f32 sum for the block-affine offset term.
+alignas(16) int16_t g_xq[MAXSEQ * F];
+float g_xs[MAXSEQ];
+float g_xsum[MAXSEQ * (F / QB)];   // per QB (= B4) block
+float g_xsum8[MAXSEQ * (F / B8)];  // per B8 block, for u8 weights
+// Set by the forward pass around the K and V projections only: they read
+// the same, unmodified input Q's projection just quantized. Every other
+// GEMM input is fresh (bx itself is rewritten between Q and the FFN).
+bool g_reuse_acts;
+
+void quantize_acts(const float* X, int seq, int cols) {
+    if (g_reuse_acts) return;
+    const int nb = cols / QB;
+    for (int t = 0; t < seq; t++) {
+        const float* x = X + t * cols;
+        float m = 0.f;
+        for (int c = 0; c < cols; c++) { const float a = fabsf(x[c]); if (a > m) m = a; }
+        const float inv = m > 0.f ? 32767.f / m : 0.f;
+        g_xs[t] = m / 32767.f;
+        int16_t* q = g_xq + t * cols;
+        // Round to nearest (even), as lrintf; |x*inv| <= 32767 by construction.
+        const v128_t vinv = wasm_f32x4_splat(inv);
+        for (int c = 0; c < cols; c += 8) {
+            const v128_t a = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(wasm_v128_load(x + c), vinv)));
+            const v128_t b = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(wasm_v128_load(x + c + 4), vinv)));
+            wasm_v128_store(q + c, wasm_i16x8_narrow_i32x4(a, b));
+        }
+        for (int b = 0; b < nb; b++) {
+            float sum = 0.f;
+            for (int c = 0; c < QB; c++) sum += x[b * QB + c];
+            g_xsum[t * nb + b] = sum;
+        }
+        for (int b = 0; b < cols / B8; b++) g_xsum8[t * (cols / B8) + b] = g_xsum[t * nb + 2 * b] + g_xsum[t * nb + 2 * b + 1];
+    }
+}
+
+// Y = A X + bias over a tile of NT tokens starting at token t0, A u8 or u4.
+// Each weight block is widened to int16 once and applied to every tile
+// token: one i32x4 integer dot per block per token (exact; at most 16
+// products of 255 * 32767 per lane), converted and scaled by the block's s
+// into a per-token f32x4, reduced and scaled by the token's xs once per row.
+// The block-affine offset term o*xsum is a scalar per weight block.
+template <int NT, bool Q4>
+void gemm_int_tile(const QuantMat& m, int rows, int cols, int t0, const float* bias, float* Y) {
+    constexpr int BS = Q4 ? B4 : B8;
+    constexpr int NV = BS / 8;  // int16x8 vectors per weight block
+    const int nblocks = cols / BS;
+    const size_t rowBytes = Q4 ? (size_t)cols / 2 : (size_t)cols;
+    const int16_t* xq0 = g_xq + t0 * cols;
+    const float* xsum0 = Q4 ? g_xsum + t0 * nblocks : g_xsum8 + t0 * nblocks;  // one sum per weight block
+    for (int r = 0; r < rows; r++) {
+        const uint8_t* arow = m.q + r * rowBytes;
+        const float* srow = m.s + (size_t)r * nblocks;
+        const float* orow = m.o + (size_t)r * nblocks;
+        v128_t facc[NT];
+        float off[NT];
+        for (int t = 0; t < NT; t++) { facc[t] = wasm_f32x4_const_splat(0.f); off[t] = 0.f; }
+        for (int b = 0; b < nblocks; b++) {
+            v128_t w[NV];
+            if (Q4) {
+                const v128_t packed = wasm_v128_load(arow + b * (B4 / 2));
+                const v128_t lo = wasm_v128_and(packed, wasm_u8x16_splat(0x0F));
+                const v128_t hi = wasm_u8x16_shr(packed, 4);
+                w[0] = wasm_u16x8_extend_low_u8x16(lo);
+                w[1] = wasm_u16x8_extend_high_u8x16(lo);
+                w[2] = wasm_u16x8_extend_low_u8x16(hi);
+                w[3] = wasm_u16x8_extend_high_u8x16(hi);
+            } else {
+                for (int c = 0; c < BS; c += 16) {
+                    const v128_t bytes = wasm_v128_load(arow + b * BS + c);
+                    w[c / 8] = wasm_u16x8_extend_low_u8x16(bytes);
+                    w[c / 8 + 1] = wasm_u16x8_extend_high_u8x16(bytes);
+                }
+            }
+            const v128_t sv = wasm_f32x4_splat(srow[b]);
+            const float ob = orow[b];
+            for (int t = 0; t < NT; t++) {
+                const int16_t* xq = xq0 + t * cols + b * BS;
+                v128_t vacc = wasm_i32x4_dot_i16x8(w[0], wasm_v128_load(xq));
+                for (int k = 1; k < NV; k++) vacc = wasm_i32x4_add(vacc, wasm_i32x4_dot_i16x8(w[k], wasm_v128_load(xq + 8 * k)));
+                facc[t] = wasm_f32x4_add(facc[t], wasm_f32x4_mul(wasm_f32x4_convert_i32x4(vacc), sv));
+                off[t] += ob * xsum0[t * nblocks + b];
+            }
+        }
+        for (int t = 0; t < NT; t++) {
+            const float dot = wasm_f32x4_extract_lane(facc[t], 0) + wasm_f32x4_extract_lane(facc[t], 1)
+                + wasm_f32x4_extract_lane(facc[t], 2) + wasm_f32x4_extract_lane(facc[t], 3);
+            Y[(t0 + t) * rows + r] = (bias ? bias[r] : 0.f) + g_xs[t0 + t] * dot + off[t];
+        }
+    }
+}
+#endif
+
 template <bool Q4>
 void gemm_seq(const QuantMat& m, int rows, int cols, const float* X, int seq, const float* bias, float* Y) {
     int t = 0;
@@ -268,7 +393,28 @@ void gemm_seq(const QuantMat& m, int rows, int cols, const float* X, int seq, co
 // a time, like the layout cursor).
 bool g_q4;
 
+#if defined(__wasm_simd128__) && INT_GEMM
+#ifndef INT_TILE
+#define INT_TILE 8
+#endif
+template <bool Q4>
+void gemm_int(const QuantMat& m, int rows, int cols, const float* X, int seq, const float* bias, float* Y) {
+    { PROF_START quantize_acts(X, seq, cols); PROF_END(0) }
+    int t = 0;
+    for (; t + INT_TILE <= seq; t += INT_TILE) gemm_int_tile<INT_TILE, Q4>(m, rows, cols, t, bias, Y);
+    if (INT_TILE > 8) for (; t + 8 <= seq; t += 8) gemm_int_tile<8, Q4>(m, rows, cols, t, bias, Y);
+    if (INT_TILE > 4) for (; t + 4 <= seq; t += 4) gemm_int_tile<4, Q4>(m, rows, cols, t, bias, Y);
+    for (; t + 2 <= seq; t += 2) gemm_int_tile<2, Q4>(m, rows, cols, t, bias, Y);
+    for (; t < seq; t++) gemm_int_tile<1, Q4>(m, rows, cols, t, bias, Y);
+}
+#endif
+
 void gemm(const QuantMat& m, int rows, int cols, const float* X, int seq, const float* bias, float* Y) {
+#if defined(__wasm_simd128__) && INT_GEMM
+    if (g_q4) gemm_int<true>(m, rows, cols, X, seq, bias, Y);
+    else gemm_int<false>(m, rows, cols, X, seq, bias, Y);
+    return;
+#endif
 #ifdef __wasm_simd128__
     if (g_q4) gemm_q4(m, rows, cols, X, seq, bias, Y);
 #else
@@ -306,6 +452,44 @@ void layernorm(float* x, const float* g, const float* bta) {
 inline float gelu(float v) {
     return 0.5f * v * (1.f + erff(v * 0.70710678f));
 }
+
+#if defined(__wasm_simd128__) && INT_GEMM
+// exp(x) for x in [-88, 0] (Cephes expf: n = round(x log2 e), two-part
+// ln 2 reduction, degree-6 polynomial, 2^n through the exponent bits).
+inline v128_t exp_neg_f32x4(v128_t x) {
+    x = wasm_f32x4_max(x, wasm_f32x4_splat(-87.3f));
+    const v128_t n = wasm_f32x4_nearest(wasm_f32x4_mul(x, wasm_f32x4_splat(1.44269504f)));
+    v128_t r = wasm_f32x4_sub(x, wasm_f32x4_mul(n, wasm_f32x4_splat(0.693359375f)));
+    r = wasm_f32x4_sub(r, wasm_f32x4_mul(n, wasm_f32x4_splat(-2.12194440e-4f)));
+    v128_t p = wasm_f32x4_splat(1.9875691500e-4f);
+    p = wasm_f32x4_add(wasm_f32x4_mul(p, r), wasm_f32x4_splat(1.3981999507e-3f));
+    p = wasm_f32x4_add(wasm_f32x4_mul(p, r), wasm_f32x4_splat(8.3334519073e-3f));
+    p = wasm_f32x4_add(wasm_f32x4_mul(p, r), wasm_f32x4_splat(4.1665795894e-2f));
+    p = wasm_f32x4_add(wasm_f32x4_mul(p, r), wasm_f32x4_splat(1.6666665459e-1f));
+    p = wasm_f32x4_add(wasm_f32x4_mul(p, r), wasm_f32x4_splat(5.0000001201e-1f));
+    p = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(p, wasm_f32x4_mul(r, r)), r), wasm_f32x4_splat(1.f));
+    const v128_t pow2n = wasm_i32x4_shl(wasm_i32x4_add(wasm_i32x4_trunc_sat_f32x4(n), wasm_i32x4_splat(127)), 23);
+    return wasm_f32x4_mul(p, pow2n);
+}
+
+// Exact-erf GELU, 0.5 v (1 + erf(v / sqrt 2)), four lanes at a time, with
+// erf from Abramowitz & Stegun 7.1.26 (|error| <= 1.5e-7) on |z|, sign
+// restored: the same function as gelu() above to f32 precision.
+inline v128_t gelu_f32x4(v128_t v) {
+    const v128_t z = wasm_f32x4_mul(v, wasm_f32x4_splat(0.70710678f));
+    const v128_t az = wasm_f32x4_abs(z);
+    const v128_t t = wasm_f32x4_div(wasm_f32x4_splat(1.f), wasm_f32x4_add(wasm_f32x4_splat(1.f), wasm_f32x4_mul(az, wasm_f32x4_splat(0.3275911f))));
+    v128_t poly = wasm_f32x4_splat(1.061405429f);
+    poly = wasm_f32x4_add(wasm_f32x4_mul(poly, t), wasm_f32x4_splat(-1.453152027f));
+    poly = wasm_f32x4_add(wasm_f32x4_mul(poly, t), wasm_f32x4_splat(1.421413741f));
+    poly = wasm_f32x4_add(wasm_f32x4_mul(poly, t), wasm_f32x4_splat(-0.284496736f));
+    poly = wasm_f32x4_add(wasm_f32x4_mul(poly, t), wasm_f32x4_splat(0.254829592f));
+    poly = wasm_f32x4_mul(poly, t);
+    const v128_t erf_abs = wasm_f32x4_sub(wasm_f32x4_splat(1.f), wasm_f32x4_mul(poly, exp_neg_f32x4(wasm_f32x4_neg(wasm_f32x4_mul(az, az)))));
+    const v128_t erf_z = wasm_v128_or(erf_abs, wasm_v128_and(z, wasm_i32x4_splat((int32_t)0x80000000)));
+    return wasm_f32x4_mul(wasm_f32x4_mul(wasm_f32x4_splat(0.5f), v), wasm_f32x4_add(wasm_f32x4_splat(1.f), erf_z));
+}
+#endif
 
 // Working buffers (BSS; single query at a time).
 float bx[MAXSEQ * D];
@@ -354,9 +538,18 @@ int encoder_forward(const uint8_t* blob, const int* ids, int seq, float* outHidd
     const float invSqrtHd = 1.f / sqrtf((float)HD);
     for (int li = 0; li < layers; li++) {
         const Layer& ly = lay.layer[li];
+        { PROF_START
         gemm(ly.wq, D, D, bx, seq, ly.bq, bq_);
+#if defined(__wasm_simd128__) && INT_GEMM
+        g_reuse_acts = true;   // K and V share Q's quantized input
+#endif
         gemm(ly.wk, D, D, bx, seq, ly.bk, bk_);
         gemm(ly.wv, D, D, bx, seq, ly.bv, bv_);
+#if defined(__wasm_simd128__) && INT_GEMM
+        g_reuse_acts = false;
+#endif
+        PROF_END(1) }
+        { PROF_START
         for (int h = 0; h < H; h++) {
             const int off = h * HD;
             for (int ti = 0; ti < seq; ti++) {
@@ -384,21 +577,32 @@ int encoder_forward(const uint8_t* blob, const int* ids, int seq, float* outHidd
                 }
             }
         }
+        PROF_END(2) }
         // bq_ is dead once attention has run; it holds the projections.
-        gemm(ly.wo, D, D, bctx, seq, ly.bo, bq_);
+        { PROF_START gemm(ly.wo, D, D, bctx, seq, ly.bo, bq_); PROF_END(3) }
+        { PROF_START
         for (int t = 0; t < seq; t++) {
             float* x = bx + t * D;
             for (int d = 0; d < D; d++) x[d] += bq_[t * D + d];
             layernorm(x, ly.ln1_g, ly.ln1_b);
         }
-        gemm(ly.wu, F, D, bx, seq, ly.bu, bh);
+        PROF_END(6) }
+        { PROF_START gemm(ly.wu, F, D, bx, seq, ly.bu, bh); PROF_END(4) }
+        { PROF_START
+#if defined(__wasm_simd128__) && INT_GEMM
+        for (int i = 0; i < seq * F; i += 4) wasm_v128_store(bh + i, gelu_f32x4(wasm_v128_load(bh + i)));
+#else
         for (int i = 0; i < seq * F; i++) bh[i] = gelu(bh[i]);
-        gemm(ly.wd, D, F, bh, seq, ly.bd, bq_);
+#endif
+        PROF_END(5) }
+        { PROF_START gemm(ly.wd, D, F, bh, seq, ly.bd, bq_); PROF_END(4) }
+        { PROF_START
         for (int t = 0; t < seq; t++) {
             float* x = bx + t * D;
             for (int d = 0; d < D; d++) x[d] += bq_[t * D + d];
             layernorm(x, ly.ln2_g, ly.ln2_b);
         }
+        PROF_END(6) }
         if (dbgStages) {
             float* dst = dbgStages + (1 + li) * seq * D;
             for (int i = 0; i < seq * D; i++) dst[i] = bx[i];
@@ -408,5 +612,12 @@ int encoder_forward(const uint8_t* blob, const int* ids, int seq, float* outHidd
     for (int i = 0; i < seq * D; i++) outHidden[i] = bx[i];
     return seq;
 }
+
+#ifdef PROFILE
+// Accumulated phase totals in ms (the caller zeroes them between runs):
+// 0 activation quantization (also counted inside 1, 3 and 4), 1 QKV GEMMs,
+// 2 attention, 3 output GEMM, 4 FFN GEMMs, 5 GELU, 6 residual+LayerNorm.
+double* encoder_profile() { return g_prof; }
+#endif
 
 } // extern "C"

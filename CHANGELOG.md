@@ -8,6 +8,32 @@ Through 0.6.0 these were published as `pancake-wasm` and
 packages are pre-1.0: a minor bump may carry breaking changes, and each entry lists them
 first.
 
+## Unreleased
+
+### Compatibility
+
+- **The inline encoder computes in integers, so its embeddings shift
+  slightly.** Every projection is now an integer GEMM: activations are
+  quantized to int16 per token and multiplied against the u8/u4 weights
+  with `i32x4.dot_i16x8_s`, and GELU is vectorized. Embeddings move by at
+  most about 3e-4 per component (MiniLM; 9e-5 for BGE-small), inside the
+  1e-3 tolerance packs declare for their test vectors, so every pack
+  compiled before this still verifies and serves: on every pack tested,
+  test vectors, golden queries and abstention probes gave the same results
+  under the old and new kernel. A pack rebuilt from the same inputs gets
+  slightly different vectors and so a new identity. The kernel uses only
+  baseline WASM SIMD, as before, and gives bit-identical embeddings in
+  Node, Chromium, Firefox and WebKit.
+
+### Changed
+
+- **Query embedding is about 1.65x faster.** Single-query p50 on a Ryzen 9
+  4900HS: MiniLM 27.5 to 16.4 ms in Node (Chromium 26.4 to 15.8, WebKit
+  28.0 to 18.0), BGE-small u8 76.0 to 47.1 ms; long documents about 1.4x.
+  u4 weights gain little (about 1.06x): their 32-wide blocks each need a
+  conversion and scale. On BEIR SciFact with BGE-small, nDCG@10 is
+  unchanged (0.7071) and 298 of 300 top-10 lists are identical.
+
 ## pikelet-wasm 0.11.0 / pikelet 0.11.0 — 2026-10-24
 
 Pack reads on Node no longer go through the runtime's fetch, whose
