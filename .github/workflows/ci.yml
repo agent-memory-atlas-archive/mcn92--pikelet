@@ -33,6 +33,12 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+      # test/build_encoder.mjs downloads create's 36 MiB build-time encoder
+      # blob once (pinned in packages/pikelet/src/common.mjs MODEL_MAP).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pikelet/models
+          key: pikelet-models-bge-small-en-v1.5-u8-3be1ede5
       - run: npm ci
       # npm test = run_tests.js + model_c_loader + sketch_profile conformance;
       # running the script (not run_tests.js directly) keeps CI and the local
@@ -60,6 +66,12 @@ jobs:
           # artifacts (~/emsdk on the release machine).
           version: 5.0.0
           actions-cache-folder: emsdk-cache
+      # test/build_encoder.mjs downloads create's 36 MiB build-time encoder
+      # blob once (pinned in packages/pikelet/src/common.mjs MODEL_MAP).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pikelet/models
+          key: pikelet-models-bge-small-en-v1.5-u8-3be1ede5
       - run: npm ci
       - name: Rebuild both engine variants from packages/pikelet-wasm/engine
         run: npm run build:all

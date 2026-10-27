@@ -240,12 +240,28 @@ const DEFAULT_CONFIG = Object.freeze({
   validation: { minRecallAt10: 0.98 },
 });
 const RANGE_ARTIFACT_MAGIC = 0x31415250;
+// workers-ai builds embed passages locally with the inline-transformer kernel
+// running a u8 export of the same model Workers AI serves for queries
+// (examples/one-file-search/encoder-spike/export_encoder_blob.py --model
+// BAAI/bge-small-en-v1.5 --bits 8 at hfRevision, which reproduces the pinned
+// bytes). Its vocabulary is the packaged bert-base-uncased WordPiece table.
+// Measured on BEIR scifact against live Workers AI query vectors: nDCG@10
+// 0.6991, against 0.6992 for the @xenova/transformers path it replaced.
 const MODEL_MAP = Object.freeze({
   'bge-small-en-v1.5': {
     dims: 384,
     workersAiModel: '@cf/baai/bge-small-en-v1.5',
-    hfModel: 'Xenova/bge-small-en-v1.5',
+    hfModel: 'BAAI/bge-small-en-v1.5',
+    hfRevision: '5c38ec7c405ec4b44b94cc5a9bb96e735b38267a',
+    license: 'mit',
     maxInputTokens: 512,
+    layout: { V: 30522, P: 512, T: 2, D: 384, F: 1536, L: 12, B: 64, H: 12 },
+    weights: {
+      file: 'bge-small-en-v1.5-u8.bin',
+      url: 'https://github.com/mcn92/pikelet/releases/download/build-encoder-bge-v1/bge-small-en-v1.5-u8.bin',
+      sha256: '3be1ede506f1826717a76593e6d614a15e15de8caa34fa209ab0089f0d613385',
+      urlEnv: 'PIKELET_BGE_WEIGHTS_URL',
+    },
   },
 });
 class CliError extends Error {

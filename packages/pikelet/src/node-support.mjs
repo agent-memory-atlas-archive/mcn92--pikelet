@@ -4,10 +4,9 @@
 //
 // Lines below these patch releases ship a fetch whose response decoder runs
 // on any body a server labels with a Content-Encoding. The CLI's own reads
-// no longer go through it (pikelet-wasm/complete/node-fetch.mjs), but other
-// code in the process still does -- @xenova/transformers downloads models
-// with it under `create` -- and 18.x, 20.x, 23.x and 25.x are end-of-life
-// with no fix.
+// no longer go through it (pikelet-wasm/complete/node-fetch.mjs), but a
+// dependency or plugin loaded into the same process still might, and 18.x,
+// 20.x, 23.x and 25.x are end-of-life with no fix.
 
 const SUPPORTED = [
   { major: 22, min: [22, 23, 4] },
@@ -33,7 +32,7 @@ export function isSupportedNode(versionString) {
 export function nodeSupportWarning(versionString = process.versions.node) {
   if (isSupportedNode(versionString)) return null;
   return `warning: pikelet does not support Node ${versionString} (supported: ${SUPPORTED_NODE_RANGE}). `
-    + 'Earlier releases have a fetch response-decompression bug; pikelet\'s own reads avoid it, but dependencies '
-    + 'such as the embedding-model download do not; 18.x, 20.x, 23.x and 25.x are end-of-life and will not be fixed. '
+    + 'Earlier releases have a fetch response-decompression bug; pikelet\'s own reads avoid it, but other code in '
+    + 'the process may not; 18.x, 20.x, 23.x and 25.x are end-of-life and will not be fixed. '
     + 'Upgrade Node. (Set PIKELET_NO_NODE_WARNING=1 to silence this.)';
 }

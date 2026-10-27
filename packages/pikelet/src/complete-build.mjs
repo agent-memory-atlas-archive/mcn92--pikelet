@@ -341,23 +341,30 @@ function inlineEncoderDeclaration(config, encoder = {}) {
 const INLINE_WEIGHTS_URL = 'https://github.com/mcn92/pikelet/releases/download/inline-encoder-v1/encoder-weights.bin';
 const INLINE_WEIGHTS_SHA256 = '3b14685a73bd7f30477be8dad89902b6e4bb55e49ec325c9e071c462cf89089b';
 
-async function fetchInlineEncoderWeights(weightsPath) {
-  const url = process.env.PIKELET_ENCODER_WEIGHTS_URL || INLINE_WEIGHTS_URL;
+// Fetches a digest-pinned weight blob to weightsPath. The default pin is the
+// packaged MiniLM blob; create's build-time BGE encoder passes its own
+// (MODEL_MAP in common.mjs). The bytes land under a temporary name and are
+// renamed into place, so an interrupted or concurrent download never leaves
+// a partial blob at weightsPath.
+async function fetchInlineEncoderWeights(weightsPath, pin = { url: INLINE_WEIGHTS_URL, sha256: INLINE_WEIGHTS_SHA256, urlEnv: 'PIKELET_ENCODER_WEIGHTS_URL' }) {
+  const url = process.env[pin.urlEnv] || pin.url;
   let body;
   try {
     const response = await nodeFetch(url, { redirect: 'follow' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     body = Buffer.from(await response.arrayBuffer());
   } catch (error) {
-    throw new CliError(`Inline encoder weights not found at ${weightsPath} and the download from ${url} failed (${error.message}). `
-      + `Next: place the encoder blob there yourself (sha256 ${INLINE_WEIGHTS_SHA256}), or set PIKELET_ENCODER_WEIGHTS_URL to a mirror.`, 2);
+    throw new CliError(`Encoder weights not found at ${weightsPath} and the download from ${url} failed (${error.message}). `
+      + `Next: place the encoder blob there yourself (sha256 ${pin.sha256}), or set ${pin.urlEnv} to a mirror.`, 2);
   }
   const digest = sha256(body).toString('hex');
-  if (digest !== INLINE_WEIGHTS_SHA256) {
-    throw new CliError(`Downloaded encoder weights failed verification: sha256 ${digest} != pinned ${INLINE_WEIGHTS_SHA256}. Refusing to use them.`, 2);
+  if (digest !== pin.sha256) {
+    throw new CliError(`Downloaded encoder weights failed verification: sha256 ${digest} != pinned ${pin.sha256}. Refusing to use them.`, 2);
   }
   await fs.mkdir(path.dirname(weightsPath), { recursive: true });
-  await fs.writeFile(weightsPath, body);
+  const partial = `${weightsPath}.${process.pid}.partial`;
+  await fs.writeFile(partial, body);
+  await fs.rename(partial, weightsPath);
 }
 
 async function resolveInlineEncoderInputs(config, projectDir) {

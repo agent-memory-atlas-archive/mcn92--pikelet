@@ -25,6 +25,22 @@ first.
   baseline WASM SIMD, as before, and gives bit-identical embeddings in
   Node, Chromium, Firefox and WebKit.
 
+- **`pikelet` no longer depends on `@xenova/transformers`.** `create`
+  (embedding mode `workers-ai`) now embeds passages at build time with the
+  inline-transformer kernel, running a u8 export of `BAAI/bge-small-en-v1.5`
+  rather than transformers.js's ONNX copy. The 36 MiB weight blob downloads
+  on the first build, pinned by sha256, into `~/.cache/pikelet/models`
+  (`PIKELET_MODEL_CACHE` moves it, `PIKELET_BGE_WEIGHTS_URL` names a
+  mirror); a cached blob that fails the pin is fetched again. Passage
+  vectors change slightly, so `pikelet rebuild` gives existing projects a
+  new index: they are within 0.9999 cosine of fp32 BGE-small where the old
+  path's were 0.996 to 0.998, and on BEIR SciFact, scored against live
+  Workers AI query vectors, nDCG@10 is 0.6991 against 0.6992 before.
+  Passages longer than 512 tokens are mean-pooled across windows instead of
+  truncated. `--omit=optional` is no longer needed: a plain install is two
+  packages, where it was 82 packages and six audit advisories (one critical)
+  inside that dependency.
+
 ### Changed
 
 - **Query embedding is about 1.65x faster.** Single-query p50 on a Ryzen 9

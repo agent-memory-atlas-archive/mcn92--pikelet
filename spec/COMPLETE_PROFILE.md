@@ -591,8 +591,8 @@ both as equivalent.
    has zero `require('fs')`/Node-only calls — every `fs` use in the
    package is confined to the Node-side artifact builders and local
    file source (`pikelet-artifact-*.js`), which correctly aren't part
-   of the browser bundle. `@xenova/transformers` is an
-   `optionalDependency` (`pikelet/package.json`), and a real browser
+   of the browser bundle. The CLI has no model-runtime dependency
+   (`@xenova/transformers` was removed in 0.12.0), and a real browser
    build already ships and runs the full encoder path, WASM engine
    included (`examples/static-wiki-pack/web/dist/`).
 3. Signatures over the identity (contract section 10, question 7).

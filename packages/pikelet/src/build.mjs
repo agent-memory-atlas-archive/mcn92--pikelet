@@ -292,6 +292,8 @@ function makeManifest(config, chunks, snapshot, vectors, artifact = null, artifa
       : {
           mode: 'workers-ai',
           hfModel: model.hfModel,
+          hfRevision: model.hfRevision,
+          buildWeightsSha256: model.weights.sha256,
           workersAiModel: model.workersAiModel,
         },
     dims: config.embedding.dims,

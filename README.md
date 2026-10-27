@@ -44,7 +44,7 @@ console.log(out.matchQuality, out.results[0]?.title);
 // 'strong' 'Snapshot restore'
 ```
 
-`compile` also takes a live URL (`--source https://docs.example.com`), a repository's commit history (`--git ./repo`), or exported chats (`--conversations <file|folder>`). To install instead of using `npx`, run `npm install -g pikelet --omit=optional`; the optional dependency is only for `create`, which builds a deployed search app (a Worker and UI) rather than a file ([why it matters](packages/pikelet/README.md#installing)). [QUICKSTART.md](QUICKSTART.md) walks the whole lifecycle; [`packages/pikelet/README.md`](packages/pikelet/README.md) is the full CLI reference.
+`compile` also takes a live URL (`--source https://docs.example.com`), a repository's commit history (`--git ./repo`), or exported chats (`--conversations <file|folder>`). To install instead of using `npx`, run `npm install -g pikelet`. `create` builds a deployed search app (a Worker and UI) rather than a file. [QUICKSTART.md](QUICKSTART.md) walks the whole lifecycle; [`packages/pikelet/README.md`](packages/pikelet/README.md) is the full CLI reference.
 
 ## The shortest demonstration
 

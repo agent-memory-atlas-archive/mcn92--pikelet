@@ -13,25 +13,17 @@ will differ.
 ## 1. Install
 
 ```bash
-npm install -g pikelet --omit=optional   # the CLI: compile, mcp, append, doctor
-npm install pikelet-wasm                 # the library: readers and the engine
+npm install -g pikelet       # the CLI: compile, mcp, append, doctor, create
+npm install pikelet-wasm     # the library: readers and the engine
 ```
 
-`--omit=optional` skips `@xenova/transformers`, which only the `create`
-scaffold path uses. Measured on a clean project:
+The CLI installs two packages, itself and `pikelet-wasm`, with no native code.
+`pikelet create` embeds its corpus locally with the same WASM kernel and
+serves queries from Cloudflare Workers AI; it downloads its 36 MiB encoder
+weights on first use.
 
-| | packages | size | `npm audit` |
-| --- | ---: | ---: | --- |
-| plain install | 82 | 257 MB | 6 vulnerabilities (5 high, 1 critical) |
-| `--omit=optional` | 2 | 1.8 MB | found 0 vulnerabilities |
-
-Every advisory is inside that one dependency, and `npm audit` reports "No fix
-available" for the critical one. `compile` and `mcp` never load it. Drop the
-flag if you want `pikelet create`, which embeds its corpus locally and then
-serves queries from Cloudflare Workers AI.
-
-The CLI needs Node 20+. `pikelet-wasm` runs on Node 18+ (CI tests 18, 20 and
-22), browsers, and Cloudflare Workers; this guide assumes `pikelet-wasm@0.8.1`
+The CLI needs Node 22.23.4+, 24.22.1+ or 26.12.1+. `pikelet-wasm` runs on
+Node 18+, browsers, and Cloudflare Workers (CI tests Node 22, 24 and 26); this guide assumes `pikelet-wasm@0.8.1`
 or later.
 
 Upgrade from 0.8.0 if you mount `.pikelet` files you did not compile yourself.

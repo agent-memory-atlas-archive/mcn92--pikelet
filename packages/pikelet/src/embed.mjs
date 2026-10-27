@@ -1,14 +1,20 @@
-// Build-time embeddings: local transformers.js, the student trainer, the inline
-// transformer, precomputed vectors, the deterministic stub, and self-recall.
+// Build-time embeddings: the inline-transformer kernel (for workers-ai builds
+// and complete artifacts), the student trainer, precomputed vectors, the
+// deterministic stub, and self-recall.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { sha256, loadCompleteModules, STUDENT_TRAINER, MODEL_MAP, CliError } from './common.mjs';
 import { tokenize, publicChunk } from './ingest.mjs';
-import { inlineEncoderDeclaration, resolveInlineEncoderInputs } from './complete-build.mjs';
+import { inlineEncoderDeclaration, resolveInlineEncoderInputs, fetchInlineEncoderWeights } from './complete-build.mjs';
+
+// The packaged bert-base-uncased WordPiece table, shared by MiniLM-L6 and
+// BGE-small.
+const PACKAGED_VOCAB = fileURLToPath(new URL('./inline-encoder/vocab.txt', import.meta.url));
 
 async function embedChunks(chunks, config, log, projectDir) {
   const embeddingConfig = config.embedding;
@@ -37,22 +43,45 @@ async function embedChunks(chunks, config, log, projectDir) {
     }
     return embedChunksWithInlineTransformer(chunks, config, log, projectDir);
   }
+  return embedChunksForWorkersAi(chunks, config, log);
+}
+
+// Where create's build-time encoder weights are cached between builds. The
+// generated project's reindex workflow caches ~/.cache/pikelet/models.
+function modelCacheDir() {
+  if (process.env.PIKELET_MODEL_CACHE) return path.resolve(process.env.PIKELET_MODEL_CACHE);
+  const base = process.env.XDG_CACHE_HOME ? path.resolve(process.env.XDG_CACHE_HOME) : path.join(os.homedir(), '.cache');
+  return path.join(base, 'pikelet', 'models');
+}
+
+// The cached blob is checked against its pin on every build (a few hundred
+// milliseconds for 36 MiB), so a truncated or altered cache entry is
+// replaced rather than embedded with.
+async function resolveBuildModelWeights(model, log) {
+  const { weights } = model;
+  const weightsPath = path.join(modelCacheDir(), weights.file);
+  let cached = null;
+  try { cached = await fs.readFile(weightsPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (cached && sha256(cached).toString('hex') === weights.sha256) return weightsPath;
+  log(cached
+    ? `Cached ${weights.file} fails its pinned digest; downloading it again`
+    : `Downloading ${model.hfModel} build encoder weights (${weights.file}) to ${path.dirname(weightsPath)}`);
+  await fetchInlineEncoderWeights(weightsPath, weights);
+  return weightsPath;
+}
+
+async function embedChunksForWorkersAi(chunks, config, log) {
+  const embeddingConfig = config.embedding;
   const model = MODEL_MAP[embeddingConfig.buildModel];
-  let transformers;
-  try {
-    transformers = await import('@xenova/transformers');
-  } catch (error) {
-    throw new CliError(`Failed to load @xenova/transformers. Next: run npm install in the pikelet package or generated project. ${error.message}`, 2);
-  }
-  const extractor = await transformers.pipeline('feature-extraction', model.hfModel, { quantized: true });
-  const vectors = [];
-  for (let i = 0; i < chunks.length; i += 16) {
-    const batch = chunks.slice(i, i + 16).map((chunk) => `${embeddingConfig.prefixPolicy?.passage || ''}${chunk.text}`);
-    const output = await extractor(batch, { pooling: embeddingConfig.pooling || 'mean', normalize: embeddingConfig.normalize !== false });
-    vectors.push(...tensorToVectors(output, embeddingConfig.dims));
-    log(`Embedded ${Math.min(i + 16, chunks.length)}/${chunks.length} chunks`);
-  }
-  return vectors;
+  if (!model) throw new CliError(`Unsupported embedding.buildModel ${embeddingConfig.buildModel}`, 1);
+  const weightsPath = await resolveBuildModelWeights(model, log);
+  const declaration = inlineEncoderDeclaration(config, {
+    model: model.hfModel,
+    license: model.license,
+    maxTokens: model.maxInputTokens,
+    layout: model.layout,
+  });
+  return embedWithInlineKernel(chunks, declaration, { vocabPath: PACKAGED_VOCAB, weightsPath }, log);
 }
 
 async function trainStudentVectors(chunks, embeddingConfig, log, projectDir) {
@@ -185,7 +214,10 @@ async function embedWithInlineWorkerPool(chunks, declaration, { vocabPath, weigh
 
 async function embedChunksWithInlineTransformer(chunks, config, log, projectDir) {
   const { encoder, vocabPath, weightsPath } = await resolveInlineEncoderInputs(config, projectDir);
-  const declaration = inlineEncoderDeclaration(config, encoder);
+  return embedWithInlineKernel(chunks, inlineEncoderDeclaration(config, encoder), { vocabPath, weightsPath }, log);
+}
+
+async function embedWithInlineKernel(chunks, declaration, { vocabPath, weightsPath }, log) {
   const workerCount = inlineEmbedWorkerCount(chunks.length);
   if (workerCount > 1) {
     try {
@@ -244,15 +276,6 @@ async function readF32Vectors(file, count, dims) {
   return vectors;
 }
 
-function tensorToVectors(output, dims) {
-  const data = output.data || output;
-  const vectors = [];
-  for (let offset = 0; offset < data.length; offset += dims) {
-    vectors.push(Float32Array.from(data.slice(offset, offset + dims)));
-  }
-  return vectors;
-}
-
 function hashEmbedding(text, dims) {
   const v = new Float32Array(dims);
   const words = tokenize(text.toLowerCase());
@@ -301,7 +324,6 @@ export {
   trainStudentVectors,
   embedChunksWithInlineTransformer,
   readF32Vectors,
-  tensorToVectors,
   hashEmbedding,
   validateSelfRecall,
 };

@@ -32,13 +32,9 @@ for the details.
 
 ## Installing
 
-`npx pikelet` needs no install. To install it, use `npm install -g pikelet
---omit=optional`. The optional dependency is `@xenova/transformers`, which
-only the `create` scaffold path uses. Measured on a clean project, omitting it
-takes the install from **82 packages / 257 MB / "6 vulnerabilities (5 high, 1
-critical)"** to **2 packages / 1.8 MB / "found 0 vulnerabilities"** — the
-advisories are all inside a dependency `compile` and `mcp` never load. The
-CLI requires Node 22.23.4+, 24.22.1+ or 26.12.1+: earlier releases ship a
+`npx pikelet` needs no install. To install it, use `npm install -g pikelet`:
+the CLI and `pikelet-wasm` are its only two packages, with no native code and
+no transitive dependencies. The CLI requires Node 22.23.4+, 24.22.1+ or 26.12.1+: earlier releases ship a
 fetch that decompresses any response a server labels with a
 `Content-Encoding`, and 18.x, 20.x, 23.x and 25.x are end-of-life with no
 fix. The CLI warns on start under any other version. `npx pikelet --help` lists every command and flag; a
@@ -70,7 +66,11 @@ still works, but new projects should use the default snapshot runtime, or
 
 In both runtimes, the story is the same: the expensive work happens at build
 time; query-time code embeds the query, searches Pikelet, and hydrates result
-metadata. Query embedding comes from Workers AI by default, or from a bundled
+metadata. Passages are embedded at build time by the same WASM kernel that
+runs inline encoders, using a u8 export of `BAAI/bge-small-en-v1.5`
+(downloaded once, pinned by sha256, cached in `~/.cache/pikelet/models`;
+`PIKELET_MODEL_CACHE` moves it). Its vectors are within 0.9999 cosine of the
+fp32 model's, the same model Workers AI serves. Query embedding comes from Workers AI by default, or from a bundled
 corpus-distilled encoder with `--mode student` (see below), which removes the
 Cloudflare AI dependency entirely. For workers-ai projects, `LOCAL_STUB_AI=1`
 can exercise the endpoint mechanics locally without Workers AI.
@@ -431,7 +431,7 @@ scaffold is generated from. The work lives beside it:
 | --- | --- |
 | `src/common.mjs` | package paths and version, config defaults, the model table, `CliError`, loaders that resolve `pikelet-wasm` (engine, `/artifact`, `/complete`) from npm or the monorepo |
 | `src/ingest.mjs` | folder walk and URL crawl, HTML/Markdown/MDX extraction, chunking, dedupe, Docusaurus route mapping, the public chunk shape |
-| `src/embed.mjs` | build-time embeddings: transformers.js, the student trainer, the inline transformer, precomputed vectors, the deterministic stub, self-recall |
+| `src/embed.mjs` | build-time embeddings: the inline-transformer kernel (workers-ai builds and complete artifacts), the student trainer, precomputed vectors, the deterministic stub, self-recall |
 | `src/embed-worker.mjs` | the worker thread `embed.mjs` fans passage embedding out to |
 | `src/student-embedder.mjs` | the corpus-distilled student query encoder used by `--mode student` |
 | `src/complete-build.mjs` | kind-3 complete artifact assembly, the inline-encoder declaration, the pinned weights download |
